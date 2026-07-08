@@ -1,0 +1,12 @@
+{
+  "name": "com.easypass.app",
+  "description": "EasyPass Password Manager Native Messaging Host",
+  "path": "easypass_native_host.exe",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://*"
+  ],
+  "allowed_origins_edge": [
+    "extension://*"
+  ]
+}
