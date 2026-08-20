@@ -166,4 +166,24 @@ class CryptoService {
       key: AppConstants.masterPasswordHashKey,
     );
   }
+
+  /// Get the configured auto-lock timeout in minutes (defaults to 5).
+  Future<int> getAutoLockMinutes() async {
+    final value =
+        await _secureStorage.read(key: AppConstants.autoLockStorageKey);
+    final parsed = int.tryParse(value ?? '');
+    if (parsed == null || parsed <= 0) {
+      return AppConstants.autoLockTimeoutMinutes;
+    }
+    return parsed;
+  }
+
+  /// Persist the auto-lock timeout in minutes.
+  Future<void> setAutoLockMinutes(int minutes) async {
+    final clamped = minutes.clamp(1, 60).toInt();
+    await _secureStorage.write(
+      key: AppConstants.autoLockStorageKey,
+      value: clamped.toString(),
+    );
+  }
 }

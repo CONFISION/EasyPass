@@ -54,18 +54,40 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
     final entry = await ref.read(selectedEntryProvider(widget.entryId!).future);
     if (entry == null || !mounted) return;
 
+    final key = ref.read(encryptionKeyProvider);
+    final crypto = CryptoService();
+
     _nameController.text = entry.name;
     _urlController.text = entry.url;
     _usernameController.text = entry.username;
-    final key = ref.read(encryptionKeyProvider);
+
     try {
       _passwordController.text =
-          CryptoService().decryptData(entry.passwordEncrypted, key!);
+          key != null ? crypto.decryptData(entry.passwordEncrypted, key) : '';
     } catch (_) {
-      _passwordController.text = entry.passwordEncrypted;
+      _passwordController.text = '';
     }
-    _notesController.text = entry.notesEncrypted ?? '';
-    _totpSecretController.text = entry.totpSecretEncrypted ?? '';
+
+    // Decrypt notes / TOTP secret too — storing ciphertext in the edit fields
+    // would re-encrypt it on save and permanently corrupt the entry.
+    try {
+      _notesController.text =
+          (entry.notesEncrypted ?? '').isEmpty
+              ? ''
+              : crypto.decryptData(entry.notesEncrypted!, key!);
+    } catch (_) {
+      _notesController.text = '';
+    }
+
+    try {
+      _totpSecretController.text =
+          (entry.totpSecretEncrypted ?? '').isEmpty
+              ? ''
+              : crypto.decryptData(entry.totpSecretEncrypted!, key!);
+    } catch (_) {
+      _totpSecretController.text = '';
+    }
+
     _isFavorite = entry.isFavorite;
     _selectedFolderId = entry.folderId;
   }
@@ -104,9 +126,9 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
         name: Value(_nameController.text.trim()),
         url: Value(_urlController.text.trim()),
         username: Value(_usernameController.text.trim()),
-        passwordEncrypted: Value(_encryptPassword(ref)),
-        notesEncrypted: Value(_notesController.text.trim()),
-        totpSecretEncrypted: Value(_totpSecretController.text.trim()),
+        passwordEncrypted: Value(_encryptField(_passwordController.text)),
+        notesEncrypted: Value(_encryptField(_notesController.text)),
+        totpSecretEncrypted: Value(_encryptField(_totpSecretController.text)),
         isFavorite: Value(_isFavorite),
         folderId: _selectedFolderId != null
             ? Value(_selectedFolderId!)
@@ -140,6 +162,19 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  /// Encrypt a plaintext field, or keep it unchanged if encryption fails
+  /// (e.g. session key missing) rather than throwing away user input.
+  String _encryptField(String plaintext) {
+    if (plaintext.isEmpty) return '';
+    final key = ref.read(encryptionKeyProvider);
+    if (key == null) return plaintext;
+    try {
+      return CryptoService().encryptData(plaintext, key);
+    } catch (_) {
+      return plaintext;
     }
   }
 
@@ -295,16 +330,6 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
         ),
       ),
     );
-  }
-
-  String _encryptPassword(WidgetRef ref) {
-    final key = ref.read(encryptionKeyProvider);
-    if (key == null) return _passwordController.text;
-    try {
-      return CryptoService().encryptData(_passwordController.text, key);
-    } catch (_) {
-      return _passwordController.text;
-    }
   }
 
   Widget _buildFolderDropdown(BuildContext context, WidgetRef ref) {

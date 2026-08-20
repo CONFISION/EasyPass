@@ -7,9 +7,13 @@ final databaseProvider = Provider<AppDatabase>((ref) {
   return AppDatabase();
 });
 
+final cryptoServiceProvider = Provider<CryptoService>((ref) {
+  return CryptoService();
+});
+
 final vaultRepositoryProvider = Provider<VaultRepository>((ref) {
   final db = ref.watch(databaseProvider);
-  final crypto = CryptoService();
+  final crypto = ref.watch(cryptoServiceProvider);
   return VaultRepository(db: db, cryptoService: crypto);
 });
 
@@ -35,6 +39,8 @@ class VaultRepository {
       db.watchEntriesByFolder(folderId);
 
   Stream<List<PasswordEntry>> watchFavorites() => db.watchFavoriteEntries();
+
+  Future<List<PasswordEntry>> getAllEntries() => db.getAllEntries();
 
   Future<List<PasswordEntry>> search(String query) => db.searchEntries(query);
 

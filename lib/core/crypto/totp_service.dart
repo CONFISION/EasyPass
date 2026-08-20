@@ -5,6 +5,11 @@ import 'package:crypto/crypto.dart';
 
 /// TOTP (Time-based One-Time Password) generator based on RFC 6238
 class TotpService {
+  final DateTime Function() _clock;
+
+  TotpService({DateTime Function()? clock})
+      : _clock = clock ?? DateTime.now;
+
   /// Generate a TOTP code from a base32-encoded secret
   /// [secret] is the base32 TOTP secret
   /// [period] defaults to 30 seconds
@@ -40,7 +45,7 @@ class TotpService {
 
   /// Get remaining seconds in the current TOTP period
   int getRemainingSeconds({int period = 30}) {
-    return period - (DateTime.now().millisecondsSinceEpoch ~/ 1000) % period;
+    return period - (_clock().millisecondsSinceEpoch ~/ 1000) % period;
   }
 
   /// Validate a TOTP code
@@ -77,7 +82,7 @@ class TotpService {
   }
 
   int _getCurrentCounter(int period) {
-    return DateTime.now().millisecondsSinceEpoch ~/ 1000 ~/ period;
+    return _clock().millisecondsSinceEpoch ~/ 1000 ~/ period;
   }
 
   /// Decode a base32 string to bytes

@@ -1,29 +1,39 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:drift/drift.dart' hide Column;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/constants/app_constants.dart';
 import '../../../core/crypto/crypto_service.dart';
+import '../../../data/database/database.dart';
+import '../../../data/repositories/vault_repository.dart';
 
 enum AuthStatus { loading, locked, unlocked, firstRun }
 
 class AuthState {
   final AuthStatus status;
   final String? errorMessage;
+  final int autoLockMinutes;
 
   const AuthState({
     this.status = AuthStatus.loading,
     this.errorMessage,
+    this.autoLockMinutes = AppConstants.autoLockTimeoutMinutes,
   });
 
   bool get isLocked => status == AuthStatus.locked;
   bool get isFirstRun => status == AuthStatus.firstRun;
   bool get isLoading => status == AuthStatus.loading;
 
-  AuthState copyWith({AuthStatus? status, String? errorMessage}) {
+  AuthState copyWith({
+    AuthStatus? status,
+    String? errorMessage,
+    int? autoLockMinutes,
+  }) {
     return AuthState(
       status: status ?? this.status,
       errorMessage: errorMessage,
+      autoLockMinutes: autoLockMinutes ?? this.autoLockMinutes,
     );
   }
 }
@@ -36,18 +46,19 @@ class AuthNotifier extends StateNotifier<AuthState> {
   final CryptoService _cryptoService;
   final Ref _ref;
   Timer? _autoLockTimer;
+  int _autoLockMinutes = AppConstants.autoLockTimeoutMinutes;
 
   AuthNotifier(this._cryptoService, this._ref) : super(const AuthState()) {
     _checkInitialState();
   }
 
   Future<void> _checkInitialState() async {
+    _autoLockMinutes = await _cryptoService.getAutoLockMinutes();
     final isFirstRun = await _cryptoService.isFirstRun();
-    if (isFirstRun) {
-      state = state.copyWith(status: AuthStatus.firstRun);
-    } else {
-      state = state.copyWith(status: AuthStatus.locked);
-    }
+    state = state.copyWith(
+      status: isFirstRun ? AuthStatus.firstRun : AuthStatus.locked,
+      autoLockMinutes: _autoLockMinutes,
+    );
   }
 
   /// Set the master password for the first time
@@ -137,6 +148,120 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Change the master password: verify the current one, re-encrypt all
+  /// entries with a freshly derived key, then persist the new salt + hash.
+  Future<bool> changeMasterPassword(
+    String currentPassword,
+    String newPassword,
+    String confirmPassword,
+  ) async {
+    if (newPassword != confirmPassword) {
+      state = state.copyWith(errorMessage: 'Passwords do not match');
+      return false;
+    }
+
+    if (newPassword.length < 8) {
+      state = state.copyWith(
+        errorMessage: 'Master password must be at least 8 characters',
+      );
+      return false;
+    }
+
+    try {
+      final storedSalt = await _cryptoService.getStoredSalt();
+      final storedHash = await _cryptoService.getStoredPasswordHash();
+
+      if (storedSalt == null || storedHash == null) {
+        state = state.copyWith(
+          errorMessage: 'No master password configured',
+        );
+        return false;
+      }
+
+      if (_cryptoService.hashMasterPassword(currentPassword, storedSalt) !=
+          storedHash) {
+        state = state.copyWith(
+          errorMessage: 'Current master password is incorrect',
+        );
+        return false;
+      }
+
+      final oldKey = _ref.read(encryptionKeyProvider);
+      if (oldKey == null) {
+        state = state.copyWith(errorMessage: 'Vault is locked');
+        return false;
+      }
+
+      // Derive the new key first so a failure re-encrypts nothing.
+      final newSalt = _cryptoService.generateSalt();
+      final newKey = _cryptoService.deriveKey(newPassword, newSalt);
+      final newHash = _cryptoService.hashMasterPassword(newPassword, newSalt);
+
+      final repo = _ref.read(vaultRepositoryProvider);
+      final entries = await repo.getAllEntries();
+      final now = DateTime.now().millisecondsSinceEpoch;
+
+      for (final entry in entries) {
+        final notes = (entry.notesEncrypted ?? '').isEmpty
+            ? null
+            : _cryptoService.decryptData(entry.notesEncrypted!, oldKey);
+        final totp = (entry.totpSecretEncrypted ?? '').isEmpty
+            ? null
+            : _cryptoService.decryptData(entry.totpSecretEncrypted!, oldKey);
+
+        await repo.updateEntry(
+          entry.id,
+          PasswordEntriesCompanion(
+            id: Value(entry.id),
+            name: Value(entry.name),
+            url: Value(entry.url),
+            username: Value(entry.username),
+            passwordEncrypted: Value(
+              _cryptoService.encryptData(
+                _cryptoService.decryptData(entry.passwordEncrypted, oldKey),
+                newKey,
+              ),
+            ),
+            notesEncrypted: Value(
+              notes == null ? '' : _cryptoService.encryptData(notes, newKey),
+            ),
+            totpSecretEncrypted: Value(
+              totp == null ? '' : _cryptoService.encryptData(totp, newKey),
+            ),
+            isFavorite: Value(entry.isFavorite),
+            folderId: entry.folderId != null
+                ? Value(entry.folderId!)
+                : const Value.absent(),
+            createdAt: Value(entry.createdAt),
+            updatedAt: Value(now),
+          ),
+        );
+      }
+
+      await _cryptoService.storeKeyMaterial(newSalt, newHash);
+      _ref.read(encryptionKeyProvider.notifier).state = newKey;
+
+      state = state.copyWith(errorMessage: null);
+      _startAutoLockTimer();
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        errorMessage: 'Failed to change master password: $e',
+      );
+      return false;
+    }
+  }
+
+  /// Update the auto-lock timeout and persist it.
+  Future<void> setAutoLockMinutes(int minutes) async {
+    _autoLockMinutes = minutes.clamp(1, 60).toInt();
+    await _cryptoService.setAutoLockMinutes(_autoLockMinutes);
+    state = state.copyWith(autoLockMinutes: _autoLockMinutes);
+    if (state.status == AuthStatus.unlocked) {
+      _startAutoLockTimer();
+    }
+  }
+
   /// Lock the vault
   void lock() {
     _autoLockTimer?.cancel();
@@ -148,7 +273,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   void _startAutoLockTimer() {
     _autoLockTimer?.cancel();
     _autoLockTimer = Timer(
-      const Duration(minutes: 5),
+      Duration(minutes: _autoLockMinutes),
       lock,
     );
   }
@@ -168,6 +293,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
 }
 
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
-  final cryptoService = CryptoService();
+  final cryptoService = ref.watch(cryptoServiceProvider);
   return AuthNotifier(cryptoService, ref);
 });

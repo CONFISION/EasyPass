@@ -221,13 +221,15 @@ class VaultScreen extends ConsumerWidget {
                     return ListTile(
                       leading: const Icon(Icons.folder),
                       title: Text(folder.name),
-                  selected: ref.watch(selectedFolderIdProvider) == folder.id &&
-                      !ref.watch(showFavoritesProvider),
-                  onTap: () {
-                    ref.read(selectedFolderIdProvider.notifier).state = folder.id;
-                    ref.read(showFavoritesProvider.notifier).state = false;
-                    Navigator.pop(context);
-                  },
+                      selected: ref.watch(selectedFolderIdProvider) == folder.id &&
+                          !ref.watch(showFavoritesProvider),
+                      onTap: () {
+                        ref.read(selectedFolderIdProvider.notifier).state = folder.id;
+                        ref.read(showFavoritesProvider.notifier).state = false;
+                        Navigator.pop(context);
+                      },
+                      onLongPress: () =>
+                          _confirmDeleteFolder(context, ref, folder),
                     );
                   },
                 ),
@@ -294,6 +296,43 @@ class VaultScreen extends ConsumerWidget {
               if (ctx.mounted) Navigator.pop(ctx);
             },
             child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteFolder(
+      BuildContext context, WidgetRef ref, Folder folder) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Folder'),
+        content: Text(
+            'Delete "${folder.name}"? Entries inside will be moved to '
+            '"No Folder". This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () async {
+              await ref.read(vaultRepositoryProvider).removeFolder(folder.id);
+              if (ref.read(selectedFolderIdProvider) == folder.id) {
+                ref.read(selectedFolderIdProvider.notifier).state = null;
+              }
+              ref.invalidate(foldersProvider);
+              ref.invalidate(filteredVaultEntriesProvider);
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Folder "${folder.name}" deleted')),
+                );
+              }
+            },
+            style: FilledButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error),
+            child: const Text('Delete'),
           ),
         ],
       ),
