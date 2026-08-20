@@ -104,6 +104,12 @@ abstract class AppLocalizations {
   /// **'EasyPass'**
   String get appTitle;
 
+  /// No description provided for @none.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get none;
+
   /// No description provided for @masterPasswordLabel.
   ///
   /// In en, this message translates to:

@@ -64,33 +64,43 @@ class EntryDetailScreen extends ConsumerWidget {
             children: [
               Text(entry.name, style: theme.textTheme.headlineMedium),
               const SizedBox(height: 24),
-              if (entry.username.isNotEmpty)
-                _buildField(
-                  context,
-                  label: l10n.username,
-                  value: entry.username,
-                  icon: Icons.person,
-                  onCopy: () {
-                    Clipboard.setData(ClipboardData(text: entry.username));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(l10n.usernameCopied)),
-                    );
-                  },
-                ),
+              _buildField(
+                context,
+                label: l10n.username,
+                value: entry.username,
+                icon: Icons.person,
+                onCopy: () {
+                  Clipboard.setData(ClipboardData(text: entry.username));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(l10n.usernameCopied)),
+                  );
+                },
+              ),
               RevealablePasswordField(entry: entry, ref: ref),
-              if (entry.url.isNotEmpty)
-                _buildField(
-                  context,
-                  label: l10n.urlLabel,
-                  value: entry.url,
-                  icon: Icons.link,
-                  onCopy: () {
-                    Clipboard.setData(ClipboardData(text: entry.url));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(l10n.urlCopied)),
-                    );
-                  },
-                ),
+              _buildField(
+                context,
+                label: l10n.urlLabel,
+                value: entry.url,
+                icon: Icons.link,
+                onCopy: () {
+                  Clipboard.setData(ClipboardData(text: entry.url));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(l10n.urlCopied)),
+                  );
+                },
+              ),
+              _buildField(
+                context,
+                label: l10n.notesLabel,
+                value: _decryptField(ref, entry.notesEncrypted),
+                icon: Icons.note,
+              ),
+              _buildField(
+                context,
+                label: l10n.totpSecretLabel,
+                value: _decryptField(ref, entry.totpSecretEncrypted),
+                icon: Icons.pin,
+              ),
               SwitchListTile(
                 title: Text(l10n.favorite),
                 subtitle: Text(l10n.favoriteSubtitle),
@@ -127,6 +137,19 @@ class EntryDetailScreen extends ConsumerWidget {
     );
   }
 
+  /// Decrypts an optional encrypted field, returning '' when it is empty or
+  /// cannot be decrypted (the UI renders empty values as "None").
+  String _decryptField(WidgetRef ref, String? encrypted) {
+    if (encrypted == null || encrypted.isEmpty) return '';
+    final key = ref.read(encryptionKeyProvider);
+    if (key == null) return '';
+    try {
+      return CryptoService().decryptData(encrypted, key);
+    } catch (_) {
+      return '';
+    }
+  }
+
   Widget _buildField(
     BuildContext context, {
     required String label,
@@ -151,7 +174,17 @@ class EntryDetailScreen extends ConsumerWidget {
               children: [
                 Icon(icon, size: 20, color: theme.colorScheme.onSurfaceVariant),
                 const SizedBox(width: 8),
-                Expanded(child: Text(value, style: theme.textTheme.bodyLarge)),
+                Expanded(
+                  child: Text(
+                    value.isEmpty ? l10n.none : value,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: value.isEmpty
+                          ? theme.colorScheme.onSurfaceVariant
+                          : null,
+                      fontStyle: value.isEmpty ? FontStyle.italic : null,
+                    ),
+                  ),
+                ),
                 if (onCopy != null)
                   IconButton(
                     icon: const Icon(Icons.copy, size: 20),
@@ -324,6 +357,43 @@ class _RevealablePasswordFieldState extends ConsumerState<RevealablePasswordFiel
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    if (widget.entry.passwordEncrypted.isEmpty) {
+      // Empty password: show "None" instead of the reveal/copy controls.
+      return Card(
+        margin: const EdgeInsets.only(bottom: 12),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(l10n.passwordField,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant)),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Icon(Icons.lock,
+                      size: 20,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(l10n.none,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodyLarge
+                            ?.copyWith(
+                              color:
+                                  Theme.of(context).colorScheme.onSurfaceVariant,
+                              fontStyle: FontStyle.italic,
+                            )),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(

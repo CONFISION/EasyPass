@@ -71,9 +71,16 @@ class VaultScreen extends ConsumerWidget {
       body: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(flex: 3, child: _buildSidebar(context, ref)),
+          Flexible(
+            flex: 2,
+            fit: FlexFit.loose,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 300),
+              child: _buildSidebar(context, ref),
+            ),
+          ),
           const VerticalDivider(width: 1, thickness: 1),
-          Expanded(flex: 7, child: _buildEntriesArea(context, ref, entriesAsync)),
+          Expanded(flex: 8, child: _buildEntriesArea(context, ref, entriesAsync)),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

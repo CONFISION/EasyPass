@@ -1,6 +1,7 @@
 {
   "@@locale": "zh",
   "appTitle": "EasyPass",
+  "none": "无",
 
   "masterPasswordLabel": "主密码",
   "masterPasswordHint": "至少 8 个字符",

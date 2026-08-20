@@ -12,6 +12,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get appTitle => 'EasyPass';
 
   @override
+  String get none => 'None';
+
+  @override
   String get masterPasswordLabel => 'Master Password';
 
   @override

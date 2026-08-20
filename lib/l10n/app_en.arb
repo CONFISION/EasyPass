@@ -1,6 +1,7 @@
 {
   "@@locale": "en",
   "appTitle": "EasyPass",
+  "none": "None",
 
   "masterPasswordLabel": "Master Password",
   "masterPasswordHint": "At least 8 characters",

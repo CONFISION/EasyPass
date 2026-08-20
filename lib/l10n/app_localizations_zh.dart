@@ -12,6 +12,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get appTitle => 'EasyPass';
 
   @override
+  String get none => '无';
+
+  @override
   String get masterPasswordLabel => '主密码';
 
   @override
