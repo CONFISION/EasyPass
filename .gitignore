@@ -46,3 +46,4 @@ app.*.map.json
 **/.codewhale/*
 !**/.codewhale/constitution.json
 .deepseek/
+HANDOFF.md
