@@ -1,0 +1,234 @@
+{
+  "@@locale": "en",
+  "appTitle": "EasyPass",
+
+  "masterPasswordLabel": "Master Password",
+  "masterPasswordHint": "At least 8 characters",
+  "confirmMasterPasswordLabel": "Confirm Master Password",
+  "unlock": "Unlock",
+  "unlockScreenSubtitle": "Enter your master password to unlock",
+  "welcomeTitle": "Welcome to EasyPass",
+  "setPasswordSubtitle": "Set your master password to get started.\nThis password will encrypt all your data.",
+  "setMasterPassword": "Set Master Password",
+  "securityNote": "Important: Your master password cannot be recovered if forgotten. Store it safely!",
+
+  "errorPasswordsDoNotMatch": "Passwords do not match",
+  "errorPasswordTooShort": "Master password must be at least 8 characters",
+  "errorNoMasterPassword": "No master password configured",
+  "errorIncorrectMasterPassword": "Incorrect master password",
+  "errorVaultLocked": "Vault is locked",
+  "errorFailedToSave": "Failed to save master password",
+  "errorFailedToChange": "Failed to change master password",
+  "errorCurrentPasswordIncorrect": "Current master password is incorrect",
+  "errorUnlockFailed": "Error unlocking vault",
+
+  "favoritesTitle": "Favorites",
+  "folderTitle": "Folder",
+  "searchTooltip": "Search",
+  "generatorTooltip": "Password Generator",
+  "passwordGenerator": "Password Generator",
+  "lockTooltip": "Lock vault",
+  "settings": "Settings",
+  "failedToLoadVault": "Failed to load vault: {error}",
+  "@failedToLoadVault": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "retry": "Retry",
+  "emptyVaultTitle": "Your vault is empty",
+  "emptyVaultHint": "Tap + to add your first password",
+  "add": "Add",
+  "passwordCopied": "Password copied to clipboard",
+  "allItems": "All Items",
+  "favorites": "Favorites",
+  "foldersSection": "FOLDERS",
+  "newFolder": "New Folder",
+  "folderNameLabel": "Folder Name",
+  "folderNameHint": "e.g., Work, Personal",
+  "cancel": "Cancel",
+  "create": "Create",
+  "deleteFolderTitle": "Delete Folder",
+  "deleteFolderMessage": "Delete \"{name}\"? Entries inside will be moved to \"No Folder\". This cannot be undone.",
+  "@deleteFolderMessage": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "folderDeleted": "Folder \"{name}\" deleted",
+  "@folderDeleted": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "delete": "Delete",
+  "searchFailed": "Search failed",
+  "noResultsFound": "No results found",
+
+  "editEntryTitle": "Edit Entry",
+  "addEntryTitle": "Add Entry",
+  "nameLabel": "Name *",
+  "nameHint": "e.g., Google, GitHub",
+  "nameRequired": "Name is required",
+  "urlLabel": "URL",
+  "urlHint": "e.g., https://example.com",
+  "usernameLabel": "Username / Email",
+  "usernameHint": "e.g., user@example.com",
+  "passwordLabel": "Password *",
+  "generatePasswordTooltip": "Generate password",
+  "totpSecretLabel": "TOTP Secret (2FA)",
+  "totpSecretHint": "Base32 secret for authenticator",
+  "noFolder": "No Folder",
+  "notesLabel": "Notes",
+  "notesHint": "Additional notes...",
+  "favorite": "Favorite",
+  "favoriteSubtitle": "Mark this entry as favorite",
+  "saveChanges": "Save Changes",
+  "passwordRequired": "Password is required",
+  "entryUpdated": "Entry updated",
+  "entrySaved": "Entry saved",
+  "failedToSaveEntry": "Failed to save: {error}",
+  "@failedToSaveEntry": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "deleteEntryTitle": "Delete Entry",
+  "deleteEntryMessage": "Are you sure? This cannot be undone.",
+  "deleteEntryDetailMessage": "Are you sure you want to delete this entry? This action cannot be undone.",
+
+  "entryDetailsTitle": "Entry Details",
+  "failedToLoadEntry": "Failed to load entry",
+  "entryNotFound": "Entry not found",
+  "username": "Username",
+  "usernameCopied": "Username copied",
+  "passwordField": "Password",
+  "visibleAutoHide": "Visible • Auto-hides in 1 min",
+  "passwordCopiedShort": "Password copied",
+  "revealPasswordTooltip": "Reveal password",
+  "hidePasswordTooltip": "Hide password",
+  "copyPasswordTooltip": "Copy password",
+  "urlCopied": "URL copied",
+  "copyFieldTooltip": "Copy {label}",
+  "@copyFieldTooltip": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "verifyMasterPasswordTitle": "Verify Master Password",
+  "verify": "Verify",
+  "noMasterPasswordConfigured": "No master password configured",
+
+  "selectOptionsBelow": "Select options below",
+  "charactersCount": "{count} characters",
+  "@charactersCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "copy": "Copy",
+  "regenerate": "Regenerate",
+  "passwordCopiedExcl": "Password copied!",
+  "useThisPassword": "Use This Password",
+  "lengthLabel": "Length: {length}",
+  "@lengthLabel": {
+    "placeholders": {
+      "length": {"type": "int"}
+    }
+  },
+  "uppercase": "Uppercase (A-Z)",
+  "uppercaseSubtitle": "Include uppercase letters",
+  "lowercase": "Lowercase (a-z)",
+  "lowercaseSubtitle": "Include lowercase letters",
+  "numbers": "Numbers (0-9)",
+  "numbersSubtitle": "Include numbers",
+  "symbols": "Symbols (!@#$...)",
+  "symbolsSubtitle": "Include special characters",
+
+  "settingsTitle": "Settings",
+  "securitySection": "Security",
+  "changeMasterPassword": "Change Master Password",
+  "changeMasterPasswordSubtitle": "Re-encrypts all entries with a new key",
+  "autoLockTimeout": "Auto-lock Timeout",
+  "autoLockMinutesValue": "{minutes} minutes",
+  "@autoLockMinutesValue": {
+    "placeholders": {
+      "minutes": {"type": "int"}
+    }
+  },
+  "biometricUnlock": "Biometric Unlock",
+  "biometricUnlockSubtitle": "Use fingerprint to unlock",
+  "biometricComingSoon": "Biometric unlock coming in a future update",
+  "dataSection": "Data",
+  "exportVault": "Export Vault",
+  "exportVaultSubtitle": "Encrypted backup or plain JSON",
+  "importVault": "Import Vault",
+  "importVaultSubtitle": "Restore from a backup or JSON file",
+  "dangerZoneSection": "Danger Zone",
+  "deleteAllData": "Delete All Data",
+  "deleteAllDataSubtitle": "This action cannot be undone",
+  "aboutSection": "About",
+  "version": "Version",
+  "appInfo": "A secure password manager",
+  "languageSection": "Language",
+  "language": "Language",
+  "followSystem": "Follow System",
+  "languageChinese": "中文",
+  "languageEnglish": "English",
+  "exportDialogTitle": "Export Vault",
+  "encryptedBackup": "Encrypted backup (recommended)",
+  "encryptedBackupDesc": "Password-protected by your master key",
+  "plainJson": "Plain JSON",
+  "plainJsonDesc": "Decrypted text — keep it safe",
+  "saveEncryptedBackupDialog": "Save Encrypted Backup",
+  "savePlainExportDialog": "Save Plain Export",
+  "vaultExportedTo": "Vault exported to {path}",
+  "@vaultExportedTo": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "exportFailed": "Export failed: {error}",
+  "@exportFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "importDialogTitle": "Import Vault",
+  "importDialogMessage": "Importing will add all entries from the backup file to your current vault. Existing entries will not be overwritten. Continue?",
+  "import": "Import",
+  "importedCounts": "Imported {entries} entries and {folders} folders",
+  "@importedCounts": {
+    "placeholders": {
+      "entries": {"type": "int"},
+      "folders": {"type": "int"}
+    }
+  },
+  "importFailed": "Import failed: {error}",
+  "@importFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "currentMasterPasswordLabel": "Current Master Password",
+  "newMasterPasswordLabel": "New Master Password",
+  "confirmNewPasswordLabel": "Confirm New Password",
+  "change": "Change",
+  "masterPasswordChanged": "Master password changed",
+  "failedWithError": "Failed: {error}",
+  "@failedWithError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "autoLockSet": "Auto-lock set to {value}",
+  "@autoLockSet": {
+    "placeholders": {
+      "value": {"type": "String"}
+    }
+  },
+  "deleteAllDataTitle": "Delete All Data?",
+  "deleteAllDataMessage": "This will permanently delete all your saved passwords and data. This action cannot be undone.",
+  "deleteAll": "Delete All",
+  "allDataDeleted": "All data deleted"
+}

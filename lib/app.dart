@@ -10,6 +10,10 @@ import 'features/vault/screens/add_edit_entry_screen.dart';
 import 'features/vault/screens/entry_detail_screen.dart';
 import 'features/generator/screens/generator_screen.dart';
 import 'features/settings/screens/settings_screen.dart';
+import 'l10n/app_localizations.dart';
+
+/// Selected UI locale; `null` follows the system language.
+final localeProvider = StateProvider<Locale?>((ref) => null);
 
 final _routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
@@ -33,8 +37,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
       // Not first run and locked: must unlock
       if (!isFirstRun && isLocked && !isOnLock) return '/lock';
 
-      // Unlocked but on lock/set-password pages: go to vault
-      if (!isFirstRun && !isLocked && (isOnLock || isOnSetPassword)) return '/vault';
+      // Unlocked but on lock/set-password pages: go to the vault
+      if (!isFirstRun && !isLocked && (isOnLock || isOnSetPassword)) {
+        return '/vault';
+      }
 
       return null;
     },
@@ -87,6 +93,7 @@ class EasyPassApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(_routerProvider);
+    final locale = ref.watch(localeProvider);
 
     return MaterialApp.router(
       title: 'EasyPass',
@@ -108,6 +115,9 @@ class EasyPassApp extends ConsumerWidget {
         fontFamily: 'Roboto',
       ),
       themeMode: ThemeMode.system,
+      locale: locale,
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       routerConfig: router,
     );
   }

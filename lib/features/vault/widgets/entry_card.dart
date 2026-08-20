@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../data/database/database.dart';
+import '../../../l10n/app_localizations.dart';
 
 class EntryCard extends StatelessWidget {
   final PasswordEntry entry;
@@ -17,6 +18,7 @@ class EntryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final hasUrl = entry.url.isNotEmpty;
     final hasUsername = entry.username.isNotEmpty;
 
@@ -75,7 +77,7 @@ class EntryCard extends StatelessWidget {
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
                 onPressed: onCopyPassword,
-                tooltip: 'Copy password',
+                tooltip: l10n.copyPasswordTooltip,
               ),
             Icon(
               Icons.chevron_right,

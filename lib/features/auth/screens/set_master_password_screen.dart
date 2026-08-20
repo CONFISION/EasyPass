@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../l10n/app_localizations.dart';
 import '../providers/auth_provider.dart';
 
 class SetMasterPasswordScreen extends ConsumerStatefulWidget {
@@ -27,13 +28,14 @@ class _SetMasterPasswordScreenState
   }
 
   Future<void> _setMasterPassword() async {
+    final l10n = AppLocalizations.of(context);
     final password = _passwordController.text;
     final confirm = _confirmPasswordController.text;
 
     if (password.length < 8) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Master password must be at least 8 characters'),
+        SnackBar(
+          content: Text(l10n.errorPasswordTooShort),
           backgroundColor: Colors.red,
         ),
       );
@@ -58,7 +60,8 @@ class _SetMasterPasswordScreenState
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
-    final errorMessage = authState.errorMessage;
+    final l10n = AppLocalizations.of(context);
+    final errorMessage = authErrorMessage(l10n, authState.errorMessage);
     final theme = Theme.of(context);
 
     return Scaffold(
@@ -78,15 +81,14 @@ class _SetMasterPasswordScreenState
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'Welcome to EasyPass',
+                  l10n.welcomeTitle,
                   style: theme.textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Set your master password to get started.\n'
-                  'This password will encrypt all your data.',
+                  l10n.setPasswordSubtitle,
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
@@ -101,8 +103,8 @@ class _SetMasterPasswordScreenState
                   autofocus: true,
                   enabled: !_isLoading,
                   decoration: InputDecoration(
-                    labelText: 'Master Password',
-                    hintText: 'At least 8 characters',
+                    labelText: l10n.masterPasswordLabel,
+                    hintText: l10n.masterPasswordHint,
                     border: const OutlineInputBorder(),
                     prefixIcon: const Icon(Icons.key),
                     suffixIcon: IconButton(
@@ -126,7 +128,7 @@ class _SetMasterPasswordScreenState
                   enabled: !_isLoading,
                   onSubmitted: (_) => _setMasterPassword(),
                   decoration: InputDecoration(
-                    labelText: 'Confirm Master Password',
+                    labelText: l10n.confirmMasterPasswordLabel,
                     border: const OutlineInputBorder(),
                     prefixIcon: const Icon(Icons.key),
                     suffixIcon: IconButton(
@@ -159,7 +161,7 @@ class _SetMasterPasswordScreenState
                               color: Colors.white,
                             ),
                           )
-                        : const Text('Set Master Password'),
+                        : Text(l10n.setMasterPassword),
                   ),
                 ),
 
@@ -181,8 +183,7 @@ class _SetMasterPasswordScreenState
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'Important: Your master password cannot be recovered '
-                          'if forgotten. Store it safely!',
+                          l10n.securityNote,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onErrorContainer,
                           ),

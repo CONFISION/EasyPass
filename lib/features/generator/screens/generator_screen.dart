@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../l10n/app_localizations.dart';
 import '../providers/generator_provider.dart';
 
 class GeneratorScreen extends ConsumerWidget {
@@ -13,10 +14,11 @@ class GeneratorScreen extends ConsumerWidget {
     final state = ref.watch(generatorProvider);
     final notifier = ref.read(generatorProvider.notifier);
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Password Generator'),
+        title: Text(l10n.passwordGenerator),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
@@ -40,7 +42,7 @@ class GeneratorScreen extends ConsumerWidget {
               children: [
                 SelectableText(
                   state.generatedPassword.isEmpty
-                      ? 'Select options below'
+                      ? l10n.selectOptionsBelow
                       : state.generatedPassword,
                   style: theme.textTheme.headlineSmall?.copyWith(
                     fontFamily: 'monospace',
@@ -54,7 +56,7 @@ class GeneratorScreen extends ConsumerWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      '${state.generatedPassword.length} characters',
+                      l10n.charactersCount(state.generatedPassword.length),
                       style: theme.textTheme.bodySmall,
                     ),
                   ],
@@ -76,13 +78,13 @@ class GeneratorScreen extends ConsumerWidget {
                             ClipboardData(text: state.generatedPassword),
                           );
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Password copied!'),
+                            SnackBar(
+                              content: Text(l10n.passwordCopiedExcl),
                             ),
                           );
                         },
                   icon: const Icon(Icons.copy),
-                  label: const Text('Copy'),
+                  label: Text(l10n.copy),
                 ),
               ),
               const SizedBox(width: 12),
@@ -90,7 +92,7 @@ class GeneratorScreen extends ConsumerWidget {
                 child: OutlinedButton.icon(
                   onPressed: () => notifier.generate(),
                   icon: const Icon(Icons.refresh),
-                  label: const Text('Regenerate'),
+                  label: Text(l10n.regenerate),
                 ),
               ),
             ],
@@ -103,7 +105,7 @@ class GeneratorScreen extends ConsumerWidget {
               child: FilledButton.icon(
                 onPressed: () => context.pop(state.generatedPassword),
                 icon: const Icon(Icons.check_circle),
-                label: const Text('Use This Password'),
+                label: Text(l10n.useThisPassword),
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.green,
                 ),
@@ -114,7 +116,7 @@ class GeneratorScreen extends ConsumerWidget {
 
               // Length Slider
               Text(
-                'Length: ${state.length}',
+                l10n.lengthLabel(state.length),
                 style: theme.textTheme.titleMedium,
               ),
               Slider(
@@ -132,26 +134,26 @@ class GeneratorScreen extends ConsumerWidget {
                 child: Column(
                   children: [
                     SwitchListTile(
-                      title: const Text('Uppercase (A-Z)'),
-                      subtitle: const Text('Include uppercase letters'),
+                      title: Text(l10n.uppercase),
+                      subtitle: Text(l10n.uppercaseSubtitle),
                       value: state.useUppercase,
                       onChanged: (_) => notifier.toggleUppercase(),
                     ),
                     SwitchListTile(
-                      title: const Text('Lowercase (a-z)'),
-                      subtitle: const Text('Include lowercase letters'),
+                      title: Text(l10n.lowercase),
+                      subtitle: Text(l10n.lowercaseSubtitle),
                       value: state.useLowercase,
                       onChanged: (_) => notifier.toggleLowercase(),
                     ),
                     SwitchListTile(
-                      title: const Text('Numbers (0-9)'),
-                      subtitle: const Text('Include numbers'),
+                      title: Text(l10n.numbers),
+                      subtitle: Text(l10n.numbersSubtitle),
                       value: state.useNumbers,
                       onChanged: (_) => notifier.toggleNumbers(),
                     ),
                     SwitchListTile(
-                      title: const Text('Symbols (!@#\$...)'),
-                      subtitle: const Text('Include special characters'),
+                      title: Text(l10n.symbols),
+                      subtitle: Text(l10n.symbolsSubtitle),
                       value: state.useSymbols,
                       onChanged: (_) => notifier.toggleSymbols(),
                     ),

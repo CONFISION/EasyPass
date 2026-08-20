@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../../../core/crypto/crypto_service.dart';
 import '../../../data/database/database.dart';
 import '../../../data/repositories/vault_repository.dart';
+import '../../../l10n/app_localizations.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../generator/providers/generator_provider.dart';
 import '../providers/vault_provider.dart';
@@ -104,11 +105,12 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
   }
 
   Future<void> _save() async {
+    final l10n = AppLocalizations.of(context);
     if (!_formKey.currentState!.validate()) return;
     if (_passwordController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Password is required'),
+        SnackBar(
+          content: Text(l10n.passwordRequired),
           backgroundColor: Colors.red,
         ),
       );
@@ -147,7 +149,9 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(widget.isEditing ? 'Entry updated' : 'Entry saved')),
+            content: Text(
+                widget.isEditing ? l10n.entryUpdated : l10n.entrySaved),
+          ),
         );
         context.pop();
       }
@@ -155,7 +159,7 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to save: $e'),
+            content: Text(l10n.failedToSaveEntry(e.toString())),
             backgroundColor: Colors.red,
           ),
         );
@@ -180,9 +184,10 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.isEditing ? 'Edit Entry' : 'Add Entry'),
+        title: Text(widget.isEditing ? l10n.editEntryTitle : l10n.addEntryTitle),
         actions: [
           if (widget.isEditing)
             IconButton(
@@ -203,15 +208,15 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
                 children: [
                   TextFormField(
                     controller: _nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Name *',
-                      hintText: 'e.g., Google, GitHub',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.label),
+                    decoration: InputDecoration(
+                      labelText: l10n.nameLabel,
+                      hintText: l10n.nameHint,
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.label),
                     ),
                     validator: (value) {
                       if (value == null || value.trim().isEmpty) {
-                        return 'Name is required';
+                        return l10n.nameRequired;
                       }
                       return null;
                     },
@@ -220,22 +225,22 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _urlController,
-                    decoration: const InputDecoration(
-                      labelText: 'URL',
-                      hintText: 'e.g., https://example.com',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.link),
+                    decoration: InputDecoration(
+                      labelText: l10n.urlLabel,
+                      hintText: l10n.urlHint,
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.link),
                     ),
                     keyboardType: TextInputType.url,
                   ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _usernameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Username / Email',
-                      hintText: 'e.g., user@example.com',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.person),
+                    decoration: InputDecoration(
+                      labelText: l10n.usernameLabel,
+                      hintText: l10n.usernameHint,
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.person),
                     ),
                     keyboardType: TextInputType.emailAddress,
                   ),
@@ -244,7 +249,7 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
                     controller: _passwordController,
                     obscureText: _obscurePassword,
                     decoration: InputDecoration(
-                      labelText: 'Password *',
+                      labelText: l10n.passwordLabel,
                       border: const OutlineInputBorder(),
                       prefixIcon: const Icon(Icons.lock),
                       suffixIcon: Row(
@@ -259,7 +264,7 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
                           ),
                           IconButton(
                             icon: const Icon(Icons.auto_fix_high),
-                            tooltip: 'Generate password',
+                            tooltip: l10n.generatePasswordTooltip,
                             onPressed: () async {
                               final result =
                                   await context.push<String>('/generator');
@@ -275,11 +280,11 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _totpSecretController,
-                    decoration: const InputDecoration(
-                      labelText: 'TOTP Secret (2FA)',
-                      hintText: 'Base32 secret for authenticator',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.pin),
+                    decoration: InputDecoration(
+                      labelText: l10n.totpSecretLabel,
+                      hintText: l10n.totpSecretHint,
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.pin),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -287,18 +292,18 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _notesController,
-                    decoration: const InputDecoration(
-                      labelText: 'Notes',
-                      hintText: 'Additional notes...',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.note),
+                    decoration: InputDecoration(
+                      labelText: l10n.notesLabel,
+                      hintText: l10n.notesHint,
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.note),
                     ),
                     maxLines: 3,
                   ),
                   const SizedBox(height: 16),
                   SwitchListTile(
-                    title: const Text('Favorite'),
-                    subtitle: const Text('Mark this entry as favorite'),
+                    title: Text(l10n.favorite),
+                    subtitle: Text(l10n.favoriteSubtitle),
                     value: _isFavorite,
                     onChanged: (value) =>
                         setState(() => _isFavorite = value),
@@ -319,8 +324,8 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
                               ? Icons.save
                               : Icons.add),
                       label: Text(widget.isEditing
-                          ? 'Save Changes'
-                          : 'Add Entry'),
+                          ? l10n.saveChanges
+                          : l10n.addEntryTitle),
                     ),
                   ),
                 ],
@@ -333,20 +338,21 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
   }
 
   Widget _buildFolderDropdown(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
     final foldersAsync = ref.watch(foldersProvider);
     return foldersAsync.when(
       loading: () => const SizedBox.shrink(),
       error: (_, _) => const SizedBox.shrink(),
       data: (folders) => DropdownButtonFormField<String?>(
         initialValue: _selectedFolderId,
-        decoration: const InputDecoration(
-          labelText: 'Folder',
-          border: OutlineInputBorder(),
-          prefixIcon: Icon(Icons.folder),
+        decoration: InputDecoration(
+          labelText: l10n.folderTitle,
+          border: const OutlineInputBorder(),
+          prefixIcon: const Icon(Icons.folder),
         ),
         isExpanded: true,
         items: [
-          const DropdownMenuItem<String?>(value: null, child: Text('No Folder')),
+          DropdownMenuItem<String?>(value: null, child: Text(l10n.noFolder)),
           ...folders.map(
             (f) => DropdownMenuItem<String?>(value: f.id, child: Text(f.name)),
           ),
@@ -357,15 +363,16 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
   }
 
   void _confirmDelete(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Entry'),
-        content: const Text('Are you sure? This cannot be undone.'),
+        title: Text(l10n.deleteEntryTitle),
+        content: Text(l10n.deleteEntryMessage),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+              child: Text(l10n.cancel)),
           FilledButton(
             onPressed: () async {
               await ref
@@ -376,7 +383,7 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
             },
             style: FilledButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('Delete'),
+            child: Text(l10n.delete),
           ),
         ],
       ),

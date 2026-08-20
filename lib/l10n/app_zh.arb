@@ -1,0 +1,234 @@
+{
+  "@@locale": "zh",
+  "appTitle": "EasyPass",
+
+  "masterPasswordLabel": "主密码",
+  "masterPasswordHint": "至少 8 个字符",
+  "confirmMasterPasswordLabel": "确认主密码",
+  "unlock": "解锁",
+  "unlockScreenSubtitle": "输入主密码以解锁",
+  "welcomeTitle": "欢迎使用 EasyPass",
+  "setPasswordSubtitle": "设置主密码以开始使用。\n此密码将加密您的所有数据。",
+  "setMasterPassword": "设置主密码",
+  "securityNote": "重要提示：主密码无法找回，请妥善保管！",
+
+  "errorPasswordsDoNotMatch": "两次输入的密码不一致",
+  "errorPasswordTooShort": "主密码至少需要 8 个字符",
+  "errorNoMasterPassword": "未配置主密码",
+  "errorIncorrectMasterPassword": "主密码错误",
+  "errorVaultLocked": "保险库已锁定",
+  "errorFailedToSave": "保存主密码失败",
+  "errorFailedToChange": "修改主密码失败",
+  "errorCurrentPasswordIncorrect": "当前主密码错误",
+  "errorUnlockFailed": "解锁保险库时出错",
+
+  "favoritesTitle": "收藏",
+  "folderTitle": "文件夹",
+  "searchTooltip": "搜索",
+  "generatorTooltip": "密码生成器",
+  "passwordGenerator": "密码生成器",
+  "lockTooltip": "锁定保险库",
+  "settings": "设置",
+  "failedToLoadVault": "加载保险库失败：{error}",
+  "@failedToLoadVault": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "retry": "重试",
+  "emptyVaultTitle": "保险库为空",
+  "emptyVaultHint": "点击 + 添加您的第一个密码",
+  "add": "添加",
+  "passwordCopied": "密码已复制到剪贴板",
+  "allItems": "全部条目",
+  "favorites": "收藏",
+  "foldersSection": "文件夹",
+  "newFolder": "新建文件夹",
+  "folderNameLabel": "文件夹名称",
+  "folderNameHint": "例如：工作、个人",
+  "cancel": "取消",
+  "create": "创建",
+  "deleteFolderTitle": "删除文件夹",
+  "deleteFolderMessage": "删除“{name}”？其中的条目将移至“无文件夹”。此操作无法撤销。",
+  "@deleteFolderMessage": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "folderDeleted": "文件夹“{name}”已删除",
+  "@folderDeleted": {
+    "placeholders": {
+      "name": {"type": "String"}
+    }
+  },
+  "delete": "删除",
+  "searchFailed": "搜索失败",
+  "noResultsFound": "未找到结果",
+
+  "editEntryTitle": "编辑条目",
+  "addEntryTitle": "添加条目",
+  "nameLabel": "名称 *",
+  "nameHint": "例如：Google、GitHub",
+  "nameRequired": "名称必填",
+  "urlLabel": "网址",
+  "urlHint": "例如：https://example.com",
+  "usernameLabel": "用户名 / 邮箱",
+  "usernameHint": "例如：user@example.com",
+  "passwordLabel": "密码 *",
+  "generatePasswordTooltip": "生成密码",
+  "totpSecretLabel": "TOTP 密钥（两步验证）",
+  "totpSecretHint": "身份验证器的 Base32 密钥",
+  "noFolder": "无文件夹",
+  "notesLabel": "备注",
+  "notesHint": "附加备注...",
+  "favorite": "收藏",
+  "favoriteSubtitle": "将此条目标记为收藏",
+  "saveChanges": "保存更改",
+  "passwordRequired": "密码必填",
+  "entryUpdated": "条目已更新",
+  "entrySaved": "条目已保存",
+  "failedToSaveEntry": "保存失败：{error}",
+  "@failedToSaveEntry": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "deleteEntryTitle": "删除条目",
+  "deleteEntryMessage": "确定要删除吗？此操作无法撤销。",
+  "deleteEntryDetailMessage": "确定要删除此条目吗？此操作无法撤销。",
+
+  "entryDetailsTitle": "条目详情",
+  "failedToLoadEntry": "加载条目失败",
+  "entryNotFound": "未找到条目",
+  "username": "用户名",
+  "usernameCopied": "用户名已复制",
+  "passwordField": "密码",
+  "visibleAutoHide": "可见 • 1 分钟后自动隐藏",
+  "passwordCopiedShort": "密码已复制",
+  "revealPasswordTooltip": "显示密码",
+  "hidePasswordTooltip": "隐藏密码",
+  "copyPasswordTooltip": "复制密码",
+  "urlCopied": "网址已复制",
+  "copyFieldTooltip": "复制{label}",
+  "@copyFieldTooltip": {
+    "placeholders": {
+      "label": {"type": "String"}
+    }
+  },
+  "verifyMasterPasswordTitle": "验证主密码",
+  "verify": "验证",
+  "noMasterPasswordConfigured": "未配置主密码",
+
+  "selectOptionsBelow": "请在下方选择选项",
+  "charactersCount": "{count} 个字符",
+  "@charactersCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "copy": "复制",
+  "regenerate": "重新生成",
+  "passwordCopiedExcl": "密码已复制！",
+  "useThisPassword": "使用此密码",
+  "lengthLabel": "长度：{length}",
+  "@lengthLabel": {
+    "placeholders": {
+      "length": {"type": "int"}
+    }
+  },
+  "uppercase": "大写字母（A-Z）",
+  "uppercaseSubtitle": "包含大写字母",
+  "lowercase": "小写字母（a-z）",
+  "lowercaseSubtitle": "包含小写字母",
+  "numbers": "数字（0-9）",
+  "numbersSubtitle": "包含数字",
+  "symbols": "符号（!@#$...）",
+  "symbolsSubtitle": "包含特殊字符",
+
+  "settingsTitle": "设置",
+  "securitySection": "安全",
+  "changeMasterPassword": "修改主密码",
+  "changeMasterPasswordSubtitle": "使用新密钥重新加密所有条目",
+  "autoLockTimeout": "自动锁定超时",
+  "autoLockMinutesValue": "{minutes} 分钟",
+  "@autoLockMinutesValue": {
+    "placeholders": {
+      "minutes": {"type": "int"}
+    }
+  },
+  "biometricUnlock": "生物识别解锁",
+  "biometricUnlockSubtitle": "使用指纹解锁",
+  "biometricComingSoon": "生物识别解锁将在未来更新中提供",
+  "dataSection": "数据",
+  "exportVault": "导出保险库",
+  "exportVaultSubtitle": "加密备份或纯 JSON",
+  "importVault": "导入保险库",
+  "importVaultSubtitle": "从备份或 JSON 文件恢复",
+  "dangerZoneSection": "危险区域",
+  "deleteAllData": "删除所有数据",
+  "deleteAllDataSubtitle": "此操作无法撤销",
+  "aboutSection": "关于",
+  "version": "版本",
+  "appInfo": "安全的密码管理器",
+  "languageSection": "语言",
+  "language": "语言",
+  "followSystem": "跟随系统",
+  "languageChinese": "中文",
+  "languageEnglish": "English",
+  "exportDialogTitle": "导出保险库",
+  "encryptedBackup": "加密备份（推荐）",
+  "encryptedBackupDesc": "由主密钥加密保护",
+  "plainJson": "纯 JSON",
+  "plainJsonDesc": "解密文本 — 请妥善保管",
+  "saveEncryptedBackupDialog": "保存加密备份",
+  "savePlainExportDialog": "保存明文导出",
+  "vaultExportedTo": "保险库已导出至 {path}",
+  "@vaultExportedTo": {
+    "placeholders": {
+      "path": {"type": "String"}
+    }
+  },
+  "exportFailed": "导出失败：{error}",
+  "@exportFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "importDialogTitle": "导入保险库",
+  "importDialogMessage": "导入会将备份文件中的所有条目添加到当前保险库。现有条目不会被覆盖。是否继续？",
+  "import": "导入",
+  "importedCounts": "已导入 {entries} 个条目和 {folders} 个文件夹",
+  "@importedCounts": {
+    "placeholders": {
+      "entries": {"type": "int"},
+      "folders": {"type": "int"}
+    }
+  },
+  "importFailed": "导入失败：{error}",
+  "@importFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "currentMasterPasswordLabel": "当前主密码",
+  "newMasterPasswordLabel": "新主密码",
+  "confirmNewPasswordLabel": "确认新主密码",
+  "change": "修改",
+  "masterPasswordChanged": "主密码已修改",
+  "failedWithError": "失败：{error}",
+  "@failedWithError": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  },
+  "autoLockSet": "自动锁定已设为 {value}",
+  "@autoLockSet": {
+    "placeholders": {
+      "value": {"type": "String"}
+    }
+  },
+  "deleteAllDataTitle": "删除所有数据？",
+  "deleteAllDataMessage": "这将永久删除所有已保存的密码和数据。此操作无法撤销。",
+  "deleteAll": "全部删除",
+  "allDataDeleted": "所有数据已删除"
+}

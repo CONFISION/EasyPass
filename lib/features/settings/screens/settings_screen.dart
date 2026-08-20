@@ -4,6 +4,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app.dart';
+import '../../../l10n/app_localizations.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../../data/repositories/vault_repository.dart';
 import '../../../data/services/export_import_provider.dart';
@@ -14,10 +16,11 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     final autoLockMinutes = ref.watch(authProvider).autoLockMinutes;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(title: Text(l10n.settingsTitle)),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Center(
@@ -25,73 +28,80 @@ class SettingsScreen extends ConsumerWidget {
             constraints: const BoxConstraints(maxWidth: 600),
             child: Column(
               children: [
-                _buildSectionHeader(context, 'Security'),
+                _buildSectionHeader(context, l10n.securitySection),
                 ListTile(
                   leading: const Icon(Icons.lock_reset),
-                  title: const Text('Change Master Password'),
-                  subtitle: const Text('Re-encrypts all entries with a new key'),
+                  title: Text(l10n.changeMasterPassword),
+                  subtitle: Text(l10n.changeMasterPasswordSubtitle),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _changeMasterPassword(context, ref),
                 ),
                 ListTile(
                   leading: const Icon(Icons.timer),
-                  title: const Text('Auto-lock Timeout'),
-                  subtitle: Text('$autoLockMinutes minutes'),
+                  title: Text(l10n.autoLockTimeout),
+                  subtitle: Text(l10n.autoLockMinutesValue(autoLockMinutes)),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _pickAutoLockTimeout(context, ref),
                 ),
                 ListTile(
                   leading: const Icon(Icons.fingerprint),
-                  title: const Text('Biometric Unlock'),
-                  subtitle: const Text('Use fingerprint to unlock'),
+                  title: Text(l10n.biometricUnlock),
+                  subtitle: Text(l10n.biometricUnlockSubtitle),
                   trailing: Switch(
                     value: false,
                     onChanged: (value) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text(
-                                'Biometric unlock coming in a future update')),
+                        SnackBar(content: Text(l10n.biometricComingSoon)),
                       );
                     },
                   ),
                 ),
                 const Divider(),
-                _buildSectionHeader(context, 'Data'),
+                _buildSectionHeader(context, l10n.dataSection),
                 ListTile(
                   leading: const Icon(Icons.upload_file),
-                  title: const Text('Export Vault'),
-                  subtitle: const Text('Encrypted backup or plain JSON'),
+                  title: Text(l10n.exportVault),
+                  subtitle: Text(l10n.exportVaultSubtitle),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _exportVault(context, ref),
                 ),
                 ListTile(
                   leading: const Icon(Icons.download),
-                  title: const Text('Import Vault'),
-                  subtitle: const Text('Restore from a backup or JSON file'),
+                  title: Text(l10n.importVault),
+                  subtitle: Text(l10n.importVaultSubtitle),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _importVault(context, ref),
                 ),
                 const Divider(),
-                _buildSectionHeader(context, 'Danger Zone',
+                _buildSectionHeader(context, l10n.languageSection),
+                ListTile(
+                  leading: const Icon(Icons.language),
+                  title: Text(l10n.language),
+                  subtitle: Text(_languageSubtitle(context, ref)),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _pickLanguage(context, ref),
+                ),
+                const Divider(),
+                _buildSectionHeader(context, l10n.dangerZoneSection,
                     color: theme.colorScheme.error),
                 ListTile(
                   leading: Icon(Icons.delete_forever, color: theme.colorScheme.error),
-                  title: Text('Delete All Data',
+                  title: Text(l10n.deleteAllData,
                       style: TextStyle(color: theme.colorScheme.error)),
-                  subtitle: const Text('This action cannot be undone'),
+                  subtitle: Text(l10n.deleteAllDataSubtitle),
                   onTap: () => _confirmDeleteAll(context, ref),
                 ),
                 const Divider(),
-                _buildSectionHeader(context, 'About'),
-                const ListTile(
-                  leading: Icon(Icons.info),
-                  title: Text('Version'),
+                _buildSectionHeader(context, l10n.aboutSection),
+                ListTile(
+                  leading: const Icon(Icons.info),
+                  title: Text(l10n.version),
                   subtitle: Text('1.0.0'),
                 ),
-                const ListTile(
-                  leading: Icon(Icons.code),
-                  title: Text('EasyPass'),
-                  subtitle: Text('A secure password manager'),
+                ListTile(
+                  leading: const Icon(Icons.code),
+                  title: Text(l10n.appTitle),
+                  subtitle: Text(l10n.appInfo),
                 ),
               ],
             ),
@@ -116,27 +126,81 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
+  // ─── Language ──────────────────────────────────────────
+
+  String _languageSubtitle(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
+    final locale = ref.watch(localeProvider);
+    if (locale == null) return l10n.followSystem;
+    return locale.languageCode == 'zh' ? l10n.languageChinese : l10n.languageEnglish;
+  }
+
+  void _pickLanguage(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
+    final current = ref.read(localeProvider);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(l10n.language),
+        children: [
+          ListTile(
+            title: Text(l10n.followSystem),
+            trailing: current == null
+                ? const Icon(Icons.check, color: Colors.green)
+                : null,
+            onTap: () {
+              ref.read(localeProvider.notifier).state = null;
+              Navigator.pop(ctx);
+            },
+          ),
+          ListTile(
+            title: Text(l10n.languageChinese),
+            trailing: current?.languageCode == 'zh'
+                ? const Icon(Icons.check, color: Colors.green)
+                : null,
+            onTap: () {
+              ref.read(localeProvider.notifier).state = const Locale('zh');
+              Navigator.pop(ctx);
+            },
+          ),
+          ListTile(
+            title: Text(l10n.languageEnglish),
+            trailing: current?.languageCode == 'en'
+                ? const Icon(Icons.check, color: Colors.green)
+                : null,
+            onTap: () {
+              ref.read(localeProvider.notifier).state = const Locale('en');
+              Navigator.pop(ctx);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   // ─── Export ─────────────────────────────────────────────
 
   void _exportVault(BuildContext context, WidgetRef ref) async {
+    final l10n = AppLocalizations.of(context);
     final format = await showDialog<String>(
       context: context,
       builder: (ctx) => SimpleDialog(
-        title: const Text('Export Vault'),
+        title: Text(l10n.exportDialogTitle),
         children: [
           SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, 'encrypted'),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(Icons.lock),
-                SizedBox(width: 12),
+                const Icon(Icons.lock),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Encrypted backup (recommended)'),
-                      Text('Password-protected by your master key',
-                          style: TextStyle(fontSize: 12)),
+                      Text(l10n.encryptedBackup),
+                      Text(l10n.encryptedBackupDesc,
+                          style: const TextStyle(fontSize: 12)),
                     ],
                   ),
                 ),
@@ -145,17 +209,17 @@ class SettingsScreen extends ConsumerWidget {
           ),
           SimpleDialogOption(
             onPressed: () => Navigator.pop(ctx, 'plain'),
-            child: const Row(
+            child: Row(
               children: [
-                Icon(Icons.description),
-                SizedBox(width: 12),
+                const Icon(Icons.description),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Plain JSON'),
-                      Text('Decrypted text — keep it safe',
-                          style: TextStyle(fontSize: 12)),
+                      Text(l10n.plainJson),
+                      Text(l10n.plainJsonDesc,
+                          style: const TextStyle(fontSize: 12)),
                     ],
                   ),
                 ),
@@ -182,7 +246,8 @@ class SettingsScreen extends ConsumerWidget {
           '${isPlain ? 'easypass_plain' : 'easypass_backup'}_$date.json';
 
       final path = await FilePicker.platform.saveFile(
-        dialogTitle: isPlain ? 'Save Plain Export' : 'Save Encrypted Backup',
+        dialogTitle:
+            isPlain ? l10n.savePlainExportDialog : l10n.saveEncryptedBackupDialog,
         fileName: filename,
         type: FileType.custom,
         allowedExtensions: ['json'],
@@ -193,13 +258,13 @@ class SettingsScreen extends ConsumerWidget {
       await service.writeToFile(content, path);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Vault exported to $path')),
+          SnackBar(content: Text(l10n.vaultExportedTo(path))),
         );
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export failed: $e'),
+          SnackBar(content: Text(l10n.exportFailed(e.toString())),
               backgroundColor: Colors.red),
         );
       }
@@ -209,22 +274,19 @@ class SettingsScreen extends ConsumerWidget {
   // ─── Import ─────────────────────────────────────────────
 
   void _importVault(BuildContext context, WidgetRef ref) async {
+    final l10n = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Import Vault'),
-        content: const Text(
-          'Importing will add all entries from the backup file to your '
-          'current vault. Existing entries will not be overwritten. '
-          'Continue?',
-        ),
+        title: Text(l10n.importDialogTitle),
+        content: Text(l10n.importDialogMessage),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
+              child: Text(l10n.cancel)),
           FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Import')),
+              child: Text(l10n.import)),
         ],
       ),
     );
@@ -250,16 +312,15 @@ class SettingsScreen extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-                'Imported ${counts['entries']} entries and '
-                '${counts['folders']} folders'),
+            content: Text(l10n.importedCounts(
+                counts['entries'] ?? 0, counts['folders'] ?? 0)),
           ),
         );
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Import failed: $e'),
+          SnackBar(content: Text(l10n.importFailed(e.toString())),
               backgroundColor: Colors.red),
         );
       }
@@ -269,6 +330,7 @@ class SettingsScreen extends ConsumerWidget {
   // ─── Change Master Password ─────────────────────────────
 
   void _changeMasterPassword(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
     final currentController = TextEditingController();
     final newController = TextEditingController();
     final confirmController = TextEditingController();
@@ -276,7 +338,7 @@ class SettingsScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Change Master Password'),
+        title: Text(l10n.changeMasterPassword),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -285,21 +347,21 @@ class SettingsScreen extends ConsumerWidget {
                 controller: currentController,
                 obscureText: true,
                 autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Current Master Password',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.key),
+                decoration: InputDecoration(
+                  labelText: l10n.currentMasterPasswordLabel,
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.key),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: newController,
                 obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'New Master Password',
-                  hintText: 'At least 8 characters',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.lock_reset),
+                decoration: InputDecoration(
+                  labelText: l10n.newMasterPasswordLabel,
+                  hintText: l10n.masterPasswordHint,
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.lock_reset),
                 ),
               ),
               const SizedBox(height: 12),
@@ -307,10 +369,10 @@ class SettingsScreen extends ConsumerWidget {
                 controller: confirmController,
                 obscureText: true,
                 onSubmitted: (_) => Navigator.pop(ctx, true),
-                decoration: const InputDecoration(
-                  labelText: 'Confirm New Password',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.lock_reset),
+                decoration: InputDecoration(
+                  labelText: l10n.confirmNewPasswordLabel,
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.lock_reset),
                 ),
               ),
             ],
@@ -319,7 +381,7 @@ class SettingsScreen extends ConsumerWidget {
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+              child: Text(l10n.cancel)),
           FilledButton(
             onPressed: () async {
               final success = await ref
@@ -333,19 +395,22 @@ class SettingsScreen extends ConsumerWidget {
               if (!ctx.mounted) return;
               Navigator.pop(ctx);
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                final messenger = ScaffoldMessenger.of(context);
+                final appL10n = AppLocalizations.of(context);
+                messenger.showSnackBar(
                   SnackBar(
                     content: Text(
                       success
-                          ? 'Master password changed'
-                          : 'Failed: ${error ?? 'Unknown error'}',
+                          ? appL10n.masterPasswordChanged
+                          : appL10n.failedWithError(
+                              authErrorMessage(appL10n, error)),
                     ),
                     backgroundColor: success ? null : Colors.red,
                   ),
                 );
               }
             },
-            child: const Text('Change'),
+            child: Text(l10n.change),
           ),
         ],
       ),
@@ -355,31 +420,28 @@ class SettingsScreen extends ConsumerWidget {
   // ─── Auto-lock Timeout ──────────────────────────────────
 
   void _pickAutoLockTimeout(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
     final current = ref.read(authProvider).autoLockMinutes;
-    const options = {
-      1: '1 minute',
-      3: '3 minutes',
-      5: '5 minutes',
-      15: '15 minutes',
-      30: '30 minutes',
-    };
+    const options = [1, 3, 5, 15, 30];
 
     showDialog(
       context: context,
       builder: (ctx) => SimpleDialog(
-        title: const Text('Auto-lock Timeout'),
-        children: options.entries.map((e) {
-          final isSelected = e.key == current;
+        title: Text(l10n.autoLockTimeout),
+        children: options.map((minutes) {
+          final isSelected = minutes == current;
           return ListTile(
-            title: Text(e.value),
+            title: Text(l10n.autoLockMinutesValue(minutes)),
             trailing:
                 isSelected ? const Icon(Icons.check, color: Colors.green) : null,
             onTap: () async {
               Navigator.pop(ctx);
-              await ref.read(authProvider.notifier).setAutoLockMinutes(e.key);
+              await ref.read(authProvider.notifier).setAutoLockMinutes(minutes);
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Auto-lock set to ${e.value}')),
+                  SnackBar(
+                      content: Text(l10n.autoLockSet(
+                          l10n.autoLockMinutesValue(minutes)))),
                 );
               }
             },
@@ -392,16 +454,16 @@ class SettingsScreen extends ConsumerWidget {
   // ─── Delete All ─────────────────────────────────────────
 
   void _confirmDeleteAll(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete All Data?'),
-        content: const Text(
-            'This will permanently delete all your saved passwords and data. '
-            'This action cannot be undone.'),
+        title: Text(l10n.deleteAllDataTitle),
+        content: Text(l10n.deleteAllDataMessage),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(l10n.cancel)),
           FilledButton(
             onPressed: () async {
               final db = ref.read(databaseProvider);
@@ -417,13 +479,13 @@ class SettingsScreen extends ConsumerWidget {
               if (ctx.mounted) Navigator.pop(ctx);
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('All data deleted')),
+                  SnackBar(content: Text(l10n.allDataDeleted)),
                 );
               }
             },
             style: FilledButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('Delete All'),
+            child: Text(l10n.deleteAll),
           ),
         ],
       ),

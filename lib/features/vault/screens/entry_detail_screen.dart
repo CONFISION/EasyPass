@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/crypto/crypto_service.dart';
 import '../../../data/database/database.dart';
 import '../../../data/repositories/vault_repository.dart';
+import '../../../l10n/app_localizations.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../providers/vault_provider.dart';
 
@@ -21,10 +22,11 @@ class EntryDetailScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final entryAsync = ref.watch(selectedEntryProvider(entryId));
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Entry Details'),
+        title: Text(l10n.entryDetailsTitle),
         actions: [
           IconButton(
             icon: const Icon(Icons.edit),
@@ -38,10 +40,10 @@ class EntryDetailScreen extends ConsumerWidget {
       ),
       body: entryAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, _) => const Center(child: Text('Failed to load entry')),
+        error: (_, _) => Center(child: Text(l10n.failedToLoadEntry)),
         data: (entry) {
           if (entry == null) {
-            return const Center(child: Text('Entry not found'));
+            return Center(child: Text(l10n.entryNotFound));
           }
           return _buildEntryDetails(context, ref, entry, theme);
         },
@@ -51,6 +53,7 @@ class EntryDetailScreen extends ConsumerWidget {
 
   Widget _buildEntryDetails(
       BuildContext context, WidgetRef ref, PasswordEntry entry, ThemeData theme) {
+    final l10n = AppLocalizations.of(context);
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16.0),
       child: Center(
@@ -64,13 +67,13 @@ class EntryDetailScreen extends ConsumerWidget {
               if (entry.username.isNotEmpty)
                 _buildField(
                   context,
-                  label: 'Username',
+                  label: l10n.username,
                   value: entry.username,
                   icon: Icons.person,
                   onCopy: () {
                     Clipboard.setData(ClipboardData(text: entry.username));
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Username copied')),
+                      SnackBar(content: Text(l10n.usernameCopied)),
                     );
                   },
                 ),
@@ -78,19 +81,19 @@ class EntryDetailScreen extends ConsumerWidget {
               if (entry.url.isNotEmpty)
                 _buildField(
                   context,
-                  label: 'URL',
+                  label: l10n.urlLabel,
                   value: entry.url,
                   icon: Icons.link,
                   onCopy: () {
                     Clipboard.setData(ClipboardData(text: entry.url));
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('URL copied')),
+                      SnackBar(content: Text(l10n.urlCopied)),
                     );
                   },
                 ),
               SwitchListTile(
-                title: const Text('Favorite'),
-                subtitle: const Text('Mark this entry as favorite'),
+                title: Text(l10n.favorite),
+                subtitle: Text(l10n.favoriteSubtitle),
                 value: entry.isFavorite,
                 onChanged: (value) async {
                   await ref.read(vaultRepositoryProvider).updateEntry(
@@ -102,13 +105,15 @@ class EntryDetailScreen extends ConsumerWidget {
                           username: Value(entry.username),
                           passwordEncrypted: Value(entry.passwordEncrypted),
                           notesEncrypted: Value(entry.notesEncrypted ?? ''),
-                          totpSecretEncrypted: Value(entry.totpSecretEncrypted ?? ''),
+                          totpSecretEncrypted:
+                              Value(entry.totpSecretEncrypted ?? ''),
                           isFavorite: Value(value),
                           folderId: entry.folderId != null
                               ? Value(entry.folderId!)
                               : const Value.absent(),
                           createdAt: Value(entry.createdAt),
-                          updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
+                          updatedAt:
+                              Value(DateTime.now().millisecondsSinceEpoch),
                         ),
                       );
                   ref.invalidate(selectedEntryProvider(entryId));
@@ -130,6 +135,7 @@ class EntryDetailScreen extends ConsumerWidget {
     VoidCallback? onCopy,
   }) {
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -150,7 +156,7 @@ class EntryDetailScreen extends ConsumerWidget {
                   IconButton(
                     icon: const Icon(Icons.copy, size: 20),
                     onPressed: onCopy,
-                    tooltip: 'Copy $label',
+                    tooltip: l10n.copyFieldTooltip(label),
                   ),
               ],
             ),
@@ -161,14 +167,16 @@ class EntryDetailScreen extends ConsumerWidget {
   }
 
   void _confirmDelete(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Entry'),
-        content: const Text(
-            'Are you sure you want to delete this entry? This action cannot be undone.'),
+        title: Text(l10n.deleteEntryTitle),
+        content: Text(l10n.deleteEntryDetailMessage),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(l10n.cancel)),
           FilledButton(
             onPressed: () async {
               await ref.read(vaultRepositoryProvider).deleteEntry(entryId);
@@ -177,7 +185,7 @@ class EntryDetailScreen extends ConsumerWidget {
             },
             style: FilledButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('Delete'),
+            child: Text(l10n.delete),
           ),
         ],
       ),
@@ -253,6 +261,7 @@ class _RevealablePasswordFieldState extends ConsumerState<RevealablePasswordFiel
   }
 
   void _verifyAndReveal() async {
+    final l10n = AppLocalizations.of(context);
     final password = _passwordController.text;
     if (password.isEmpty) return;
 
@@ -261,7 +270,7 @@ class _RevealablePasswordFieldState extends ConsumerState<RevealablePasswordFiel
     if (storedSalt == null || storedHash == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No master password configured')),
+          SnackBar(content: Text(l10n.noMasterPasswordConfigured)),
         );
       }
       return;
@@ -273,8 +282,8 @@ class _RevealablePasswordFieldState extends ConsumerState<RevealablePasswordFiel
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Incorrect master password'),
+          SnackBar(
+            content: Text(l10n.errorIncorrectMasterPassword),
             backgroundColor: Colors.red,
           ),
         );
@@ -283,25 +292,30 @@ class _RevealablePasswordFieldState extends ConsumerState<RevealablePasswordFiel
   }
 
   void _showMasterPasswordDialog() {
+    final l10n = AppLocalizations.of(context);
     _passwordController.clear();
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Verify Master Password'),
+        title: Text(l10n.verifyMasterPasswordTitle),
         content: TextField(
           controller: _passwordController,
           obscureText: true,
           autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Master Password',
-            border: OutlineInputBorder(),
-            prefixIcon: Icon(Icons.key),
+          decoration: InputDecoration(
+            labelText: l10n.masterPasswordLabel,
+            border: const OutlineInputBorder(),
+            prefixIcon: const Icon(Icons.key),
           ),
           onSubmitted: (_) => _verifyAndReveal(),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(onPressed: _verifyAndReveal, child: const Text('Verify')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(l10n.cancel)),
+          FilledButton(
+              onPressed: _verifyAndReveal,
+              child: Text(l10n.verify)),
         ],
       ),
     );
@@ -309,6 +323,7 @@ class _RevealablePasswordFieldState extends ConsumerState<RevealablePasswordFiel
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -318,7 +333,7 @@ class _RevealablePasswordFieldState extends ConsumerState<RevealablePasswordFiel
           children: [
             Row(
               children: [
-                Text('Password',
+                Text(l10n.passwordField,
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant)),
                 if (_isRevealed) ...[
@@ -330,7 +345,7 @@ class _RevealablePasswordFieldState extends ConsumerState<RevealablePasswordFiel
                       borderRadius: BorderRadius.circular(4),
                       border: Border.all(color: Colors.orange.withAlpha(100)),
                     ),
-                    child: Text('Visible • Auto-hides in 1 min',
+                    child: Text(l10n.visibleAutoHide,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                               color: Colors.orange,
                               fontSize: 10,
@@ -358,17 +373,19 @@ class _RevealablePasswordFieldState extends ConsumerState<RevealablePasswordFiel
                         : _displayText;
                     Clipboard.setData(ClipboardData(text: text));
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Password copied')),
+                      SnackBar(content: Text(l10n.passwordCopiedShort)),
                     );
                   },
-                  tooltip: 'Copy password',
+                  tooltip: l10n.copyPasswordTooltip,
                 ),
                 IconButton(
                   icon: Icon(_isRevealed ? Icons.visibility_off : Icons.visibility,
                       size: 20),
                   onPressed:
                       _isRevealed ? _hidePassword : _showMasterPasswordDialog,
-                  tooltip: _isRevealed ? 'Hide password' : 'Reveal password',
+                  tooltip: _isRevealed
+                      ? l10n.hidePasswordTooltip
+                      : l10n.revealPasswordTooltip,
                 ),
               ],
             ),

@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../../../core/crypto/crypto_service.dart';
 import '../../../data/database/database.dart';
 import '../../../data/repositories/vault_repository.dart';
+import '../../../l10n/app_localizations.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../providers/vault_provider.dart';
 import '../widgets/entry_card.dart';
@@ -22,14 +23,15 @@ class VaultScreen extends ConsumerWidget {
         ? ref.watch(vaultFavoritesProvider)
         : ref.watch(filteredVaultEntriesProvider);
     final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
 
     String title;
     if (showFavorites) {
-      title = '⭐ Favorites';
+      title = l10n.favoritesTitle;
     } else if (folderName != null) {
-      title = '📁 $folderName';
+      title = folderName;
     } else {
-      title = 'EasyPass';
+      title = l10n.appTitle;
     }
 
     return Scaffold(
@@ -45,19 +47,19 @@ class VaultScreen extends ConsumerWidget {
                 delegate: _VaultSearchDelegate(ref: ref),
               );
             },
-            tooltip: 'Search',
+            tooltip: l10n.searchTooltip,
           ),
           IconButton(
             icon: const Icon(Icons.auto_fix_high),
             onPressed: () => context.push('/generator'),
-            tooltip: 'Password Generator',
+            tooltip: l10n.generatorTooltip,
           ),
           IconButton(
             icon: const Icon(Icons.lock_outline),
             onPressed: () {
               ref.read(authProvider.notifier).lock();
             },
-            tooltip: 'Lock vault',
+            tooltip: l10n.lockTooltip,
           ),
         ],
       ),
@@ -71,11 +73,11 @@ class VaultScreen extends ConsumerWidget {
               Icon(Icons.error_outline,
                   size: 64, color: theme.colorScheme.error),
               const SizedBox(height: 16),
-              Text('Failed to load vault: $error'),
+              Text(l10n.failedToLoadVault(error.toString())),
               const SizedBox(height: 16),
               FilledButton(
                 onPressed: () => ref.invalidate(vaultEntriesProvider),
-                child: const Text('Retry'),
+                child: Text(l10n.retry),
               ),
             ],
           ),
@@ -92,11 +94,11 @@ class VaultScreen extends ConsumerWidget {
                     color: theme.colorScheme.onSurfaceVariant.withAlpha(100),
                   ),
                   const SizedBox(height: 16),
-                  Text('Your vault is empty',
+                  Text(l10n.emptyVaultTitle,
                       style: theme.textTheme.headlineSmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant)),
                   const SizedBox(height: 8),
-                  Text('Tap + to add your first password',
+                  Text(l10n.emptyVaultHint,
                       style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant)),
                 ],
@@ -115,7 +117,8 @@ class VaultScreen extends ConsumerWidget {
                   return EntryCard(
                     entry: entry,
                     onTap: () => context.push('/vault/entry/${entry.id}'),
-                    onCopyPassword: () => _copyPassword(context, ref, entry),
+                    onCopyPassword: () =>
+                        _copyPassword(context, ref, entry),
                   );
                 },
               ),
@@ -126,7 +129,7 @@ class VaultScreen extends ConsumerWidget {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/vault/add'),
         icon: const Icon(Icons.add),
-        label: const Text('Add'),
+        label: Text(l10n.add),
       ),
     );
   }
@@ -145,13 +148,16 @@ class VaultScreen extends ConsumerWidget {
     await Clipboard.setData(ClipboardData(text: decrypted));
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password copied to clipboard')),
+        SnackBar(
+          content: Text(AppLocalizations.of(context).passwordCopied),
+        ),
       );
     }
   }
 
   Widget _buildDrawer(BuildContext context, WidgetRef ref) {
     final foldersAsync = ref.watch(foldersProvider);
+    final l10n = AppLocalizations.of(context);
 
     return Drawer(
       child: SafeArea(
@@ -173,7 +179,7 @@ class VaultScreen extends ConsumerWidget {
             ),
             ListTile(
               leading: const Icon(Icons.inventory_2),
-              title: const Text('All Items'),
+              title: Text(l10n.allItems),
               selected: ref.watch(selectedFolderIdProvider) == null &&
                   !ref.watch(showFavoritesProvider),
               onTap: () {
@@ -184,7 +190,7 @@ class VaultScreen extends ConsumerWidget {
             ),
             ListTile(
               leading: const Icon(Icons.star),
-              title: const Text('Favorites'),
+              title: Text(l10n.favorites),
               selected: ref.watch(showFavoritesProvider),
               onTap: () {
                 ref.read(showFavoritesProvider.notifier).state = true;
@@ -197,11 +203,13 @@ class VaultScreen extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  Text('FOLDERS',
-                      style: Theme.of(context)
-                          .textTheme
-                          .labelSmall
-                          ?.copyWith(fontWeight: FontWeight.bold)),
+                  Text(
+                    l10n.foldersSection,
+                    style: Theme.of(context)
+                        .textTheme
+                        .labelSmall
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.add, size: 20),
@@ -239,7 +247,7 @@ class VaultScreen extends ConsumerWidget {
             const Divider(),
             ListTile(
               leading: const Icon(Icons.auto_fix_high),
-              title: const Text('Password Generator'),
+              title: Text(l10n.passwordGenerator),
               onTap: () {
                 Navigator.pop(context);
                 context.push('/generator');
@@ -247,7 +255,7 @@ class VaultScreen extends ConsumerWidget {
             ),
             ListTile(
               leading: const Icon(Icons.settings),
-              title: const Text('Settings'),
+              title: Text(l10n.settings),
               onTap: () {
                 Navigator.pop(context);
                 context.push('/settings');
@@ -261,23 +269,24 @@ class VaultScreen extends ConsumerWidget {
 
   void _showAddFolderDialog(BuildContext context, WidgetRef ref) {
     final controller = TextEditingController();
+    final l10n = AppLocalizations.of(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('New Folder'),
+        title: Text(l10n.newFolder),
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'Folder Name',
-            hintText: 'e.g., Work, Personal',
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            labelText: l10n.folderNameLabel,
+            hintText: l10n.folderNameHint,
+            border: const OutlineInputBorder(),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
+            child: Text(l10n.cancel),
           ),
           FilledButton(
             onPressed: () async {
@@ -295,7 +304,7 @@ class VaultScreen extends ConsumerWidget {
               ref.invalidate(foldersProvider);
               if (ctx.mounted) Navigator.pop(ctx);
             },
-            child: const Text('Create'),
+            child: Text(l10n.create),
           ),
         ],
       ),
@@ -304,17 +313,16 @@ class VaultScreen extends ConsumerWidget {
 
   void _confirmDeleteFolder(
       BuildContext context, WidgetRef ref, Folder folder) {
+    final l10n = AppLocalizations.of(context);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Folder'),
-        content: Text(
-            'Delete "${folder.name}"? Entries inside will be moved to '
-            '"No Folder". This cannot be undone.'),
+        title: Text(l10n.deleteFolderTitle),
+        content: Text(l10n.deleteFolderMessage(folder.name)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel')),
+              child: Text(l10n.cancel)),
           FilledButton(
             onPressed: () async {
               await ref.read(vaultRepositoryProvider).removeFolder(folder.id);
@@ -326,13 +334,13 @@ class VaultScreen extends ConsumerWidget {
               if (ctx.mounted) Navigator.pop(ctx);
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Folder "${folder.name}" deleted')),
+                  SnackBar(content: Text(l10n.folderDeleted(folder.name))),
                 );
               }
             },
             style: FilledButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.error),
-            child: const Text('Delete'),
+            child: Text(l10n.delete),
           ),
         ],
       ),
@@ -370,13 +378,14 @@ class _VaultSearchDelegate extends SearchDelegate<String?> {
 
   Widget _buildSearchResults(BuildContext context) {
     final results = ref.watch(searchResultsProvider(query));
+    final l10n = AppLocalizations.of(context);
 
     return results.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, _) => const Center(child: Text('Search failed')),
+      error: (_, _) => Center(child: Text(l10n.searchFailed)),
       data: (entries) {
         if (entries.isEmpty) {
-          return const Center(child: Text('No results found'));
+          return Center(child: Text(l10n.noResultsFound));
         }
         return ListView.builder(
           itemCount: entries.length,

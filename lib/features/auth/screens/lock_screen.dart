@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../l10n/app_localizations.dart';
 import '../providers/auth_provider.dart';
 
 class LockScreen extends ConsumerStatefulWidget {
@@ -39,7 +40,8 @@ class _LockScreenState extends ConsumerState<LockScreen> {
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(authProvider);
-    final errorMessage = authState.errorMessage;
+    final l10n = AppLocalizations.of(context);
+    final errorMessage = authErrorMessage(l10n, authState.errorMessage);
     final theme = Theme.of(context);
 
     return Scaffold(
@@ -59,7 +61,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'EasyPass',
+                  l10n.appTitle,
                   style: theme.textTheme.headlineLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: theme.colorScheme.primary,
@@ -67,7 +69,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Enter your master password to unlock',
+                  l10n.unlockScreenSubtitle,
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -82,7 +84,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                   enabled: !_isLoading,
                   onSubmitted: (_) => _unlock(),
                   decoration: InputDecoration(
-                    labelText: 'Master Password',
+                    labelText: l10n.masterPasswordLabel,
                     border: const OutlineInputBorder(),
                     prefixIcon: const Icon(Icons.key),
                     suffixIcon: IconButton(
@@ -115,7 +117,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
                               color: Colors.white,
                             ),
                           )
-                        : const Text('Unlock'),
+                        : Text(l10n.unlock),
                   ),
                 ),
               ],

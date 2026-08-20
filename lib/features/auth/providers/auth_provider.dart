@@ -7,6 +7,21 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/crypto/crypto_service.dart';
 import '../../../data/database/database.dart';
 import '../../../data/repositories/vault_repository.dart';
+import '../../../l10n/app_localizations.dart';
+
+/// Error codes stored in [AuthState.errorMessage]. UI layers map these to
+/// localized strings via `AppLocalizations`.
+abstract final class AuthErrorCodes {
+  static const passwordsDoNotMatch = 'passwordsDoNotMatch';
+  static const passwordTooShort = 'passwordTooShort';
+  static const failedToSave = 'failedToSave';
+  static const noMasterPassword = 'noMasterPassword';
+  static const incorrectMasterPassword = 'incorrectMasterPassword';
+  static const unlockError = 'unlockError';
+  static const currentPasswordIncorrect = 'currentPasswordIncorrect';
+  static const vaultLocked = 'vaultLocked';
+  static const failedToChange = 'failedToChange';
+}
 
 enum AuthStatus { loading, locked, unlocked, firstRun }
 
@@ -66,7 +81,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     if (password != confirmPassword) {
       state = state.copyWith(
         status: AuthStatus.firstRun,
-        errorMessage: 'Passwords do not match',
+        errorMessage: AuthErrorCodes.passwordsDoNotMatch,
       );
       return false;
     }
@@ -74,7 +89,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     if (password.length < 8) {
       state = state.copyWith(
         status: AuthStatus.firstRun,
-        errorMessage: 'Master password must be at least 8 characters',
+        errorMessage: AuthErrorCodes.passwordTooShort,
       );
       return false;
     }
@@ -94,10 +109,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
       );
       _startAutoLockTimer();
       return true;
-    } catch (e) {
+    } catch (_) {
       state = state.copyWith(
         status: AuthStatus.firstRun,
-        errorMessage: 'Failed to save master password: $e',
+        errorMessage: AuthErrorCodes.failedToSave,
       );
       return false;
     }
@@ -114,7 +129,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       if (storedSalt == null || storedHash == null) {
         state = state.copyWith(
           status: AuthStatus.locked,
-          errorMessage: 'No master password configured',
+          errorMessage: AuthErrorCodes.noMasterPassword,
         );
         return false;
       }
@@ -135,14 +150,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
       } else {
         state = state.copyWith(
           status: AuthStatus.locked,
-          errorMessage: 'Incorrect master password',
+          errorMessage: AuthErrorCodes.incorrectMasterPassword,
         );
         return false;
       }
-    } catch (e) {
+    } catch (_) {
       state = state.copyWith(
         status: AuthStatus.locked,
-        errorMessage: 'Error unlocking vault: $e',
+        errorMessage: AuthErrorCodes.unlockError,
       );
       return false;
     }
@@ -156,13 +171,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
     String confirmPassword,
   ) async {
     if (newPassword != confirmPassword) {
-      state = state.copyWith(errorMessage: 'Passwords do not match');
+      state = state.copyWith(errorMessage: AuthErrorCodes.passwordsDoNotMatch);
       return false;
     }
 
     if (newPassword.length < 8) {
       state = state.copyWith(
-        errorMessage: 'Master password must be at least 8 characters',
+        errorMessage: AuthErrorCodes.passwordTooShort,
       );
       return false;
     }
@@ -173,7 +188,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
       if (storedSalt == null || storedHash == null) {
         state = state.copyWith(
-          errorMessage: 'No master password configured',
+          errorMessage: AuthErrorCodes.noMasterPassword,
         );
         return false;
       }
@@ -181,14 +196,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
       if (_cryptoService.hashMasterPassword(currentPassword, storedSalt) !=
           storedHash) {
         state = state.copyWith(
-          errorMessage: 'Current master password is incorrect',
+          errorMessage: AuthErrorCodes.currentPasswordIncorrect,
         );
         return false;
       }
 
       final oldKey = _ref.read(encryptionKeyProvider);
       if (oldKey == null) {
-        state = state.copyWith(errorMessage: 'Vault is locked');
+        state = state.copyWith(errorMessage: AuthErrorCodes.vaultLocked);
         return false;
       }
 
@@ -244,9 +259,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
       state = state.copyWith(errorMessage: null);
       _startAutoLockTimer();
       return true;
-    } catch (e) {
+    } catch (_) {
       state = state.copyWith(
-        errorMessage: 'Failed to change master password: $e',
+        errorMessage: AuthErrorCodes.failedToChange,
       );
       return false;
     }
@@ -296,3 +311,29 @@ final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   final cryptoService = ref.watch(cryptoServiceProvider);
   return AuthNotifier(cryptoService, ref);
 });
+
+/// Maps an [AuthErrorCodes] value to a localized message.
+String authErrorMessage(AppLocalizations l10n, String? code) {
+  switch (code) {
+    case AuthErrorCodes.passwordsDoNotMatch:
+      return l10n.errorPasswordsDoNotMatch;
+    case AuthErrorCodes.passwordTooShort:
+      return l10n.errorPasswordTooShort;
+    case AuthErrorCodes.failedToSave:
+      return l10n.errorFailedToSave;
+    case AuthErrorCodes.noMasterPassword:
+      return l10n.errorNoMasterPassword;
+    case AuthErrorCodes.incorrectMasterPassword:
+      return l10n.errorIncorrectMasterPassword;
+    case AuthErrorCodes.unlockError:
+      return l10n.errorUnlockFailed;
+    case AuthErrorCodes.currentPasswordIncorrect:
+      return l10n.errorCurrentPasswordIncorrect;
+    case AuthErrorCodes.vaultLocked:
+      return l10n.errorVaultLocked;
+    case AuthErrorCodes.failedToChange:
+      return l10n.errorFailedToChange;
+    default:
+      return code ?? '';
+  }
+}
