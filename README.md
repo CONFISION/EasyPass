@@ -67,6 +67,16 @@ generator, export/import round-trips (encrypted and plain), and the auth
 lifecycle (set / unlock / change master password, auto-lock settings).
 Run with `flutter test`.
 
+## Versioning
+
+This project follows a `major.minor.patch` scheme (see `pubspec.yaml`):
+
+- **Major (`x`)** — advanced only on significant underlying architecture
+  changes (e.g. crypto-layer rewrite, schema migration, security-model change).
+- **Minor (`y`)** — advanced when features are added, removed, or changed.
+- **Patch (`z`)** — used for optimizations: bug fixes, performance tweaks,
+  and UI polish that do not alter behavior.
+
 ## Roadmap
 
 See `Plan.md` (Chinese) for the full roadmap. Cloud sync, password sharing,

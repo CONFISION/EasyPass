@@ -22,11 +22,15 @@ Requires Flutter with Dart SDK `^3.12.2`.
 ```bash
 flutter pub get          # install deps
 dart run build_runner build --delete-conflicting-outputs   # regenerate database.g.dart (drift)
+flutter gen-l10n        # regenerate app_localizations.dart after editing lib/l10n/*.arb
 flutter analyze         # lint (flutter_lints)
 flutter test            # 38 unit tests: crypto, TOTP (RFC 6238 vectors), generator, export/import, auth lifecycle
 flutter run -d windows  # run desktop app
 flutter build windows   # release build
 ```
+
+- **Windows 构建命令固定为 `flutter build windows`** — 每次需要构建 Windows 发布版时都使用这条命令。
+- **版本号约定（`major.minor.patch`，见下方 Versioning）** — 推进版本时同步更新 `pubspec.yaml` 的 `version` 字段与 `settings_screen.dart` 中显示的版本号。
 
 - Regenerating code: after editing `lib/data/database/tables.drift`, you **must**
   rerun build_runner — `AppDatabase` and companions in `database.g.dart` are generated.
@@ -110,14 +114,34 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
 - **Encryption discipline:** passwords/notes/TOTP secrets are always encrypted
   via `CryptoService` before persistence; derive the key from
   `encryptionKeyProvider`; never log or print secrets.
-- **Comments:** mixed Chinese/English comments throughout; UI strings are English.
+- **Comments:** mixed Chinese/English comments throughout.
+- **Localization:** all UI strings live in `lib/l10n/app_en.arb` (source) and
+  `app_zh.arb` (Chinese); reference them via `AppLocalizations.of(context)`.
+  After adding a key to an ARB file, run `flutter gen-l10n`. The UI follows the
+  system locale by default with a manual override in Settings (`localeProvider`
+  in `lib/app.dart`).
 - **Errors:** services return `bool` + set `errorMessage` on state (auth) or throw
   exceptions caught by callers (native messaging returns `error` field).
+- **Auth errors** are error codes (`AuthErrorCodes` in `auth_provider.dart`);
+  map them to localized text with `authErrorMessage(l10n, code)`.
 - **Auth provider** adds `changeMasterPassword()` (verifies the current password,
   re-encrypts all entries with a fresh key) and `setAutoLockMinutes()` (persisted
   via secure storage); `AuthState.autoLockMinutes` drives the settings UI.
 - **Export/import** distinguishes `format: 'encrypted'` backups (restorable) from
   plain JSON; plain imports are re-encrypted with the session key on import.
+
+## Versioning
+
+Semantic versioning `x.y.z`, applied to `pubspec.yaml`'s `version` field and the
+in-app version shown on the Settings screen:
+
+- **`x` (major)** — 大版本号。只在发生重大底层架构更新（例如重写加密层、
+  数据库迁移、安全模型变更）时推进。
+- **`y` (minor)** — 中版本号。有功能变更（新增/移除功能）时推进。
+- **`z` (patch)** — 小版本号。一般用于软件优化：bug 修复、性能优化、
+  UI 打磨等不改变功能的行为调整。
+
+Rule of thumb: 功能变更 → `y`，纯优化/修复 → `z`，架构/安全模型重构 → `x`。
 
 ## Git Workflow
 
