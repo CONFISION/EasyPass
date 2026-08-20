@@ -9,14 +9,25 @@ import '../../core/crypto/totp_service.dart';
 import '../../data/database/database.dart';
 
 /// Handles Native Messaging communication with the browser extension
-/// via stdin/stdout JSON protocol
+/// via stdin/stdout JSON protocol.
+///
+/// The host runs inside the desktop app process (`easypass.exe --native-host`,
+/// see [main.dart]), sharing the same database file and secure storage. The
+/// vault stays locked until the user sends an `unlock` action with the master
+/// password; the derived key is kept in memory only for the host session.
 class NativeMessagingService {
   final AppDatabase _db;
   final CryptoService _cryptoService;
   final TotpService _totpService;
   bool _running = false;
 
+  /// Session AES key derived from the master password on `unlock`.
+  /// Null while the vault is locked; cleared on `lock`/disconnect.
+  Uint8List? _sessionKey;
+
   NativeMessagingService(this._db, this._cryptoService, this._totpService);
+
+  bool get isUnlocked => _sessionKey != null;
 
   /// Start the native messaging host listening on stdin
   Future<void> start() async {
@@ -42,7 +53,7 @@ class NativeMessagingService {
 
         final message = utf8.decode(messageBytes.sublist(0, length));
         final response =
-            await _handleMessage(jsonDecode(message) as Map<String, dynamic>);
+            await handleRequest(jsonDecode(message) as Map<String, dynamic>);
 
         _sendResponse(response);
       } catch (e) {
@@ -54,6 +65,7 @@ class NativeMessagingService {
 
   void stop() {
     _running = false;
+    _sessionKey = null;
   }
 
   /// Send a JSON response to the browser extension
@@ -72,9 +84,9 @@ class NativeMessagingService {
     stdout.add(bytes);
   }
 
-  /// Handle incoming messages from the browser extension
-  Future<Map<String, dynamic>> _handleMessage(
-      Map<String, dynamic> message) async {
+  /// Handle a single incoming message from the browser extension.
+  /// Public so the protocol can be unit-tested without a real stdin/stdout.
+  Future<Map<String, dynamic>> handleRequest(Map<String, dynamic> message) async {
     final requestId = message['requestId'] as String?;
     final action = message['action'] as String?;
     final baseResponse = <String, dynamic>{'requestId': requestId};
@@ -100,6 +112,10 @@ class NativeMessagingService {
           return baseResponse
             ..['data'] = await _unlock(message['password'] as String? ?? '');
 
+        case 'lock':
+          _sessionKey = null;
+          return baseResponse..['data'] = {'success': true};
+
         case 'generatePassword':
           return baseResponse
             ..['data'] =
@@ -120,6 +136,7 @@ class NativeMessagingService {
   // ─── Action Handlers ────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> _getCredentials(String? url) async {
+    _requireUnlocked();
     if (url == null || url.isEmpty) {
       return await _getAllCredentials();
     }
@@ -129,11 +146,13 @@ class NativeMessagingService {
   }
 
   Future<List<Map<String, dynamic>>> _getAllCredentials() async {
+    _requireUnlocked();
     final entries = await _db.getAllEntries();
     return entries.map((e) => _entryToJson(e)).toList();
   }
 
   Future<List<Map<String, dynamic>>> _searchCredentials(String query) async {
+    _requireUnlocked();
     if (query.isEmpty) return await _getAllCredentials();
     final entries = await _db.searchEntries(query);
     return entries.map((e) => _entryToJson(e)).toList();
@@ -143,7 +162,7 @@ class NativeMessagingService {
     final count = await _db.getEntryCount();
     return {
       'connected': true,
-      'locked': false,
+      'locked': !isUnlocked,
       'entryCount': count,
     };
   }
@@ -159,6 +178,9 @@ class NativeMessagingService {
     final computedHash =
         _cryptoService.hashMasterPassword(password, storedSalt);
     if (computedHash == storedHash) {
+      // Derive and keep the session key so credential fields can be
+      // decrypted. The key lives in memory only for this host session.
+      _sessionKey = _cryptoService.deriveKey(password, storedSalt);
       return {'success': true};
     }
     throw Exception('Incorrect master password');
@@ -182,24 +204,25 @@ class NativeMessagingService {
     if (charSets.isEmpty) return {'password': ''};
 
     final allChars = charSets.join();
-    final password = StringBuffer();
+    final buffer = StringBuffer();
     for (final set in charSets) {
-      password.write(set[random.nextInt(set.length)]);
+      buffer.write(set[random.nextInt(set.length)]);
     }
-    while (password.length < length) {
-      password.write(allChars[random.nextInt(allChars.length)]);
+    while (buffer.length < length) {
+      buffer.write(allChars[random.nextInt(allChars.length)]);
     }
-    final shuffled = password.toString().split('')..shuffle(random);
+    final chars = buffer.toString().split('')..shuffle(random);
 
-    return {'password': shuffled.join()};
+    return {'password': chars.join()};
   }
 
   Future<Map<String, dynamic>> _getTotp(String entryId) async {
+    _requireUnlocked();
     final entry = await _db.getEntryById(entryId);
     if (entry == null || (entry.totpSecretEncrypted ?? '').isEmpty) {
       throw Exception('No TOTP secret configured for this entry');
     }
-    final secret = entry.totpSecretEncrypted!;
+    final secret = _decrypt(entry.totpSecretEncrypted);
     final totp = _totpService.generateTotp(secret);
     final remaining = _totpService.getRemainingSeconds();
     return {'totp': totp, 'remaining': remaining};
@@ -207,14 +230,28 @@ class NativeMessagingService {
 
   // ─── Helpers ────────────────────────────────────────────
 
+  void _requireUnlocked() {
+    if (_sessionKey == null) {
+      throw Exception('Vault is locked');
+    }
+  }
+
+  /// Decrypt a stored field with the session key. Empty/null stays empty.
+  String _decrypt(String? encrypted) {
+    if (encrypted == null || encrypted.isEmpty) return '';
+    return _cryptoService.decryptData(encrypted, _sessionKey!);
+  }
+
   Map<String, dynamic> _entryToJson(PasswordEntry entry) {
+    _requireUnlocked();
     return {
       'id': entry.id,
       'name': entry.name,
       'url': entry.url,
       'username': entry.username,
-      'password': entry.passwordEncrypted,
-      'notes': entry.notesEncrypted,
+      'password': _decrypt(entry.passwordEncrypted),
+      'notes': _decrypt(entry.notesEncrypted),
+      'totp': _decrypt(entry.totpSecretEncrypted),
       'isFavorite': entry.isFavorite,
     };
   }
