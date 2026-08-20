@@ -6,6 +6,12 @@ class AppConstants {
   static const String masterPasswordHashKey = 'easypass_master_pw_hash';
   static const String firstRunKey = 'easypass_first_run';
   static const String autoLockStorageKey = 'easypass_auto_lock_minutes';
+  static const String fontFamilyStorageKey = 'easypass_font_family';
+
+  // Font options
+  static const String defaultFontFamily = 'Maple Mono NF CN';
+  static const String systemFontOption = 'system';
+  static const String monospaceFontOption = 'monospace';
 
   // PBKDF2 settings
   static const int pbkdf2Iterations = 100000;

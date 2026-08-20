@@ -409,6 +409,45 @@ class AppLocalizationsZh extends AppLocalizations {
   String get languageEnglish => 'English';
 
   @override
+  String get appearanceSection => '外观';
+
+  @override
+  String get theme => '主题';
+
+  @override
+  String get themeComingSoon => '主题自定义将在未来更新中提供';
+
+  @override
+  String get font => '字体';
+
+  @override
+  String get fontDefault => '默认（Maple Mono NF CN）';
+
+  @override
+  String get fontSystem => '系统默认';
+
+  @override
+  String get fontMonospace => '等宽';
+
+  @override
+  String get fontAssetSection => '软件字体';
+
+  @override
+  String get fontSystemSection => '系统字体';
+
+  @override
+  String get fontSearchHint => '搜索字体...';
+
+  @override
+  String get fontNoResults => '未找到字体';
+
+  @override
+  String get fontApplied => '字体已更新';
+
+  @override
+  String get ok => '确定';
+
+  @override
   String get exportDialogTitle => '导出保险库';
 
   @override

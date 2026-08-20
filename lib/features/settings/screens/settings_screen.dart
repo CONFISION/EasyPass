@@ -5,10 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app.dart';
+import '../../../core/constants/app_constants.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../../data/repositories/vault_repository.dart';
+import '../../../data/services/font_discovery_service.dart';
 import '../../../data/services/export_import_provider.dart';
+import '../providers/font_settings_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -18,6 +21,7 @@ class SettingsScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
     final autoLockMinutes = ref.watch(authProvider).autoLockMinutes;
+    final fontSetting = ref.watch(fontFamilyProvider);
 
     return Scaffold(
       appBar: AppBar(title: Text(l10n.settingsTitle)),
@@ -73,6 +77,26 @@ class SettingsScreen extends ConsumerWidget {
                   onTap: () => _importVault(context, ref),
                 ),
                 const Divider(),
+                _buildSectionHeader(context, l10n.appearanceSection),
+                ListTile(
+                  leading: const Icon(Icons.palette_outlined),
+                  title: Text(l10n.theme),
+                  subtitle: Text(l10n.themeComingSoon),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(l10n.themeComingSoon)),
+                    );
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.font_download_outlined),
+                  title: Text(l10n.font),
+                  subtitle: Text(_fontSubtitle(l10n, fontSetting)),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => _pickFont(context, ref),
+                ),
+                const Divider(),
                 _buildSectionHeader(context, l10n.languageSection),
                 ListTile(
                   leading: const Icon(Icons.language),
@@ -96,7 +120,7 @@ class SettingsScreen extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.info),
                   title: Text(l10n.version),
-                  subtitle: Text('1.0.0'),
+                  subtitle: Text('1.1.0'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.code),
@@ -127,6 +151,61 @@ class SettingsScreen extends ConsumerWidget {
   }
 
   // ─── Language ──────────────────────────────────────────
+
+  // ─── Appearance ─────────────────────────────────────────
+
+  String _fontSubtitle(AppLocalizations l10n, String? setting) {
+    if (setting == null || setting.isEmpty) return l10n.fontDefault;
+    if (setting == AppConstants.systemFontOption) return l10n.fontSystem;
+    if (setting == AppConstants.monospaceFontOption) return l10n.fontMonospace;
+    return setting;
+  }
+
+  void _pickFont(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
+    final current = ref.read(fontFamilyProvider);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.font),
+        content: SizedBox(
+          width: 420,
+          height: 420,
+          child: Consumer(
+            builder: (context, ref, _) {
+              final fontsAsync = ref.watch(availableFontsProvider);
+              return fontsAsync.when(
+                loading: () =>
+                    const Center(child: CircularProgressIndicator()),
+                error: (_, _) => Center(child: Text(l10n.searchFailed)),
+                data: (fonts) => _FontPickerList(
+                  fonts: fonts,
+                  current: current,
+                  onSelect: (value) async {
+                    Navigator.pop(ctx);
+                    await ref
+                        .read(fontFamilyProvider.notifier)
+                        .setFontFamily(value);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(l10n.fontApplied)),
+                      );
+                    }
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(l10n.cancel)),
+        ],
+      ),
+    );
+  }
 
   String _languageSubtitle(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context);
@@ -489,6 +568,107 @@ class SettingsScreen extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── Font Picker List ────────────────────────────────────
+
+class _FontPickerList extends StatefulWidget {
+  final FontList fonts;
+  final String? current;
+  final ValueChanged<String?> onSelect;
+
+  const _FontPickerList({
+    required this.fonts,
+    required this.current,
+    required this.onSelect,
+  });
+
+  @override
+  State<_FontPickerList> createState() => _FontPickerListState();
+}
+
+class _FontPickerListState extends State<_FontPickerList> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final q = _query.trim().toLowerCase();
+
+    final bundled = q.isEmpty
+        ? widget.fonts.bundled
+        : widget.fonts.bundled
+            .where((f) => f.toLowerCase().contains(q))
+            .toList();
+    final system = q.isEmpty
+        ? widget.fonts.system
+        : widget.fonts.system
+            .where((f) => f.toLowerCase().contains(q))
+            .toList();
+
+    final hasResults = bundled.isNotEmpty || system.isNotEmpty;
+
+    Widget tile(String title, String? value) {
+      final selected = widget.current == value;
+      return ListTile(
+        dense: true,
+        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        trailing: selected
+            ? const Icon(Icons.check, color: Colors.green)
+            : null,
+        onTap: () => widget.onSelect(value),
+      );
+    }
+
+    Widget groupHeader(String title) {
+      final theme = Theme.of(context);
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Text(
+          title,
+          style: theme.textTheme.labelSmall?.copyWith(
+            fontWeight: FontWeight.bold,
+            color: theme.colorScheme.primary,
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        TextField(
+          decoration: InputDecoration(
+            hintText: l10n.fontSearchHint,
+            prefixIcon: const Icon(Icons.search),
+            border: const OutlineInputBorder(),
+            isDense: true,
+          ),
+          onChanged: (v) => setState(() => _query = v),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: hasResults
+              ? ListView(
+                  children: [
+                    if (q.isEmpty) ...[
+                      tile(l10n.fontDefault, null),
+                      tile(l10n.fontSystem, AppConstants.systemFontOption),
+                    ],
+                    if (bundled.isNotEmpty) ...[
+                      groupHeader(l10n.fontAssetSection),
+                      ...bundled.map((f) => tile(f, f)),
+                    ],
+                    if (system.isNotEmpty) ...[
+                      groupHeader(l10n.fontSystemSection),
+                      ...system.map((f) => tile(f, f)),
+                    ],
+                  ],
+                )
+              : Center(child: Text(l10n.fontNoResults)),
+        ),
+      ],
     );
   }
 }

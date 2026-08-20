@@ -61,6 +61,11 @@ class VaultScreen extends ConsumerWidget {
             },
             tooltip: l10n.lockTooltip,
           ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => context.push('/settings'),
+            tooltip: l10n.settings,
+          ),
         ],
       ),
       drawer: _buildDrawer(context, ref),

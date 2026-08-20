@@ -416,6 +416,46 @@ class AppLocalizationsEn extends AppLocalizations {
   String get languageEnglish => 'English';
 
   @override
+  String get appearanceSection => 'Appearance';
+
+  @override
+  String get theme => 'Theme';
+
+  @override
+  String get themeComingSoon =>
+      'Theme customization is coming in a future update';
+
+  @override
+  String get font => 'Font';
+
+  @override
+  String get fontDefault => 'Default (Maple Mono NF CN)';
+
+  @override
+  String get fontSystem => 'System Default';
+
+  @override
+  String get fontMonospace => 'Monospace';
+
+  @override
+  String get fontAssetSection => 'Bundled Fonts';
+
+  @override
+  String get fontSystemSection => 'System Fonts';
+
+  @override
+  String get fontSearchHint => 'Search fonts...';
+
+  @override
+  String get fontNoResults => 'No fonts found';
+
+  @override
+  String get fontApplied => 'Font updated';
+
+  @override
+  String get ok => 'OK';
+
+  @override
   String get exportDialogTitle => 'Export Vault';
 
   @override

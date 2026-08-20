@@ -866,6 +866,84 @@ abstract class AppLocalizations {
   /// **'English'**
   String get languageEnglish;
 
+  /// No description provided for @appearanceSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance'**
+  String get appearanceSection;
+
+  /// No description provided for @theme.
+  ///
+  /// In en, this message translates to:
+  /// **'Theme'**
+  String get theme;
+
+  /// No description provided for @themeComingSoon.
+  ///
+  /// In en, this message translates to:
+  /// **'Theme customization is coming in a future update'**
+  String get themeComingSoon;
+
+  /// No description provided for @font.
+  ///
+  /// In en, this message translates to:
+  /// **'Font'**
+  String get font;
+
+  /// No description provided for @fontDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Default (Maple Mono NF CN)'**
+  String get fontDefault;
+
+  /// No description provided for @fontSystem.
+  ///
+  /// In en, this message translates to:
+  /// **'System Default'**
+  String get fontSystem;
+
+  /// No description provided for @fontMonospace.
+  ///
+  /// In en, this message translates to:
+  /// **'Monospace'**
+  String get fontMonospace;
+
+  /// No description provided for @fontAssetSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Bundled Fonts'**
+  String get fontAssetSection;
+
+  /// No description provided for @fontSystemSection.
+  ///
+  /// In en, this message translates to:
+  /// **'System Fonts'**
+  String get fontSystemSection;
+
+  /// No description provided for @fontSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search fonts...'**
+  String get fontSearchHint;
+
+  /// No description provided for @fontNoResults.
+  ///
+  /// In en, this message translates to:
+  /// **'No fonts found'**
+  String get fontNoResults;
+
+  /// No description provided for @fontApplied.
+  ///
+  /// In en, this message translates to:
+  /// **'Font updated'**
+  String get fontApplied;
+
+  /// No description provided for @ok.
+  ///
+  /// In en, this message translates to:
+  /// **'OK'**
+  String get ok;
+
   /// No description provided for @exportDialogTitle.
   ///
   /// In en, this message translates to:

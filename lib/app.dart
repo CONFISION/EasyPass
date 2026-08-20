@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'core/constants/app_constants.dart';
 import 'features/auth/screens/lock_screen.dart';
 import 'features/auth/screens/set_master_password_screen.dart';
 import 'features/auth/providers/auth_provider.dart';
-import 'features/vault/screens/vault_screen.dart';
+import 'features/generator/screens/generator_screen.dart';
+import 'features/settings/providers/font_settings_provider.dart';
+import 'features/settings/screens/settings_screen.dart';
 import 'features/vault/screens/add_edit_entry_screen.dart';
 import 'features/vault/screens/entry_detail_screen.dart';
-import 'features/generator/screens/generator_screen.dart';
-import 'features/settings/screens/settings_screen.dart';
+import 'features/vault/screens/vault_screen.dart';
 import 'l10n/app_localizations.dart';
 
 /// Selected UI locale; `null` follows the system language.
@@ -94,6 +96,7 @@ class EasyPassApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(_routerProvider);
     final locale = ref.watch(localeProvider);
+    final fontFamily = _resolveFontFamily(ref.watch(fontFamilyProvider));
 
     return MaterialApp.router(
       title: 'EasyPass',
@@ -104,7 +107,7 @@ class EasyPassApp extends ConsumerWidget {
           brightness: Brightness.light,
         ),
         useMaterial3: true,
-        fontFamily: 'Roboto',
+        fontFamily: fontFamily,
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -112,7 +115,7 @@ class EasyPassApp extends ConsumerWidget {
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
-        fontFamily: 'Roboto',
+        fontFamily: fontFamily,
       ),
       themeMode: ThemeMode.system,
       locale: locale,
@@ -120,5 +123,20 @@ class EasyPassApp extends ConsumerWidget {
       supportedLocales: AppLocalizations.supportedLocales,
       routerConfig: router,
     );
+  }
+
+  /// Resolve the user's font setting into a `fontFamily` value:
+  /// `null` falls back to the bundled [AppConstants.defaultFontFamily],
+  /// the special `system` option maps to `null` (platform default), and
+  /// any other value (including `monospace` or a custom family name) is
+  /// passed through to the text engine.
+  static String? _resolveFontFamily(String? setting) {
+    if (setting == null || setting.isEmpty) {
+      return AppConstants.defaultFontFamily;
+    }
+    if (setting == AppConstants.systemFontOption) {
+      return null;
+    }
+    return setting;
   }
 }
