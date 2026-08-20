@@ -43,11 +43,21 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
     if (widget.isEditing) {
       _loadEntry();
     } else {
-      final generatedPassword =
-          ref.read(generatorProvider).generatedPassword;
-      if (generatedPassword.isNotEmpty) {
-        _passwordController.text = generatedPassword;
-      }
+      // The generator provider is a session-wide singleton that only
+      // generates a password once at construction. Regenerate after the first
+      // frame so every new entry gets a fresh suggested password instead of
+      // the same one for the whole session (it used to stay fixed until
+      // restart). Deferred because mutating a provider during initState
+      // (widget tree build) is not allowed by Riverpod.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(generatorProvider.notifier).generate();
+        final generatedPassword =
+            ref.read(generatorProvider).generatedPassword;
+        if (generatedPassword.isNotEmpty) {
+          _passwordController.text = generatedPassword;
+        }
+      });
     }
   }
 
