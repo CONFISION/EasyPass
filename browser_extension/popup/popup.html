@@ -151,23 +151,23 @@
 <body>
   <div class="header">
     <h1>🔐 EasyPass</h1>
-    <span id="statusDot" class="status disconnected" title="Disconnected"></span>
+    <span id="statusDot" class="status disconnected" data-i18n-title="disconnected"></span>
   </div>
   
   <div class="search-box">
-    <input type="text" id="searchInput" placeholder="Search passwords..." />
+    <input type="text" id="searchInput" data-i18n-placeholder="searchPlaceholder" />
   </div>
   
   <div id="content">
     <div class="loading">
       <div class="spinner"></div>
-      <div>Loading...</div>
+      <div data-i18n="loading"></div>
     </div>
   </div>
   
   <div class="actions">
-    <button class="btn btn-secondary" id="btnGenerator">🔑 Generator</button>
-    <button class="btn btn-primary" id="btnOpenApp">📱 Open App</button>
+    <button class="btn btn-secondary" id="btnGenerator">🔑 <span data-i18n="generator"></span></button>
+    <button class="btn btn-primary" id="btnOpenApp">📱 <span data-i18n="openApp"></span></button>
   </div>
   
   <script src="popup.js"></script>

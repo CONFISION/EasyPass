@@ -1,0 +1,127 @@
+{
+  "extName": {
+    "message": "EasyPass",
+    "description": "扩展显示名称（品牌名）"
+  },
+  "extDescription": {
+    "message": "EasyPass - 安全密码管理器浏览器扩展",
+    "description": "浏览器中显示的扩展描述"
+  },
+  "searchPlaceholder": {
+    "message": "搜索密码...",
+    "description": "密码搜索输入框的占位文本"
+  },
+  "loading": {
+    "message": "加载中...",
+    "description": "条目列表加载时显示的文本"
+  },
+  "generator": {
+    "message": "密码生成器",
+    "description": "密码生成器按钮的标签"
+  },
+  "openApp": {
+    "message": "打开应用",
+    "description": "打开桌面应用按钮的标签"
+  },
+  "connected": {
+    "message": "已连接",
+    "description": "本机宿主已连接时的状态提示"
+  },
+  "disconnected": {
+    "message": "未连接",
+    "description": "本机宿主未连接时的状态提示"
+  },
+  "statusDisconnected": {
+    "message": "未连接 - 请打开 EasyPass 桌面应用",
+    "description": "提示用户打开桌面应用的状态提示"
+  },
+  "vaultLocked": {
+    "message": "保险库已锁定",
+    "description": "保险库锁定时的状态提示/标题"
+  },
+  "cannotConnect": {
+    "message": "无法连接到 EasyPass",
+    "description": "扩展无法连接到桌面应用时显示的错误"
+  },
+  "noPasswordsFound": {
+    "message": "未找到密码",
+    "description": "没有已保存密码时显示的消息"
+  },
+  "addPasswordsHint": {
+    "message": "请在 EasyPass 桌面应用中添加密码",
+    "description": "空条目列表下方显示的提示"
+  },
+  "masterPassword": {
+    "message": "主密码",
+    "description": "主密码输入框的占位文本"
+  },
+  "unlock": {
+    "message": "解锁",
+    "description": "解锁按钮的标签"
+  },
+  "failedToUnlock": {
+    "message": "解锁失败",
+    "description": "解锁失败时提示框的前缀"
+  },
+  "searchFailed": {
+    "message": "搜索失败",
+    "description": "搜索失败时显示的错误"
+  },
+  "fillWithEasyPass": {
+    "message": "使用 EasyPass 填充",
+    "description": "密码输入框内 EasyPass 图标的悬停提示"
+  },
+  "unlockHint": {
+    "message": "解锁 EasyPass 桌面应用以访问密码",
+    "description": "锁定状态显示的提示"
+  },
+  "openDesktopApp": {
+    "message": "请打开 EasyPass 桌面应用。",
+    "description": "用户请求打开桌面应用时显示的提示"
+  },
+  "nativeHostNotConnected": {
+    "message": "未连接到 EasyPass 桌面应用",
+    "description": "本机宿主端口未打开时的后台错误"
+  },
+  "nativeHostDisconnected": {
+    "message": "本机宿主已断开连接",
+    "description": "本机宿主断开时的后台错误"
+  },
+  "requestTimedOut": {
+    "message": "请求超时",
+    "description": "本机宿主请求超时时的后台错误"
+  },
+  "unknownAction": {
+    "message": "未知操作：$action$",
+    "description": "收到未知消息操作时的后台错误",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      }
+    }
+  },
+  "logNativeHostDisconnected": {
+    "message": "EasyPass：本机宿主已断开连接",
+    "description": "控制台日志"
+  },
+  "logConnectedToNativeHost": {
+    "message": "EasyPass：已连接到本机宿主",
+    "description": "控制台日志"
+  },
+  "logFailedToConnect": {
+    "message": "EasyPass：连接到本机宿主失败：",
+    "description": "控制台错误前缀"
+  },
+  "logBackgroundInitialized": {
+    "message": "EasyPass 后台服务工作进程已初始化",
+    "description": "控制台日志"
+  },
+  "logContentScriptLoaded": {
+    "message": "EasyPass 内容脚本已加载",
+    "description": "控制台日志"
+  },
+  "logFailedToFill": {
+    "message": "填充凭据失败：",
+    "description": "控制台错误前缀"
+  }
+}

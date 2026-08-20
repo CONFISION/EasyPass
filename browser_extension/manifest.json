@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "EasyPass",
-  "version": "1.0.0",
-  "description": "EasyPass - Secure Password Manager Browser Extension",
+  "name": "__MSG_extName__",
+  "version": "1.2.0",
+  "default_locale": "zh_CN",
+  "description": "__MSG_extDescription__",
   "permissions": [
     "activeTab",
     "scripting",

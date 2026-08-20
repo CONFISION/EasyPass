@@ -16,11 +16,11 @@ function connectToNativeHost() {
     });
     
     nativePort.onDisconnect.addListener(() => {
-      console.log('EasyPass: Native host disconnected');
+      console.log(chrome.i18n.getMessage('logNativeHostDisconnected'));
       nativePort = null;
       // Reject all pending requests
       for (const [id, reject] of pendingRequests) {
-        reject(new Error('Native host disconnected'));
+        reject(new Error(chrome.i18n.getMessage('nativeHostDisconnected')));
       }
       pendingRequests.clear();
       
@@ -28,9 +28,9 @@ function connectToNativeHost() {
       setTimeout(connectToNativeHost, 5000);
     });
     
-    console.log('EasyPass: Connected to native host');
+    console.log(chrome.i18n.getMessage('logConnectedToNativeHost'));
   } catch (e) {
-    console.error('EasyPass: Failed to connect to native host:', e);
+    console.error(chrome.i18n.getMessage('logFailedToConnect'), e);
     setTimeout(connectToNativeHost, 5000);
   }
 }
@@ -55,7 +55,7 @@ function handleNativeMessage(message) {
 function sendToNativeHost(action, data = {}) {
   return new Promise((resolve, reject) => {
     if (!nativePort) {
-      reject(new Error('Not connected to EasyPass desktop app'));
+      reject(new Error(chrome.i18n.getMessage('nativeHostNotConnected')));
       return;
     }
     
@@ -72,7 +72,7 @@ function sendToNativeHost(action, data = {}) {
     setTimeout(() => {
       if (pendingRequests.has(requestId)) {
         pendingRequests.delete(requestId);
-        reject(new Error('Request timed out'));
+        reject(new Error(chrome.i18n.getMessage('requestTimedOut')));
       }
     }, 30000);
   });
@@ -112,7 +112,7 @@ async function handleExtensionMessage(request) {
       return await sendToNativeHost('generatePassword', request.options || {});
     
     default:
-      throw new Error(`Unknown action: ${request.action}`);
+      throw new Error(chrome.i18n.getMessage('unknownAction', [request.action]));
   }
 }
 
@@ -121,4 +121,4 @@ async function handleExtensionMessage(request) {
 // Connect to native host on startup
 connectToNativeHost();
 
-console.log('EasyPass background service worker initialized');
+console.log(chrome.i18n.getMessage('logBackgroundInitialized'));

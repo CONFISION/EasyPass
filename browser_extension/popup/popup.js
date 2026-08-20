@@ -4,6 +4,27 @@ const statusDot = document.getElementById('statusDot');
 const searchInput = document.getElementById('searchInput');
 const contentDiv = document.getElementById('content');
 
+// ─── i18n (Internationalization) ──────────────────────────
+
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    if (key) el.textContent = chrome.i18n.getMessage(key);
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    const key = el.dataset.i18nPlaceholder;
+    if (key) el.placeholder = chrome.i18n.getMessage(key);
+  });
+  document.querySelectorAll('[data-i18n-title]').forEach(el => {
+    const key = el.dataset.i18nTitle;
+    if (key) el.title = chrome.i18n.getMessage(key);
+  });
+  // Adapt the document language to the browser UI language
+  document.documentElement.lang = chrome.i18n.getUILanguage();
+}
+
+applyI18n();
+
 // ─── Initialize ───────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -30,15 +51,15 @@ async function checkStatus() {
     const status = await chrome.runtime.sendMessage({ action: 'getStatus' });
     if (status && status.locked) {
       statusDot.className = 'status locked';
-      statusDot.title = 'Vault is locked';
+      statusDot.title = chrome.i18n.getMessage('vaultLocked');
       showLockedState();
     } else {
       statusDot.className = 'status connected';
-      statusDot.title = 'Connected';
+      statusDot.title = chrome.i18n.getMessage('connected');
     }
   } catch (e) {
     statusDot.className = 'status disconnected';
-    statusDot.title = 'Disconnected - Open EasyPass desktop app';
+    statusDot.title = chrome.i18n.getMessage('statusDisconnected');
   }
 }
 
@@ -52,7 +73,7 @@ async function loadEntries() {
     contentDiv.innerHTML = `
       <div class="empty-state">
         <div class="icon">⚠️</div>
-        <div>Cannot connect to EasyPass</div>
+        <div>${chrome.i18n.getMessage('cannotConnect')}</div>
         <div style="margin-top: 8px; font-size: 12px;">${e.message}</div>
       </div>
     `;
@@ -69,7 +90,7 @@ async function searchEntries(query) {
     });
     renderEntries(entries);
   } catch (e) {
-    contentDiv.innerHTML = '<div class="empty-state"><div>Search failed</div></div>';
+    contentDiv.innerHTML = `<div class="empty-state"><div>${chrome.i18n.getMessage('searchFailed')}</div></div>`;
   }
 }
 
@@ -80,8 +101,8 @@ function renderEntries(entries) {
     contentDiv.innerHTML = `
       <div class="empty-state">
         <div class="icon">📭</div>
-        <div>No passwords found</div>
-        <div style="margin-top: 8px; font-size: 12px;">Add passwords in the EasyPass desktop app</div>
+        <div>${chrome.i18n.getMessage('noPasswordsFound')}</div>
+        <div style="margin-top: 8px; font-size: 12px;">${chrome.i18n.getMessage('addPasswordsHint')}</div>
       </div>
     `;
     return;
@@ -139,7 +160,7 @@ async function fillCredentialsOnCurrentTab(entryId) {
       window.close(); // Close popup after filling
     }
   } catch (e) {
-    console.error('Failed to fill credentials:', e);
+    console.error(chrome.i18n.getMessage('logFailedToFill'), e);
   }
 }
 
@@ -149,17 +170,17 @@ function showLockedState() {
   contentDiv.innerHTML = `
     <div style="padding: 32px 16px; text-align: center;">
       <div style="font-size: 48px; margin-bottom: 12px;">🔒</div>
-      <div style="font-weight: 600; margin-bottom: 8px;">Vault is Locked</div>
+      <div style="font-weight: 600; margin-bottom: 8px;">${chrome.i18n.getMessage('vaultLocked')}</div>
       <div style="font-size: 12px; color: #6c7086; margin-bottom: 16px;">
-        Unlock EasyPass desktop app to access passwords
+        ${chrome.i18n.getMessage('unlockHint')}
       </div>
       <input type="password" id="masterPassword" 
-             placeholder="Master Password" 
+             placeholder="${chrome.i18n.getMessage('masterPassword')}" 
              style="width: 100%; padding: 8px 12px; border: 1px solid #313244; 
                     border-radius: 8px; background: #313244; color: #cdd6f4; 
                     font-size: 14px; outline: none; margin-bottom: 8px;" />
       <button id="btnUnlock" class="btn btn-primary" style="width: 100%;">
-        Unlock
+        ${chrome.i18n.getMessage('unlock')}
       </button>
     </div>
   `;
@@ -170,7 +191,7 @@ function showLockedState() {
       await chrome.runtime.sendMessage({ action: 'unlock', password });
       window.close();
     } catch (e) {
-      alert('Failed to unlock: ' + e.message);
+      alert(chrome.i18n.getMessage('failedToUnlock') + ': ' + e.message);
     }
   });
 }
@@ -184,7 +205,7 @@ function openGenerator() {
 function openDesktopApp() {
   chrome.runtime.sendMessage({ action: 'getStatus' }).catch(() => {});
   // Can't directly open the app from the extension
-  alert('Please open the EasyPass desktop application.');
+  alert(chrome.i18n.getMessage('openDesktopApp'));
 }
 
 // ─── Helpers ──────────────────────────────────────────────

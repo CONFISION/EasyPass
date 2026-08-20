@@ -152,7 +152,7 @@ function addEasyPassIconToFields() {
           z-index: 9999;
           opacity: 0.7;
         `;
-        icon.title = 'Fill with EasyPass';
+        icon.title = chrome.i18n.getMessage('fillWithEasyPass');
         
         icon.addEventListener('click', (e) => {
           e.preventDefault();
@@ -218,4 +218,4 @@ observer.observe(document.body, {
   subtree: true
 });
 
-console.log('EasyPass content script loaded');
+console.log(chrome.i18n.getMessage('logContentScriptLoaded'));

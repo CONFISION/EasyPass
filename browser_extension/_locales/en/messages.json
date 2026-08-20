@@ -1,0 +1,127 @@
+{
+  "extName": {
+    "message": "EasyPass",
+    "description": "Extension display name (brand)"
+  },
+  "extDescription": {
+    "message": "EasyPass - Secure Password Manager Browser Extension",
+    "description": "Extension description shown in the browser"
+  },
+  "searchPlaceholder": {
+    "message": "Search passwords...",
+    "description": "Placeholder text for the password search input"
+  },
+  "loading": {
+    "message": "Loading...",
+    "description": "Text shown while the entry list is loading"
+  },
+  "generator": {
+    "message": "Generator",
+    "description": "Label of the password generator button"
+  },
+  "openApp": {
+    "message": "Open App",
+    "description": "Label of the open desktop app button"
+  },
+  "connected": {
+    "message": "Connected",
+    "description": "Status tooltip when the native host is connected"
+  },
+  "disconnected": {
+    "message": "Disconnected",
+    "description": "Status tooltip when the native host is disconnected"
+  },
+  "statusDisconnected": {
+    "message": "Disconnected - Open EasyPass desktop app",
+    "description": "Status tooltip telling the user to open the desktop app"
+  },
+  "vaultLocked": {
+    "message": "Vault is locked",
+    "description": "Status tooltip / heading when the vault is locked"
+  },
+  "cannotConnect": {
+    "message": "Cannot connect to EasyPass",
+    "description": "Error shown when the extension cannot reach the desktop app"
+  },
+  "noPasswordsFound": {
+    "message": "No passwords found",
+    "description": "Message shown when there are no saved passwords"
+  },
+  "addPasswordsHint": {
+    "message": "Add passwords in the EasyPass desktop app",
+    "description": "Hint shown under the empty entry list"
+  },
+  "masterPassword": {
+    "message": "Master Password",
+    "description": "Placeholder of the master password input"
+  },
+  "unlock": {
+    "message": "Unlock",
+    "description": "Label of the unlock button"
+  },
+  "failedToUnlock": {
+    "message": "Failed to unlock",
+    "description": "Alert prefix when unlocking fails"
+  },
+  "searchFailed": {
+    "message": "Search failed",
+    "description": "Error shown when the search fails"
+  },
+  "fillWithEasyPass": {
+    "message": "Fill with EasyPass",
+    "description": "Tooltip of the EasyPass icon shown inside password fields"
+  },
+  "unlockHint": {
+    "message": "Unlock EasyPass desktop app to access passwords",
+    "description": "Hint shown in the locked state"
+  },
+  "openDesktopApp": {
+    "message": "Please open the EasyPass desktop application.",
+    "description": "Alert shown when the user asks to open the desktop app"
+  },
+  "nativeHostNotConnected": {
+    "message": "Not connected to EasyPass desktop app",
+    "description": "Background error when the native host port is not open"
+  },
+  "nativeHostDisconnected": {
+    "message": "Native host disconnected",
+    "description": "Background error when the native host disconnects"
+  },
+  "requestTimedOut": {
+    "message": "Request timed out",
+    "description": "Background error when a native host request times out"
+  },
+  "unknownAction": {
+    "message": "Unknown action: $action$",
+    "description": "Background error for an unknown message action",
+    "placeholders": {
+      "action": {
+        "content": "$1"
+      }
+    }
+  },
+  "logNativeHostDisconnected": {
+    "message": "EasyPass: Native host disconnected",
+    "description": "Console log"
+  },
+  "logConnectedToNativeHost": {
+    "message": "EasyPass: Connected to native host",
+    "description": "Console log"
+  },
+  "logFailedToConnect": {
+    "message": "EasyPass: Failed to connect to native host:",
+    "description": "Console error prefix"
+  },
+  "logBackgroundInitialized": {
+    "message": "EasyPass background service worker initialized",
+    "description": "Console log"
+  },
+  "logContentScriptLoaded": {
+    "message": "EasyPass content script loaded",
+    "description": "Console log"
+  },
+  "logFailedToFill": {
+    "message": "Failed to fill credentials:",
+    "description": "Console error prefix"
+  }
+}
