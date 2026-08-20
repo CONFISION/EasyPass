@@ -22,7 +22,6 @@ class VaultScreen extends ConsumerWidget {
     final entriesAsync = showFavorites
         ? ref.watch(vaultFavoritesProvider)
         : ref.watch(filteredVaultEntriesProvider);
-    final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
 
     String title;
@@ -68,74 +67,91 @@ class VaultScreen extends ConsumerWidget {
           ),
         ],
       ),
-      drawer: _buildDrawer(context, ref),
-      body: entriesAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, stack) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.error_outline,
-                  size: 64, color: theme.colorScheme.error),
-              const SizedBox(height: 16),
-              Text(l10n.failedToLoadVault(error.toString())),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () => ref.invalidate(vaultEntriesProvider),
-                child: Text(l10n.retry),
-              ),
-            ],
-          ),
-        ),
-        data: (entries) {
-          if (entries.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.lock_open,
-                    size: 80,
-                    color: theme.colorScheme.onSurfaceVariant.withAlpha(100),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(l10n.emptyVaultTitle,
-                      style: theme.textTheme.headlineSmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant)),
-                  const SizedBox(height: 8),
-                  Text(l10n.emptyVaultHint,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant)),
-                ],
-              ),
-            );
-          }
-
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 800),
-              child: ListView.builder(
-                padding: const EdgeInsets.only(top: 8, bottom: 80),
-                itemCount: entries.length,
-                itemBuilder: (context, index) {
-                  final entry = entries[index];
-                  return EntryCard(
-                    entry: entry,
-                    onTap: () => context.push('/vault/entry/${entry.id}'),
-                    onCopyPassword: () =>
-                        _copyPassword(context, ref, entry),
-                  );
-                },
-              ),
-            ),
-          );
-        },
+      // Persistent sidebar (30%) + entries area (70%).
+      body: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(flex: 3, child: _buildSidebar(context, ref)),
+          const VerticalDivider(width: 1, thickness: 1),
+          Expanded(flex: 7, child: _buildEntriesArea(context, ref, entriesAsync)),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/vault/add'),
         icon: const Icon(Icons.add),
         label: Text(l10n.add),
       ),
+    );
+  }
+
+  Widget _buildEntriesArea(
+    BuildContext context,
+    WidgetRef ref,
+    AsyncValue<List<PasswordEntry>> entriesAsync,
+  ) {
+    final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
+
+    return entriesAsync.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, stack) => Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline,
+                size: 64, color: theme.colorScheme.error),
+            const SizedBox(height: 16),
+            Text(l10n.failedToLoadVault(error.toString())),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: () => ref.invalidate(vaultEntriesProvider),
+              child: Text(l10n.retry),
+            ),
+          ],
+        ),
+      ),
+      data: (entries) {
+        if (entries.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.lock_open,
+                  size: 80,
+                  color: theme.colorScheme.onSurfaceVariant.withAlpha(100),
+                ),
+                const SizedBox(height: 16),
+                Text(l10n.emptyVaultTitle,
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant)),
+                const SizedBox(height: 8),
+                Text(l10n.emptyVaultHint,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant)),
+              ],
+            ),
+          );
+        }
+
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 800),
+            child: ListView.builder(
+              padding: const EdgeInsets.only(top: 8, bottom: 80),
+              itemCount: entries.length,
+              itemBuilder: (context, index) {
+                final entry = entries[index];
+                return EntryCard(
+                  entry: entry,
+                  onTap: () => context.push('/vault/entry/${entry.id}'),
+                  onCopyPassword: () => _copyPassword(context, ref, entry),
+                );
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -160,28 +176,38 @@ class VaultScreen extends ConsumerWidget {
     }
   }
 
-  Widget _buildDrawer(BuildContext context, WidgetRef ref) {
-    final foldersAsync = ref.watch(foldersProvider);
-    final l10n = AppLocalizations.of(context);
+  // ─── Persistent Sidebar ─────────────────────────────────
 
-    return Drawer(
+  Widget _buildSidebar(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final l10n = AppLocalizations.of(context);
+    final foldersAsync = ref.watch(foldersProvider);
+
+    return Material(
+      color: theme.colorScheme.surfaceContainerLow,
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            DrawerHeader(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
+            // Header
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
                 children: [
-                  Icon(Icons.security, size: 48,
-                      color: Theme.of(context).colorScheme.primary),
-                  const SizedBox(height: 12),
-                  const Text('EasyPass',
-                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  Icon(Icons.security,
+                      size: 32, color: theme.colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Text(
+                    l10n.appTitle,
+                    style: theme.textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ],
               ),
             ),
+            const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.inventory_2),
               title: Text(l10n.allItems),
@@ -190,7 +216,6 @@ class VaultScreen extends ConsumerWidget {
               onTap: () {
                 ref.read(selectedFolderIdProvider.notifier).state = null;
                 ref.read(showFavoritesProvider.notifier).state = false;
-                Navigator.pop(context);
               },
             ),
             ListTile(
@@ -200,7 +225,6 @@ class VaultScreen extends ConsumerWidget {
               onTap: () {
                 ref.read(showFavoritesProvider.notifier).state = true;
                 ref.read(selectedFolderIdProvider.notifier).state = null;
-                Navigator.pop(context);
               },
             ),
             const Divider(),
@@ -210,9 +234,7 @@ class VaultScreen extends ConsumerWidget {
                 children: [
                   Text(
                     l10n.foldersSection,
-                    style: Theme.of(context)
-                        .textTheme
-                        .labelSmall
+                    style: theme.textTheme.labelSmall
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                   const Spacer(),
@@ -239,7 +261,6 @@ class VaultScreen extends ConsumerWidget {
                       onTap: () {
                         ref.read(selectedFolderIdProvider.notifier).state = folder.id;
                         ref.read(showFavoritesProvider.notifier).state = false;
-                        Navigator.pop(context);
                       },
                       onLongPress: () =>
                           _confirmDeleteFolder(context, ref, folder),
@@ -249,23 +270,13 @@ class VaultScreen extends ConsumerWidget {
               ),
             ),
             const Divider(),
-            const Divider(),
             ListTile(
               leading: const Icon(Icons.auto_fix_high),
               title: Text(l10n.passwordGenerator),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/generator');
-              },
+              onTap: () => context.push('/generator'),
             ),
-            ListTile(
-              leading: const Icon(Icons.settings),
-              title: Text(l10n.settings),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/settings');
-              },
-            ),
+            // Settings entry lives in the top-right AppBar; it is intentionally
+            // not duplicated here.
           ],
         ),
       ),
