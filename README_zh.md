@@ -1,5 +1,7 @@
 # EasyPass
 
+**English**: [README.md](README.md)
+
 本地优先、对标 Bitwarden 的密码管理器，使用 Flutter 构建，支持 Windows 桌面端。
 所有数据仅保存在你的电脑上，绝不联网上传。
 
@@ -91,6 +93,18 @@ powershell -ExecutionPolicy Bypass -File browser_extension/native_host/install_h
 ```
 
 然后重启浏览器，以开发者模式加载 `browser_extension/`。`uninstall_host.ps1` 可移除注册。请保持 `background.js` 中的动作与 `NativeMessagingService.handleRequest` 的 switch 同步。
+
+## 安装包
+
+`installer/easypass_setup.iss`（Inno Setup 脚本）可生成**单用户安装包**。由于 `easypass.db` 写在可执行文件同目录，应用安装到 `%LOCALAPPDATA%\Programs\EasyPass`（用户可写），而不是 `Program Files` —— 无需管理员权限。安装包会将 VC++ 运行库（`msvcp140.dll`、`vcruntime140.dll`、`vcruntime140_1.dll`）以 app-local 方式一并打包，目标机器无需单独安装 VC++ Redistributable。
+
+```powershell
+# 先执行 flutter build windows，然后：
+& "C:\Program Files\Inno Setup 7\ISCC.exe" installer\easypass_setup.iss
+# 产物：build\installer\EasypassSetup.exe
+```
+
+安装向导提供可选的「注册浏览器扩展主机」步骤（用安装后的 exe 路径运行 `install_host.ps1`），卸载时自动运行 `uninstall_host.ps1` 清理注册。
 
 ## 测试
 

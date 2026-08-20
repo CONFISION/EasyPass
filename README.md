@@ -1,5 +1,7 @@
 # EasyPass
 
+**中文版**: [README_zh.md](README_zh.md)
+
 A local-first, Bitwarden-like password manager for Windows, built with Flutter.
 All data stays on your machine; nothing is ever sent to the network.
 
@@ -132,6 +134,25 @@ powershell -ExecutionPolicy Bypass -File browser_extension/native_host/install_h
 Then restart the browser and load `browser_extension/` (developer mode).
 `uninstall_host.ps1` removes the registration. Keep `background.js` actions
 in sync with `NativeMessagingService.handleRequest`'s switch.
+
+## Installer
+
+An Inno Setup script (`installer/easypass_setup.iss`) builds a per-user
+installer. Because `easypass.db` is written next to the executable, the app
+installs to `%LOCALAPPDATA%\Programs\EasyPass` (user-writable) instead of
+`Program Files` — no admin rights are required. The installer bundles the
+VC++ runtime (`msvcp140.dll`, `vcruntime140.dll`, `vcruntime140_1.dll`)
+app-locally, so target machines do not need the VC++ Redistributable.
+
+```powershell
+# after building (flutter build windows):
+& "C:\Program Files\Inno Setup 7\ISCC.exe" installer\easypass_setup.iss
+# output: build\installer\EasypassSetup.exe
+```
+
+The installer offers an optional "register browser host" step (runs
+`install_host.ps1` with the installed exe path) and runs `uninstall_host.ps1`
+on uninstall.
 
 ## Testing
 
