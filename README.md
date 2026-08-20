@@ -52,20 +52,25 @@ The SQLite database (`easypass.db`) is created next to the executable.
 ## Browser extension
 
 The extension in `browser_extension/` (Chrome MV3) talks to the desktop app
-through Chrome Native Messaging. The Dart host implementation lives in
-`lib/features/browser_bridge/native_messaging_service.dart`, but no build
-target currently produces the `easypass_native_host.exe` that
-`browser_extension/native_host/com.easypass.app.json` references — the host
-build is not wired up yet. The extension code is ready to use once a host
-binary is produced; keep `background.js` actions in sync with
-`NativeMessagingService._handleMessage`'s switch.
+through Chrome Native Messaging. The host runs as the desktop executable
+itself (`easypass.exe --native-host`, see `lib/main.dart`), so no separate
+binary is needed — it shares the same `easypass.db` and secure storage as the
+UI. The Dart protocol implementation lives in
+`lib/features/browser_bridge/native_messaging_service.dart` (lock/unlock,
+credential queries, search, password generation, TOTP).
+
+To register the host with Chrome/Edge, run
+`browser_extension/native_host/install_host.ps1` after building
+(`uninstall_host.ps1` removes it). Keep `background.js` actions in sync with
+`NativeMessagingService.handleRequest`'s switch.
 
 ## Testing
 
 Unit tests cover the crypto round-trip, RFC 6238 TOTP vectors, the password
-generator, export/import round-trips (encrypted and plain), and the auth
-lifecycle (set / unlock / change master password, auto-lock settings).
-Run with `flutter test`.
+generator, export/import round-trips (encrypted and plain), the auth
+lifecycle (set / unlock / change master password, auto-lock settings), the
+native messaging host protocol (lock/unlock, credential decryption, TOTP),
+and the password health report analysis. Run with `flutter test`.
 
 ## Versioning
 
