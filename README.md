@@ -78,7 +78,7 @@ before wiping build output.
 
 | Item | Location |
 |------|----------|
-| `flutter_secure_storage.dat` | `%APPDATA%\kuinehisa.com\easypass\` |
+| `flutter_secure_storage.dat` | `%APPDATA%\easypass.com\easypass\` |
 
 A DPAPI-encrypted file holding the master-password **salt + hash** (for
 verifying unlocks) plus persisted settings (auto-lock minutes, font
@@ -87,14 +87,14 @@ from scratch still asks for the existing master password instead of
 re-running the first-run setup.
 
 > Note: this path derives from the `CompanyName` in
-> `windows/runner/Runner.rc` (`kuinehisa.com`). Changing it relocates the
+> `windows/runner/Runner.rc` (`easypass.com`). Changing it relocates the
 > AppData path above — the old directory is not migrated automatically.
 
 ### Reset / factory wipe
 
 - **In-app**: Settings → *Delete all data* clears the vault and the secure
   storage, returning the app to first-run state.
-- **Manual**: close the app, delete `%APPDATA%\kuinehisa.com\easypass\`
+- **Manual**: close the app, delete `%APPDATA%\easypass.com\easypass\`
   (resets master-password state) and/or the `easypass.db` next to the exe
   (resets entries). Restart to see the first-run setup.
 
