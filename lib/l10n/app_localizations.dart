@@ -1099,6 +1099,120 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'All data deleted'**
   String get allDataDeleted;
+
+  /// No description provided for @healthReport.
+  ///
+  /// In en, this message translates to:
+  /// **'Password Health Report'**
+  String get healthReport;
+
+  /// No description provided for @healthScore.
+  ///
+  /// In en, this message translates to:
+  /// **'Health Score'**
+  String get healthScore;
+
+  /// No description provided for @healthGood.
+  ///
+  /// In en, this message translates to:
+  /// **'Good'**
+  String get healthGood;
+
+  /// No description provided for @healthFair.
+  ///
+  /// In en, this message translates to:
+  /// **'Fair'**
+  String get healthFair;
+
+  /// No description provided for @healthPoor.
+  ///
+  /// In en, this message translates to:
+  /// **'Poor'**
+  String get healthPoor;
+
+  /// No description provided for @healthWeakPasswords.
+  ///
+  /// In en, this message translates to:
+  /// **'Weak Passwords'**
+  String get healthWeakPasswords;
+
+  /// No description provided for @healthReusedPasswords.
+  ///
+  /// In en, this message translates to:
+  /// **'Reused Passwords'**
+  String get healthReusedPasswords;
+
+  /// No description provided for @healthNoTotp.
+  ///
+  /// In en, this message translates to:
+  /// **'Missing 2-Step Login'**
+  String get healthNoTotp;
+
+  /// No description provided for @healthNoUrl.
+  ///
+  /// In en, this message translates to:
+  /// **'Missing URL'**
+  String get healthNoUrl;
+
+  /// No description provided for @healthAllHealthy.
+  ///
+  /// In en, this message translates to:
+  /// **'All clear! No health issues found.'**
+  String get healthAllHealthy;
+
+  /// No description provided for @healthTotalEntries.
+  ///
+  /// In en, this message translates to:
+  /// **'entries'**
+  String get healthTotalEntries;
+
+  /// No description provided for @healthTapToView.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap an entry to view details'**
+  String get healthTapToView;
+
+  /// No description provided for @healthWeakTooShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Password is too short (fewer than 12 characters)'**
+  String get healthWeakTooShort;
+
+  /// No description provided for @healthWeakSingleType.
+  ///
+  /// In en, this message translates to:
+  /// **'Password uses only one character type'**
+  String get healthWeakSingleType;
+
+  /// No description provided for @healthWeakCommonPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Password is a commonly used password'**
+  String get healthWeakCommonPassword;
+
+  /// No description provided for @healthReusedShared.
+  ///
+  /// In en, this message translates to:
+  /// **'Shared by {count} entries'**
+  String healthReusedShared(int count);
+
+  /// No description provided for @healthNoTotpReason.
+  ///
+  /// In en, this message translates to:
+  /// **'2-step verification is not enabled'**
+  String get healthNoTotpReason;
+
+  /// No description provided for @healthNoUrlReason.
+  ///
+  /// In en, this message translates to:
+  /// **'No website URL saved'**
+  String get healthNoUrlReason;
+
+  /// No description provided for @healthLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to load health report: {error}'**
+  String healthLoadFailed(String error);
 }
 
 class _AppLocalizationsDelegate

@@ -7,6 +7,7 @@ import 'features/auth/screens/lock_screen.dart';
 import 'features/auth/screens/set_master_password_screen.dart';
 import 'features/auth/providers/auth_provider.dart';
 import 'features/generator/screens/generator_screen.dart';
+import 'features/health/screens/health_screen.dart';
 import 'features/settings/providers/font_settings_provider.dart';
 import 'features/settings/screens/settings_screen.dart';
 import 'features/vault/screens/add_edit_entry_screen.dart';
@@ -80,6 +81,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/generator',
         builder: (context, state) => const GeneratorScreen(),
+      ),
+      GoRoute(
+        path: '/health',
+        builder: (context, state) => const HealthScreen(),
       ),
       GoRoute(
         path: '/settings',

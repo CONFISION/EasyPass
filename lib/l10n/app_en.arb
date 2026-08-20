@@ -244,5 +244,35 @@
   "deleteAllDataTitle": "Delete All Data?",
   "deleteAllDataMessage": "This will permanently delete all your saved passwords and data. This action cannot be undone.",
   "deleteAll": "Delete All",
-  "allDataDeleted": "All data deleted"
+  "allDataDeleted": "All data deleted",
+
+  "healthReport": "Password Health Report",
+  "healthScore": "Health Score",
+  "healthGood": "Good",
+  "healthFair": "Fair",
+  "healthPoor": "Poor",
+  "healthWeakPasswords": "Weak Passwords",
+  "healthReusedPasswords": "Reused Passwords",
+  "healthNoTotp": "Missing 2-Step Login",
+  "healthNoUrl": "Missing URL",
+  "healthAllHealthy": "All clear! No health issues found.",
+  "healthTotalEntries": "entries",
+  "healthTapToView": "Tap an entry to view details",
+  "healthWeakTooShort": "Password is too short (fewer than 12 characters)",
+  "healthWeakSingleType": "Password uses only one character type",
+  "healthWeakCommonPassword": "Password is a commonly used password",
+  "healthReusedShared": "Shared by {count} entries",
+  "@healthReusedShared": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "healthNoTotpReason": "2-step verification is not enabled",
+  "healthNoUrlReason": "No website URL saved",
+  "healthLoadFailed": "Failed to load health report: {error}",
+  "@healthLoadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  }
 }

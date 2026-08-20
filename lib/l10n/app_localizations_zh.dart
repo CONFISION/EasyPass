@@ -536,4 +536,65 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get allDataDeleted => '所有数据已删除';
+
+  @override
+  String get healthReport => '密码健康报告';
+
+  @override
+  String get healthScore => '健康评分';
+
+  @override
+  String get healthGood => '良好';
+
+  @override
+  String get healthFair => '一般';
+
+  @override
+  String get healthPoor => '危险';
+
+  @override
+  String get healthWeakPasswords => '弱密码';
+
+  @override
+  String get healthReusedPasswords => '重复使用的密码';
+
+  @override
+  String get healthNoTotp => '缺少两步验证';
+
+  @override
+  String get healthNoUrl => '缺少网址';
+
+  @override
+  String get healthAllHealthy => '一切正常！未发现健康问题。';
+
+  @override
+  String get healthTotalEntries => '个条目';
+
+  @override
+  String get healthTapToView => '点击条目查看详情';
+
+  @override
+  String get healthWeakTooShort => '密码过短（少于 12 个字符）';
+
+  @override
+  String get healthWeakSingleType => '密码仅使用单一字符类型';
+
+  @override
+  String get healthWeakCommonPassword => '密码属于常见弱密码';
+
+  @override
+  String healthReusedShared(int count) {
+    return '被 $count 个条目共用';
+  }
+
+  @override
+  String get healthNoTotpReason => '未启用两步验证';
+
+  @override
+  String get healthNoUrlReason => '未填写网站网址';
+
+  @override
+  String healthLoadFailed(String error) {
+    return '加载健康报告失败：$error';
+  }
 }

@@ -54,6 +54,11 @@ class VaultScreen extends ConsumerWidget {
             tooltip: l10n.generatorTooltip,
           ),
           IconButton(
+            icon: const Icon(Icons.health_and_safety_outlined),
+            onPressed: () => context.push('/health'),
+            tooltip: l10n.healthReport,
+          ),
+          IconButton(
             icon: const Icon(Icons.lock_outline),
             onPressed: () {
               ref.read(authProvider.notifier).lock();

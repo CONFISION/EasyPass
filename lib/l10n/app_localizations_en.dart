@@ -546,4 +546,66 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get allDataDeleted => 'All data deleted';
+
+  @override
+  String get healthReport => 'Password Health Report';
+
+  @override
+  String get healthScore => 'Health Score';
+
+  @override
+  String get healthGood => 'Good';
+
+  @override
+  String get healthFair => 'Fair';
+
+  @override
+  String get healthPoor => 'Poor';
+
+  @override
+  String get healthWeakPasswords => 'Weak Passwords';
+
+  @override
+  String get healthReusedPasswords => 'Reused Passwords';
+
+  @override
+  String get healthNoTotp => 'Missing 2-Step Login';
+
+  @override
+  String get healthNoUrl => 'Missing URL';
+
+  @override
+  String get healthAllHealthy => 'All clear! No health issues found.';
+
+  @override
+  String get healthTotalEntries => 'entries';
+
+  @override
+  String get healthTapToView => 'Tap an entry to view details';
+
+  @override
+  String get healthWeakTooShort =>
+      'Password is too short (fewer than 12 characters)';
+
+  @override
+  String get healthWeakSingleType => 'Password uses only one character type';
+
+  @override
+  String get healthWeakCommonPassword => 'Password is a commonly used password';
+
+  @override
+  String healthReusedShared(int count) {
+    return 'Shared by $count entries';
+  }
+
+  @override
+  String get healthNoTotpReason => '2-step verification is not enabled';
+
+  @override
+  String get healthNoUrlReason => 'No website URL saved';
+
+  @override
+  String healthLoadFailed(String error) {
+    return 'Failed to load health report: $error';
+  }
 }

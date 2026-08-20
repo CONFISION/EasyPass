@@ -244,5 +244,35 @@
   "deleteAllDataTitle": "删除所有数据？",
   "deleteAllDataMessage": "这将永久删除所有已保存的密码和数据。此操作无法撤销。",
   "deleteAll": "全部删除",
-  "allDataDeleted": "所有数据已删除"
+  "allDataDeleted": "所有数据已删除",
+
+  "healthReport": "密码健康报告",
+  "healthScore": "健康评分",
+  "healthGood": "良好",
+  "healthFair": "一般",
+  "healthPoor": "危险",
+  "healthWeakPasswords": "弱密码",
+  "healthReusedPasswords": "重复使用的密码",
+  "healthNoTotp": "缺少两步验证",
+  "healthNoUrl": "缺少网址",
+  "healthAllHealthy": "一切正常！未发现健康问题。",
+  "healthTotalEntries": "个条目",
+  "healthTapToView": "点击条目查看详情",
+  "healthWeakTooShort": "密码过短（少于 12 个字符）",
+  "healthWeakSingleType": "密码仅使用单一字符类型",
+  "healthWeakCommonPassword": "密码属于常见弱密码",
+  "healthReusedShared": "被 {count} 个条目共用",
+  "@healthReusedShared": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+  "healthNoTotpReason": "未启用两步验证",
+  "healthNoUrlReason": "未填写网站网址",
+  "healthLoadFailed": "加载健康报告失败：{error}",
+  "@healthLoadFailed": {
+    "placeholders": {
+      "error": {"type": "String"}
+    }
+  }
 }
