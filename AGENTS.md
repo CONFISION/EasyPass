@@ -30,6 +30,10 @@ flutter build windows   # release build
 ```
 
 - **Windows 构建命令固定为 `flutter build windows`** — 每次需要构建 Windows 发布版时都使用这条命令。
+- **构建分工（重要约定）** — Windows 原生构建（`flutter build windows` / `flutter run -d windows`）
+  由用户亲自执行；agent 负责到构建前的完整测试与 debug（`flutter analyze`、`flutter test`、
+  代码审查与修复）。agent 的执行环境与 MSBuild 存在兼容问题（FileTracker 崩溃），
+  不要尝试在 agent 侧执行原生构建，也不要将其结果作为交付依据。
 - **版本号约定（`major.minor.patch`，见下方 Versioning）** — 推进版本时同步更新 `pubspec.yaml` 的 `version` 字段与 `settings_screen.dart` 中显示的版本号。
 
 - Regenerating code: after editing `lib/data/database/tables.drift`, you **must**
