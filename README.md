@@ -2,225 +2,150 @@
 
 **中文版**: [README_zh.md](README_zh.md)
 
-A local-first, Bitwarden-like password manager for Windows, built with Flutter.
-All data stays on your machine; nothing is ever sent to the network.
+EasyPass is a **local-first, open-source password manager** for Windows, built
+with Flutter. It keeps your credentials safe on your own machine — nothing is
+ever uploaded to the cloud. A companion browser extension auto-fills your
+logins in Chrome and Edge.
 
-Current version: **2.0.0** (`pubspec.yaml: 2.0.0+6`).
+> **Current release: 2.0.0** — service-based architecture, tray residency and
+> a background daemon so the extension works even when the app is closed.
 
-## Features
+---
 
-### Phase 1 — MVP core
+## Why EasyPass?
 
-- **Master password protection** — PBKDF2-HMAC-SHA256 (100,000 iterations)
-  derives an AES-256-CBC key; the master password itself is never stored
-- **Vault CRUD** — entries with name, URL, username, password, notes and
-  TOTP secret, organized into folders with favorites
-- **Search** — instant search across name, URL and username
-- **Password generator** — configurable length and character sets; the
-  add-entry screen pre-fills a fresh generated password on every open
-- **Auto-lock** — configurable 1–30 minute timeout clears the session key
-  from memory
-- **Change master password** — verifies the current password and re-encrypts
-  the whole vault with a freshly derived key
+- **Your data stays on your device.** The vault is encrypted (PBKDF2 +
+  AES-256-CBC) and stored in a local SQLite database. There is no server, no
+  account, no subscription — your passwords are yours, offline.
+- **Open source.** Every byte of the crypto and storage logic is in this
+  repository, auditable by anyone.
+- **A real background service.** Since 2.0 the vault core runs as a daemon
+  that starts with your system. The browser extension connects instantly,
+  with no cold-start delay, and keeps working after you close the app window.
+- **Tray-first desktop UX.** Closing the window hides EasyPass to the system
+  tray instead of quitting; the daemon keeps serving in the background.
+- **Native Windows app.** Built with Flutter for a fast, familiar desktop
+  experience, shipped as a per-user installer with no admin rights needed.
 
-### Phase 2 — Extension & portability
+## Features (v2.0.0)
 
-- **Browser extension** (Chrome MV3) with login-form auto-fill over Chrome
-  Native Messaging
-- **Encrypted backup export/import** (restorable) and plain JSON export
-- **TOTP** (RFC 6238) codes for two-factor logins
+**Vault**
 
-### v2.0.0 — This release
+- Master-password protection (PBKDF2-HMAC-SHA256, 100k iterations; the
+  password itself is never stored)
+- Entries with name, URL, username, password, notes and TOTP secret —
+  every sensitive field AES-256-CBC encrypted
+- Folders, favorites, instant search
+- Configurable password generator with a fresh suggestion on every new entry
+- Auto-lock (1–30 min) and change-master-password with full re-encryption
+- Password health report: weak/reused passwords, missing TOTP/URL, 0–100 score
 
-- **Service architecture** — the vault core now runs as a background daemon
-  (`easypass.exe --service`, windowless, started at logon via the HKCU Run
-  key). A small x86 console bridge (`easypass_native_host.exe`, built
-  automatically by `flutter build windows`) forwards the browser's stdio pipe
-  to the daemon over loopback TCP with a random token. This fixes the
-  cross-bitness handle-passing issue of 32-bit Edge, removes the per-connection
-  cold start, and lets the extension work while the UI is closed.
-- **Tray residency** — closing the window hides the app to the system tray
-  instead of exiting; the tray icon restores the window (left click) or shows
-  a menu (Open / Exit). The daemon keeps serving while hidden.
-- **Extension reliability** — popup auto-retries during daemon cold start,
-  stale `daemon.json` files are cleaned up, and the bridge self-heals
-  (clears stale state and relaunches the daemon when it cannot connect).
+**Browser extension** (Chrome MV3 / Edge)
 
-### v1.3.0 — This release
+- Auto-fill login forms from the desktop vault over Chrome Native Messaging
+- Lock / unlock, search, password generation and TOTP codes from the popup
+- Bilingual UI (Chinese / English)
 
-- **Browser extension connectivity overhaul** — the native messaging host
-  now launches reliably: the runner detects browser launches from stdio pipes
-  and `start_hidden` startup flags (no CLI args are passed by Chrome/Edge),
-  the frame codec buffers arbitrary chunk boundaries, responses are flushed,
-  and the host process exits when the browser disconnects (no process leaks).
-  The host manifest is registered in both 64-bit and 32-bit (WOW6432Node)
-  registry views with the concrete extension ID
-  (`hlkbbdlgaocmnjlgpafkimobnkfniike`) in `chrome-extension://` form only.
-  Popup loading is now state-machine driven with an 8s diagnostic timeout.
-- **Installer hardening** — host registration moved from silently running
-  PowerShell into the installer's own script (`[Code]` section), eliminating
-  the `Trojan:Win32/Wacatac.B!ml` false positives from unsigned installers
-  that silently execute scripts. `install_host.ps1` remains for manual use.
-- **Known limitation** — 32-bit Edge has a cross-bitness handle-passing issue
-  that prevents the host from receiving the browser's stdio pipes; use the
-  64-bit Edge, or the planned 2.0 daemon architecture (see Plan.md).
+**Desktop**
 
-### v1.2.0 — This release
+- Chinese / English UI, custom fonts, persistent sidebar, dark theme
+- Encrypted backup export/import (restorable) and plain JSON export
+- Background daemon + system tray (2.0)
 
-- **Native messaging host wired up** — the host runs as the desktop
-  executable itself (`easypass.exe --native-host`, see `lib/main.dart`), so
-  no separate binary is needed; it shares the same database and secure
-  storage as the UI. Register it with Chrome/Edge via
-  `browser_extension/native_host/install_host.ps1`
-- **Bilingual extension UI** — the browser extension is now localized
-  (Chinese / English) through `chrome.i18n`, following the browser language
-- **Password health report** — weak passwords, reused passwords, entries
-  without TOTP and entries without a URL, plus a 0–100 score (vault screen →
-  health icon → `/health`)
-- **Bilingual desktop UI** — Chinese / English following the system locale,
-  with a manual override in Settings
-- **Custom fonts** — Maple Mono NF CN ships next to the executable
-  (`assets/fonts/`), and Settings lets you pick any detected font
-- **Sidebar & polish** — persistent sidebar (2:8 split, max 300px), full
-  entry detail view, app icon (`windows/runner/resources/app_icon.ico`)
+## Installation
 
-## Security model
+### Option 1 — Windows users: download the installer (recommended)
 
-- Only the salt and a master-password hash are persisted, via
-  `flutter_secure_storage` (DPAPI on Windows).
-- Every sensitive field (password, notes, TOTP secret) is AES-256-CBC
-  encrypted with the session-derived key before it touches SQLite.
-- The derived key lives only in memory and is cleared when the vault locks
-  (5 minutes by default).
-- Never log or print secrets; pass keys by reference only.
+Grab `EasypassSetup.exe` from the
+[Releases](https://github.com/) page of this repository.
 
-## Where your data lives
+- Per-user install to `%LOCALAPPDATA%\Programs\EasyPass` — **no admin rights**
+- Bundles the VC++ runtime and the native messaging bridge
+- Optional: register the browser host and start EasyPass at logon
+  (the vault daemon then runs in the background, tray-accessible)
 
-EasyPass stores two kinds of data in two different places. **Deleting the
-`build/` directory does not reset the app** — it only removes compiled
-output; your vault data and your master-password state survive.
+### Option 2 — Build your own from source
 
-### 1. The vault database — next to the executable
+Building from source lets you review the code, patch it, or fork your own
+version.
 
-| Item | Location |
-|------|----------|
-| `easypass.db` | Same directory as `easypass.exe` (e.g. `build\windows\x64\runner\Release\`) |
+**Prerequisites**
 
-Contains all password entries, encrypted with the session key. Because it
-sits next to the executable, deleting the `build/` directory deletes your
-entries too. **Keep a backup** (Settings → export, or copy `easypass.db`)
-before wiping build output.
+| Requirement | Version / Notes |
+|-------------|-----------------|
+| Windows | 10 or 11, 64-bit |
+| Git | any recent |
+| Flutter SDK | `^3.12.2` (with Dart 3.12+), on your `PATH` |
+| Visual Studio | 2022 or newer, **"Desktop development with C++"** workload (for the Windows runner and the x86 bridge) |
 
-### 2. Master-password state & settings — in Windows AppData
-
-| Item | Location |
-|------|----------|
-| `flutter_secure_storage.dat` | `%APPDATA%\easypass.com\easypass\` |
-
-A DPAPI-encrypted file holding the master-password **salt + hash** (for
-verifying unlocks) plus persisted settings (auto-lock minutes, font
-choice). It is *not* tied to the build directory, which is why rebuilding
-from scratch still asks for the existing master password instead of
-re-running the first-run setup.
-
-> Note: this path derives from the `CompanyName` in
-> `windows/runner/Runner.rc` (`easypass.com`). Changing it relocates the
-> AppData path above — the old directory is not migrated automatically.
-
-### Reset / factory wipe
-
-- **In-app**: Settings → *Delete all data* clears the vault and the secure
-  storage, returning the app to first-run state.
-- **Manual**: close the app, delete `%APPDATA%\easypass.com\easypass\`
-  (resets master-password state) and/or the `easypass.db` next to the exe
-  (resets entries). Restart to see the first-run setup.
-
-## Build & run
-
-Requires Flutter with Dart SDK `^3.12.2`.
-
-```bash
-flutter pub get                                  # install dependencies
-dart run build_runner build --delete-conflicting-outputs  # after tables.drift changes
-flutter gen-l10n                                 # after editing lib/l10n/*.arb
-flutter run -d windows                           # run the desktop app
-flutter test                                     # run the test suite
-flutter build windows                            # release build
-```
-
-## Browser extension
-
-The extension in `browser_extension/` (Chrome MV3) talks to the desktop app
-through Chrome Native Messaging. The host runs as the desktop executable
-itself (`easypass.exe --native-host`, see `lib/main.dart`), so no separate
-binary is needed — it shares the same `easypass.db` and secure storage as the
-UI. The Dart protocol implementation lives in
-`lib/features/browser_bridge/native_messaging_service.dart` (lock/unlock,
-credential queries, search, password generation, TOTP).
-
-To register the host with Chrome/Edge:
+**Steps**
 
 ```powershell
-# after building, from the repo root:
-powershell -ExecutionPolicy Bypass -File browser_extension/native_host/install_host.ps1
-# (optionally pass -ExePath "C:\path\to\easypass.exe")
+# 1. Clone the repository
+git clone https://github.com/<your-org>/easypass.git
+cd easypass
+
+# 2. Fetch dependencies
+flutter pub get
+
+# 3. Build the Windows release
+#    NOTE: this also compiles the x86 native-messaging bridge
+#    (easypass_native_host.exe) automatically as a POST_BUILD step.
+flutter build windows --release
 ```
 
-Then restart the browser and load `browser_extension/` (developer mode).
-The extension has a **fixed ID** (`hlkbbdlgaocmnjlgpafkimobnkfniike`) derived
-from the `key` field in `manifest.json` (the private key
-`keys/easypass_extension_private_key.pem` is gitignored) — the generated
-host manifest only allows that ID to connect, so check the ID shown in
-`chrome://extensions` matches. `uninstall_host.ps1` removes the registration.
-Keep `background.js` actions in sync with
-`NativeMessagingService.handleRequest`'s switch.
-
-## Installer
-
-An Inno Setup script (`installer/easypass_setup.iss`) builds a per-user
-installer. Because `easypass.db` is written next to the executable, the app
-installs to `%LOCALAPPDATA%\Programs\EasyPass` (user-writable) instead of
-`Program Files` — no admin rights are required. The installer bundles the
-VC++ runtime (`msvcp140.dll`, `vcruntime140.dll`, `vcruntime140_1.dll`)
-app-locally, so target machines do not need the VC++ Redistributable.
+The app lands in `build\windows\x64\runner\Release\` — run
+`easypass.exe` directly, or package an installer with Inno Setup:
 
 ```powershell
-# after building (flutter build windows):
+# Optional: build the per-user installer (requires Inno Setup 7)
 & "C:\Program Files\Inno Setup 7\ISCC.exe" installer\easypass_setup.iss
 # output: build\installer\EasypassSetup.exe
 ```
 
-The installer offers an optional "register browser host" step. Registration is
-done natively by the installer's own script (Inno Setup `[Code]` section) —
-it writes the host manifest and the HKCU registry keys directly and
-**spawns no PowerShell**, keeping Defender heuristics quiet (an unsigned
-installer silently running `powershell.exe -ExecutionPolicy Bypass` is a
-classic false-positive trigger). Uninstall cleans up the same way.
-`install_host.ps1` / `uninstall_host.ps1` remain available for manual use.
+> If you modified the source after cloning, the generated files
+> (`database.g.dart`, `app_localizations*.dart`) are already committed, so a
+> plain clone builds as-is. When you change `tables.drift` run
+> `dart run build_runner build --delete-conflicting-outputs`; when you change
+> `lib/l10n/*.arb` run `flutter gen-l10n`.
 
-## Testing
+**Browser extension**
 
-`flutter test` — 89 unit/widget tests covering the crypto round-trip,
-RFC 6238 TOTP vectors, the password generator, export/import round-trips
-(encrypted and plain), the auth lifecycle (set / unlock / change master
-password, auto-lock settings), the native messaging host protocol
-(lock/unlock, credential decryption, TOTP, frame codec chunking), the password health report
-analysis, and the add-entry screen's fresh-password behavior.
+The extension is in `browser_extension/` (not needed for the desktop app
+alone):
 
-## Versioning
+1. Build once (above) so `easypass_native_host.exe` exists next to
+   `easypass.exe`
+2. Register the native host with your browser:
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File browser_extension/native_host/install_host.ps1
+   # optional: -ExePath "C:\path\to\your\easypass.exe"
+   ```
+3. Open `edge://extensions` (or `chrome://extensions`), enable **Developer
+   mode**, and **Load unpacked** the `browser_extension/` folder
+4. Restart the browser. Verify the extension ID is
+   `hlkbbdlgaocmnjlgpafkimobnkfniike` (fixed by the manifest `key`)
 
-This project follows a `major.minor.patch` scheme (see `pubspec.yaml`):
+**Tests**
 
-- **Major (`x`)** — advanced only on significant underlying architecture
-  changes (e.g. crypto-layer rewrite, schema migration, security-model change).
-- **Minor (`y`)** — advanced when features are added, removed, or changed.
-- **Patch (`z`)** — used for optimizations: bug fixes, performance tweaks,
-  and UI polish that do not alter behavior.
+```bash
+flutter analyze
+flutter test      # 94 unit/integration tests
+```
+
+## Data & security model
+
+- **Vault database**: `easypass.db`, stored **next to the executable**
+  (in the install dir, or in `build\windows\x64\runner\Release\` for source
+  builds). Keep backups (Settings → export, or copy the file).
+- **Master-password state & settings**: `%APPDATA%\easypass.com\easypass\`
+  (DPAPI-protected): salt + hash for unlock verification and preferences.
+- Sensitive fields are AES-256-CBC encrypted before touching SQLite; the
+  derived key lives in memory only and is cleared on lock.
+- Nothing ever leaves your machine.
 
 ## Roadmap
 
-See `Plan.md` (Chinese) for the full roadmap. Phase 1 (MVP) and Phase 2
-(extension, TOTP, export/import) are complete; the password health report
-(scheduled under Phase 3) landed in v1.2.0 as a fully local feature. Cloud
-sync, password sharing, emergency access and cross-platform releases remain
-planned for Phase 3.
+Phase 1 (MVP) and Phase 2 (extension, TOTP, export/import) are complete;
+2.0 added the service architecture. Cloud sync, sharing, emergency access and
+more platforms are planned — see `Plan.md` for details.
