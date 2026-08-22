@@ -5,7 +5,7 @@
 A local-first, Bitwarden-like password manager for Windows, built with Flutter.
 All data stays on your machine; nothing is ever sent to the network.
 
-Current version: **1.2.0** (`pubspec.yaml: 1.2.0+4`).
+Current version: **2.0.0** (`pubspec.yaml: 2.0.0+6`).
 
 ## Features
 
@@ -29,6 +29,22 @@ Current version: **1.2.0** (`pubspec.yaml: 1.2.0+4`).
   Native Messaging
 - **Encrypted backup export/import** (restorable) and plain JSON export
 - **TOTP** (RFC 6238) codes for two-factor logins
+
+### v2.0.0 — This release
+
+- **Service architecture** — the vault core now runs as a background daemon
+  (`easypass.exe --service`, windowless, started at logon via the HKCU Run
+  key). A small x86 console bridge (`easypass_native_host.exe`, built
+  automatically by `flutter build windows`) forwards the browser's stdio pipe
+  to the daemon over loopback TCP with a random token. This fixes the
+  cross-bitness handle-passing issue of 32-bit Edge, removes the per-connection
+  cold start, and lets the extension work while the UI is closed.
+- **Tray residency** — closing the window hides the app to the system tray
+  instead of exiting; the tray icon restores the window (left click) or shows
+  a menu (Open / Exit). The daemon keeps serving while hidden.
+- **Extension reliability** — popup auto-retries during daemon cold start,
+  stale `daemon.json` files are cleaned up, and the bridge self-heals
+  (clears stale state and relaunches the daemon when it cannot connect).
 
 ### v1.3.0 — This release
 
