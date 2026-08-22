@@ -1,4 +1,4 @@
-; EasyPass 1.2.0 — Inno Setup installer script
+; EasyPass 2.0.0 — Inno Setup installer script
 ;
 ; Per-user install: easypass.db is written next to the executable, so the
 ; app must live in a user-writable directory (LocalAppData), not Program
@@ -25,6 +25,13 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+AppComments=Local-first, open-source password manager for Windows
+AppCopyright=Copyright (C) 2026 easypass.com
+; Version resource of the generated Setup.exe (file version 2.0.0.0).
+VersionInfoVersion=2.0.0.0
+VersionInfoProductVersion=2.0.0.0
+VersionInfoProductName=EasyPass
+VersionInfoDescription=EasyPass Password Manager Installer
 DefaultDirName={localappdata}\Programs\EasyPass
 DefaultGroupName=EasyPass
 DisableProgramGroupPage=yes

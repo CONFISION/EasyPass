@@ -39,7 +39,7 @@ EasyPass 是一款**本地优先、开源**的密码管理器，使用 Flutter �
 
 ### 方式一：Windows 用户下载安装包（推荐）
 
-从本仓库的 [Releases](https://github.com/) 页面下载 `EasypassSetup.exe`。
+从本仓库的 [Releases](https://github.com/CONFISION/EasyPass/releases) 页面下载 `EasypassSetup.exe`。
 
 - 单用户安装到 `%LOCALAPPDATA%\Programs\EasyPass`——**无需管理员权限**
 - 自带 VC++ 运行库与原生消息桥接
@@ -62,7 +62,7 @@ EasyPass 是一款**本地优先、开源**的密码管理器，使用 Flutter �
 
 ```powershell
 # 1. 克隆仓库
-git clone https://github.com/<your-org>/easypass.git
+git clone https://github.com/CONFISION/EasyPass.git
 cd easypass
 
 # 2. 安装依赖

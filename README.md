@@ -56,7 +56,7 @@ releases.
 ### Option 1 — Windows users: download the installer (recommended)
 
 Grab `EasypassSetup.exe` from the
-[Releases](https://github.com/) page of this repository.
+[Releases](https://github.com/CONFISION/EasyPass/releases) page of this repository.
 
 - Per-user install to `%LOCALAPPDATA%\Programs\EasyPass` — **no admin rights**
 - Bundles the VC++ runtime and the native messaging bridge
@@ -81,7 +81,7 @@ version.
 
 ```powershell
 # 1. Clone the repository
-git clone https://github.com/<your-org>/easypass.git
+git clone https://github.com/CONFISION/EasyPass.git
 cd easypass
 
 # 2. Fetch dependencies
