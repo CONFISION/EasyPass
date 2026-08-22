@@ -63,27 +63,38 @@ function handleNativeMessage(message) {
 
 function sendToNativeHost(action, data = {}) {
   return new Promise((resolve, reject) => {
-    if (!nativePort) {
-      reject(new Error(chrome.i18n.getMessage('nativeHostNotConnected')));
-      return;
-    }
-    
     const requestId = generateRequestId();
     pendingRequests.set(requestId, { resolve, reject });
     
-    nativePort.postMessage({
-      requestId,
-      action,
-      ...data
-    });
-    
-    // Timeout after 30 seconds
-    setTimeout(() => {
-      if (pendingRequests.has(requestId)) {
-        pendingRequests.delete(requestId);
-        reject(new Error(chrome.i18n.getMessage('requestTimedOut')));
+    let tries = 0;
+    const attempt = () => {
+      if (nativePort) {
+        nativePort.postMessage({
+          requestId,
+          action,
+          ...data
+        });
+        // Timeout after 30 seconds
+        setTimeout(() => {
+          if (pendingRequests.has(requestId)) {
+            pendingRequests.delete(requestId);
+            reject(new Error(chrome.i18n.getMessage('requestTimedOut')));
+          }
+        }, 30000);
+        return;
       }
-    }, 30000);
+      // The service worker may have just been woken up by this very message
+      // while connectToNativeHost() is still establishing the port. Retry
+      // briefly instead of failing immediately.
+      if (tries++ < 8) {
+        setTimeout(attempt, 250);
+      } else {
+        pendingRequests.delete(requestId);
+        reject(new Error(chrome.i18n.getMessage('nativeHostNotConnected')));
+      }
+    };
+    
+    attempt();
   });
 }
 

@@ -81,25 +81,35 @@ function showErrorState(detail) {
 // ─── Check Connection Status ──────────────────────────────
 
 async function checkStatus() {
-  try {
-    const status = await sendWithTimeout({ action: 'getStatus' });
-    if (isErrorResponse(status)) {
-      throw new Error(errorMessage(status));
+  // Retry a few times: on the very first launch the service worker is
+  // waking up and the daemon may still be cold-starting (bridge + daemon
+  // startup takes a couple of seconds). Without retries the user would see
+  // a timeout and have to close/reopen the popup once.
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const status = await sendWithTimeout({ action: 'getStatus' });
+      if (isErrorResponse(status)) {
+        throw new Error(errorMessage(status));
+      }
+      if (status && status.locked) {
+        statusDot.className = 'status locked';
+        statusDot.title = chrome.i18n.getMessage('vaultLocked');
+        showLockedState();
+      } else {
+        statusDot.className = 'status connected';
+        statusDot.title = chrome.i18n.getMessage('connected');
+        loadEntries();
+      }
+      return;
+    } catch (e) {
+      lastError = e;
+      if (attempt < 2) await new Promise(r => setTimeout(r, 1200));
     }
-    if (status && status.locked) {
-      statusDot.className = 'status locked';
-      statusDot.title = chrome.i18n.getMessage('vaultLocked');
-      showLockedState();
-    } else {
-      statusDot.className = 'status connected';
-      statusDot.title = chrome.i18n.getMessage('connected');
-      loadEntries();
-    }
-  } catch (e) {
-    statusDot.className = 'status disconnected';
-    statusDot.title = chrome.i18n.getMessage('statusDisconnected');
-    showErrorState(e.message);
   }
+  statusDot.className = 'status disconnected';
+  statusDot.title = chrome.i18n.getMessage('statusDisconnected');
+  showErrorState(lastError ? lastError.message : '');
 }
 
 // ─── Load Entries ─────────────────────────────────────────
