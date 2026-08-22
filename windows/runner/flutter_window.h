@@ -23,6 +23,21 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  // Tray icon (system notification area). Closing the window hides the app
+  // to the tray while the background daemon keeps serving the extension
+  // (Bitwarden-style behavior).
+  void CreateTrayIcon();
+  void DestroyTrayIcon();
+  void ShowTrayMenu();
+  void RestoreWindow();
+  void MinimizeToTray();
+
+  static constexpr UINT kTrayIconMessage = WM_APP + 1;
+  static constexpr UINT kTrayOpenCommand = 1001;
+  static constexpr UINT kTrayExitCommand = 1002;
+
+  bool tray_icon_created_ = false;
+
   // The project to run.
   flutter::DartProject project_;
 

@@ -31,62 +31,46 @@ class NativeMessagingService {
 
   bool get isUnlocked => _sessionKey != null;
 
-  /// Start the native messaging host listening on stdin
-  Future<void> start() async {
+  /// Start the native messaging host listening on stdin (browser-launched
+  /// host mode).
+  Future<void> start() => serve(StreamIterator(stdin), stdout);
+
+  /// Serve the native messaging protocol over arbitrary byte streams.
+  ///
+  /// Used by the browser-launched host (stdin/stdout) and by the 2.0 daemon
+  /// (a TCP socket). [iterator] must already be positioned after any
+  /// handshake frame. Responses are written to [output] as length-prefixed
+  /// JSON frames.
+  Future<void> serve(
+      StreamIterator<List<int>> iterator, IOSink output) async {
     if (_running) return;
     _running = true;
-    _diag('host service started, unlocked=$isUnlocked');
 
-    // One StreamIterator for the whole session: stdin is a single-subscription
-    // stream, so every frame must consume from the same iterator.
-    final iterator = StreamIterator(stdin);
     while (_running) {
       try {
         final message = await readMessage(iterator);
         if (message == null) {
-          _diag('stdin EOF, host exiting');
-          break; // stdin closed (browser exited)
+          break; // peer closed the stream
         }
-        _diag(
-            'recv requestId=${message['requestId']} action=${message['action']}');
         final response = await handleRequest(message);
-        await _sendResponse(response);
-        _diag('sent requestId=${message['requestId']}');
+        await _writeFrame(output, response);
       } catch (e) {
         if (!_running) break;
-        _diag('loop error: $e');
-        await _sendResponse({'error': e.toString()});
+        await _writeFrame(output, {'error': e.toString()});
       }
     }
   }
 
-  /// Temporary diagnostics for the browser-launch investigation. Writes to
-  /// %TEMP%\easypass_host_dart.log. NEVER logs message payloads (they may
-  /// contain secrets). Remove once the host launch is confirmed working.
-  void _diag(String message) {
-    try {
-      final temp = Platform.environment['TEMP'];
-      if (temp == null) return;
-      File('$temp\\easypass_host_dart.log').writeAsStringSync(
-          '${DateTime.now().toIso8601String()} $message\r\n',
-          mode: FileMode.append,
-          flush: true);
-    } catch (_) {
-      // Diagnostics must never break the host loop.
-    }
+  Future<void> _writeFrame(IOSink output, Map<String, dynamic> response) async {
+    output.add(encodeMessage(response));
+    // The stream buffers; without an explicit flush the peer (browser or
+    // daemon client) would never receive the response.
+    await output.flush();
   }
 
   void stop() {
     _running = false;
     _sessionKey = null;
-  }
-
-  /// Send a JSON response to the browser extension
-  Future<void> _sendResponse(Map<String, dynamic> response) async {
-    stdout.add(encodeMessage(response));
-    // Dart's stdout buffers; the host process stays alive between requests,
-    // so without an explicit flush the browser never receives the response.
-    await stdout.flush();
   }
 
   /// Encode a JSON message as a native-messaging frame: a 4-byte little-endian
@@ -114,8 +98,7 @@ class NativeMessagingService {
   /// and payload in another, or even the header itself split), so bytes are
   /// accumulated until both the header and the full payload are available.
   ///
-  /// Returns the decoded message, or null on EOF (browser closed the pipe).
-  @visibleForTesting
+  /// Returns the decoded message, or null on EOF (peer closed the pipe).
   static Future<Map<String, dynamic>?> readMessage(
       StreamIterator<List<int>> iterator) async {
     final buffer = BytesBuilder(copy: false);

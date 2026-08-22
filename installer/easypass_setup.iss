@@ -14,7 +14,7 @@
 ;   "C:\Program Files\Inno Setup 7\ISCC.exe" installer\easypass_setup.iss
 
 #define MyAppName "EasyPass"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "2.0.0"
 #define MyAppPublisher "easypass.com"
 #define MyAppExeName "easypass.exe"
 #define MyAppId "{{8F1E5B2A-6C4D-4E9F-9A1B-2C3D4E5F6071}"
@@ -47,10 +47,13 @@ Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.i
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "registerhost"; Description: "注册浏览器扩展 Native Messaging 主机"; GroupDescription: "浏览器集成:"; Flags: checkedonce
+Name: "autostart"; Description: "登录时自动启动 EasyPass（后台服务随系统启动）"; GroupDescription: "随系统启动:"
 
 [Files]
 ; Application
 Source: "..\build\windows\x64\runner\Release\easypass.exe"; DestDir: "{app}"; Flags: ignoreversion
+; x86 console bridge: browser stdio -> daemon TCP (native messaging host)
+Source: "..\build\windows\x64\runner\Release\easypass_native_host.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; Flutter engine
 Source: "..\build\windows\x64\runner\Release\flutter_windows.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\build\windows\x64\runner\Release\dartjni.dll"; DestDir: "{app}"; Flags: ignoreversion
@@ -106,14 +109,13 @@ begin
   if not DirExists(ManifestDir) then
     ForceDirectories(ManifestDir);
   ManifestPath := ManifestDir + '\' + HostName + '.json';
-  ExePath := ExpandConstant('{app}\' + '{#MyAppExeName}');
+  ExePath := ExpandConstant('{app}\easypass_native_host.exe');
 
   Manifest :=
     '{' + #13#10 +
     '  "name": "' + HostName + '",' + #13#10 +
     '  "description": "EasyPass Password Manager Native Messaging Host",' + #13#10 +
     '  "path": "' + JsonEscape(ExePath) + '",' + #13#10 +
-    '  "args": ["--native-host"],' + #13#10 +
     '  "type": "stdio",' + #13#10 +
     '  "allowed_origins": ["chrome-extension://' + ExtensionId + '/"]' + #13#10 +
     '}';
@@ -144,17 +146,46 @@ begin
   DeleteFile(ExpandConstant('{localappdata}\EasyPass\') + HostName + '.json');
 end;
 
+{ Register EasyPass in the HKCU Run key so it starts at logon AND appears in
+  Task Manager's "Startup" tab (Task Scheduler entries are NOT listed there).
+  The value is written by the installer wizard itself (user-visible), not by
+  a silent script, so it does not look like malware behavior. The app shows
+  its UI on start and hides to the tray when closed, keeping the background
+  daemon (extension backend) alive. }
+procedure RegisterAutoStart();
+begin
+  RegWriteStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run',
+                      'EasyPass',
+                      '"' + ExpandConstant('{app}\easypass.exe') + '"');
+end;
+
+procedure UnregisterAutoStart();
+var
+  ResultCode: Integer;
+begin
+  RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run',
+                 'EasyPass');
+  // Clean up the legacy Task Scheduler entry registered by earlier builds.
+  Exec('schtasks.exe', '/Delete /F /TN "EasyPass"', '', SW_HIDE,
+       ewWaitUntilTerminated, ResultCode);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
   begin
     if WizardIsTaskSelected('registerhost') then
       RegisterNativeHost();
+    if WizardIsTaskSelected('autostart') then
+      RegisterAutoStart();
   end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usUninstall then
+  begin
+    UnregisterAutoStart();
     UnregisterNativeHost();
+  end;
 end;

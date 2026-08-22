@@ -40,25 +40,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::SetEnvironmentVariableW(L"EASYPASS_NATIVE_HOST", L"1");
   }
 
-  // Temporary diagnostic: log the startup facts so a failing browser launch
-  // can be traced. Written to %TEMP%\easypass_host_diag.log. Remove once the
-  // host launch is confirmed working. ASCII-only content.
-  {
-    wchar_t diag_path[MAX_PATH] = {};
-    ::GetTempPathW(MAX_PATH, diag_path);
-    wcscat_s(diag_path, MAX_PATH, L"easypass_host_diag.log");
-    FILE* diag = nullptr;
-    if (_wfopen_s(&diag, diag_path, L"a") == 0 && diag != nullptr) {
-      fprintf(diag,
-              "[tick=%llu] argv_flag=%d stdin_type=%lu started_hidden=%d "
-              "native_host=%d\n",
-              (unsigned long long)::GetTickCount64(),
-              wcsstr(command_line, L"--native-host") != nullptr ? 1 : 0,
-              (unsigned long)::GetFileType(
-                  ::GetStdHandle(STD_INPUT_HANDLE)),
-              started_hidden ? 1 : 0, is_native_host ? 1 : 0);
-      fclose(diag);
-    }
+  // Background daemon mode (`easypass.exe --service`, launched by the native
+  // host bridge). Windowless: hide the window so no UI ever appears.
+  const bool is_service = wcsstr(command_line, L"--service") != nullptr;
+  if (is_service) {
+    ::SetEnvironmentVariableW(L"EASYPASS_SERVICE", L"1");
   }
 
   // Initialize COM, so that it is available for use in the library and/or
@@ -78,10 +64,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   if (!window.Create(L"easypass", origin, size)) {
     return EXIT_FAILURE;
   }
-  // In native host mode the Dart code never renders UI; hide the window so
-  // no blank window pops up every time the browser connects. The message
-  // loop below still runs, which the Flutter engine needs.
-  if (is_native_host) {
+  // In native host / daemon mode the Dart code never renders UI; hide the
+  // window so nothing pops up. The message loop below still runs, which the
+  // Flutter engine needs.
+  if (is_native_host || is_service) {
     ::ShowWindow(window.GetHandle(), SW_HIDE);
   }
   window.SetQuitOnClose(true);

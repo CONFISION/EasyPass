@@ -38,3 +38,18 @@ target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+# Compile the x86 native messaging host bridge next to the app binary.
+# Must live in this directory: add_custom_command(TARGET ...) requires
+# the target to be created here.
+# Path to the x86 native messaging host bridge sources
+# (repo root: browser_extension/native_host).
+set(EASYPASS_BRIDGE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../browser_extension/native_host")
+
+add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+  COMMAND cmd /c call "${EASYPASS_BRIDGE_DIR}/build_bridge.bat"
+          "$<TARGET_FILE_DIR:${BINARY_NAME}>"
+  COMMENT "Building EasyPass native messaging host bridge (x86)"
+  VERBATIM
+)

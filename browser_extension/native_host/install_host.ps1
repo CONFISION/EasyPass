@@ -45,6 +45,19 @@ function Resolve-EasyPassExe {
 $exe = Resolve-EasyPassExe
 Write-Host "Using host executable: $exe"
 
+# 2.0: the browser launches the console BRIDGE (easypass_native_host.exe,
+# same directory as easypass.exe), which forwards stdio to the background
+# daemon (easypass.exe --service). The bridge is x86 so 32-bit browsers
+# inherit its stdio handles reliably.
+$exeDir = Split-Path $exe -Parent
+$bridge = Join-Path $exeDir "easypass_native_host.exe"
+if (-not (Test-Path $bridge)) {
+  Write-Error "Bridge host not found next to easypass.exe: $bridge"
+  Write-Error "Build it first: browser_extension\native_host\build_bridge.bat"
+  exit 1
+}
+Write-Host "Bridge host: $bridge"
+
 # Where the generated manifest lives.
 $manifestDir = Join-Path $env:LOCALAPPDATA "EasyPass"
 New-Item -ItemType Directory -Force -Path $manifestDir | Out-Null
@@ -53,8 +66,7 @@ $manifestPath = Join-Path $manifestDir "com.easypass.app.json"
 $manifest = @{
   name        = "com.easypass.app"
   description = "EasyPass Password Manager Native Messaging Host"
-  path        = $exe
-  args        = @("--native-host")
+  path        = $bridge
   type        = "stdio"
   # Concrete extension origins only. Chromium's manifest parser (Chrome and
   # Edge) accepts ONLY the "chrome-extension://<id>/" form -- any other scheme
@@ -62,8 +74,6 @@ $manifest = @{
   # browser reports "Specified native messaging host not found". Edge's
   # DevTools may DISPLAY the origin as "extensions://<id>/", but the real
   # origin scheme is chrome-extension://.
-  # NOTE: Chrome/Edge ignore the "args" field above (no CLI args are passed to
-  # the host); the host detects browser launches via its stdio pipes instead.
   allowed_origins = @("chrome-extension://$ExtensionId/")
 } | ConvertTo-Json -Depth 3
 
