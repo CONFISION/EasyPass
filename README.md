@@ -30,6 +30,25 @@ Current version: **1.2.0** (`pubspec.yaml: 1.2.0+4`).
 - **Encrypted backup export/import** (restorable) and plain JSON export
 - **TOTP** (RFC 6238) codes for two-factor logins
 
+### v1.3.0 — This release
+
+- **Browser extension connectivity overhaul** — the native messaging host
+  now launches reliably: the runner detects browser launches from stdio pipes
+  and `start_hidden` startup flags (no CLI args are passed by Chrome/Edge),
+  the frame codec buffers arbitrary chunk boundaries, responses are flushed,
+  and the host process exits when the browser disconnects (no process leaks).
+  The host manifest is registered in both 64-bit and 32-bit (WOW6432Node)
+  registry views with the concrete extension ID
+  (`hlkbbdlgaocmnjlgpafkimobnkfniike`) in `chrome-extension://` form only.
+  Popup loading is now state-machine driven with an 8s diagnostic timeout.
+- **Installer hardening** — host registration moved from silently running
+  PowerShell into the installer's own script (`[Code]` section), eliminating
+  the `Trojan:Win32/Wacatac.B!ml` false positives from unsigned installers
+  that silently execute scripts. `install_host.ps1` remains for manual use.
+- **Known limitation** — 32-bit Edge has a cross-bitness handle-passing issue
+  that prevents the host from receiving the browser's stdio pipes; use the
+  64-bit Edge, or the planned 2.0 daemon architecture (see Plan.md).
+
 ### v1.2.0 — This release
 
 - **Native messaging host wired up** — the host runs as the desktop
@@ -132,8 +151,13 @@ powershell -ExecutionPolicy Bypass -File browser_extension/native_host/install_h
 ```
 
 Then restart the browser and load `browser_extension/` (developer mode).
-`uninstall_host.ps1` removes the registration. Keep `background.js` actions
-in sync with `NativeMessagingService.handleRequest`'s switch.
+The extension has a **fixed ID** (`hlkbbdlgaocmnjlgpafkimobnkfniike`) derived
+from the `key` field in `manifest.json` (the private key
+`keys/easypass_extension_private_key.pem` is gitignored) — the generated
+host manifest only allows that ID to connect, so check the ID shown in
+`chrome://extensions` matches. `uninstall_host.ps1` removes the registration.
+Keep `background.js` actions in sync with
+`NativeMessagingService.handleRequest`'s switch.
 
 ## Installer
 
@@ -150,17 +174,21 @@ app-locally, so target machines do not need the VC++ Redistributable.
 # output: build\installer\EasypassSetup.exe
 ```
 
-The installer offers an optional "register browser host" step (runs
-`install_host.ps1` with the installed exe path) and runs `uninstall_host.ps1`
-on uninstall.
+The installer offers an optional "register browser host" step. Registration is
+done natively by the installer's own script (Inno Setup `[Code]` section) —
+it writes the host manifest and the HKCU registry keys directly and
+**spawns no PowerShell**, keeping Defender heuristics quiet (an unsigned
+installer silently running `powershell.exe -ExecutionPolicy Bypass` is a
+classic false-positive trigger). Uninstall cleans up the same way.
+`install_host.ps1` / `uninstall_host.ps1` remain available for manual use.
 
 ## Testing
 
-`flutter test` — 79 unit/widget tests covering the crypto round-trip,
+`flutter test` — 89 unit/widget tests covering the crypto round-trip,
 RFC 6238 TOTP vectors, the password generator, export/import round-trips
 (encrypted and plain), the auth lifecycle (set / unlock / change master
 password, auto-lock settings), the native messaging host protocol
-(lock/unlock, credential decryption, TOTP), the password health report
+(lock/unlock, credential decryption, TOTP, frame codec chunking), the password health report
 analysis, and the add-entry screen's fresh-password behavior.
 
 ## Versioning

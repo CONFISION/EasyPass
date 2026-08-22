@@ -5,7 +5,7 @@
 本地优先、对标 Bitwarden 的密码管理器，使用 Flutter 构建，支持 Windows 桌面端。
 所有数据仅保存在你的电脑上，绝不联网上传。
 
-当前版本：**1.2.0**（`pubspec.yaml: 1.2.0+4`）。
+当前版本：**1.3.0**（`pubspec.yaml: 1.3.0+5`）。
 
 ## 功能特性
 
@@ -23,6 +23,12 @@
 - **浏览器扩展**（Chrome MV3），通过 Chrome Native Messaging 实现登录表单自动填充
 - **加密备份导出/导入**（可恢复）与明文 JSON 导出
 - **TOTP**（RFC 6238）双因素验证码
+
+### v1.3.0 — 本次发布
+
+- **浏览器扩展连接全面修复** — native messaging 主机现在能可靠启动：runner 通过 stdio 管道与 `start_hidden` 启动标志检测浏览器启动（Chrome/Edge 不传命令行参数）；帧编解码支持任意分块边界；响应显式 flush；浏览器断开后主机进程正常退出（无残留）。主机清单同时注册 64 位与 32 位（WOW6432Node）注册表视图，`allowed_origins` 仅使用具体扩展 ID（`hlkbbdlgaocmnjlgpafkimobnkfniike`）的 `chrome-extension://` 格式。Popup 加载改为状态机驱动并带 8 秒诊断超时。
+- **安装器安全加固** — 主机注册从"静默执行 PowerShell"改为安装器内置脚本（`[Code]` 段）原生完成，消除了未签名安装包静默执行脚本导致的 `Trojan:Win32/Wacatac.B!ml` 误报。`install_host.ps1` 保留供手动使用。
+- **已知限制** — 32 位 Edge 存在跨位数句柄传递问题，导致主机收不到浏览器的 stdio 管道；请使用 64 位 Edge，或等待计划中的 2.0 常驻服务架构（见 Plan.md）。
 
 ### v1.2.0 — 本次发布
 
@@ -92,7 +98,7 @@ powershell -ExecutionPolicy Bypass -File browser_extension/native_host/install_h
 # （可选）通过 -ExePath "C:\path\to\easypass.exe" 指定可执行文件路径
 ```
 
-然后重启浏览器，以开发者模式加载 `browser_extension/`。`uninstall_host.ps1` 可移除注册。请保持 `background.js` 中的动作与 `NativeMessagingService.handleRequest` 的 switch 同步。
+然后重启浏览器，以开发者模式加载 `browser_extension/`。扩展的固定 ID 为 `hlkbbdlgaocmnjlgpafkimobnkfniike`（由 `manifest.json` 中的 `key` 字段派生，私钥 `browser_extension/extension_private_key.pem` 不入库）——`install_host.ps1` 生成的 host 清单只允许该 ID 连接，加载后请核对 `chrome://extensions` 中显示的 ID 与此一致。`uninstall_host.ps1` 可移除注册。请保持 `background.js` 中的动作与 `NativeMessagingService.handleRequest` 的 switch 同步。
 
 ## 安装包
 
@@ -104,11 +110,11 @@ powershell -ExecutionPolicy Bypass -File browser_extension/native_host/install_h
 # 产物：build\installer\EasypassSetup.exe
 ```
 
-安装向导提供可选的「注册浏览器扩展主机」步骤（用安装后的 exe 路径运行 `install_host.ps1`），卸载时自动运行 `uninstall_host.ps1` 清理注册。
+安装向导提供可选的「注册浏览器扩展主机」步骤：由安装程序内置脚本（Inno Setup `[Code]` 段）直接生成 host 清单并写入 HKCU 注册表，**不调用 PowerShell**——安装器不静默执行任何外部脚本，避免安全软件启发式误报。卸载时由同样的脚本自动清理注册与清单文件。`install_host.ps1` / `uninstall_host.ps1` 仍保留，供手动注册使用。
 
 ## 测试
 
-`flutter test` —— 共 79 个单元/组件测试，覆盖：加解密往返、RFC 6238 TOTP 测试向量、密码生成器、导出/导入往返（加密与明文）、认证生命周期（设置/解锁/修改主密码、自动锁定设置）、Native Messaging 主机协议（锁定/解锁、凭据解密、TOTP）、密码健康报告分析，以及添加条目页的密码预选行为。
+`flutter test` —— 共 89 个单元/组件测试，覆盖：加解密往返、RFC 6238 TOTP 测试向量、密码生成器、导出/导入往返（加密与明文）、认证生命周期（设置/解锁/修改主密码、自动锁定设置）、Native Messaging 主机协议（锁定/解锁、凭据解密、TOTP、帧编解码分片容错）、密码健康报告分析，以及添加条目页的密码预选行为。
 
 ## 版本规范
 
