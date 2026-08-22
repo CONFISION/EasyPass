@@ -40,11 +40,10 @@ logins in Chrome and Edge.
 - Auto-lock (1–30 min) and change-master-password with full re-encryption
 - Password health report: weak/reused passwords, missing TOTP/URL, 0–100 score
 
-**Browser extension** (Chrome MV3 / Edge)
-
-- Auto-fill login forms from the desktop vault over Chrome Native Messaging
-- Lock / unlock, search, password generation and TOTP codes from the popup
-- Bilingual UI (Chinese / English)
+**Browser extension** (Chrome MV3 / Edge) — **not usable yet**:
+the extension currently only links to the desktop vault (lock/unlock,
+credential queries). Core features are planned within the next 3 minor
+releases.
 
 **Desktop**
 
@@ -110,6 +109,13 @@ The app lands in `build\windows\x64\runner\Release\` — run
 > `lib/l10n/*.arb` run `flutter gen-l10n`.
 
 **Browser extension**
+
+> ⚠️ **Status**: the browser extension currently only *links* to the desktop
+> vault (lock/unlock, credential queries). Core features — login-form
+> auto-fill, password generation, TOTP display — are **not implemented yet**,
+> so the extension is **not usable** at this time. We plan to complete it
+> within the next 3 minor releases. If you are familiar with browser
+> extension development, you are welcome to build and use your own.
 
 The extension is in `browser_extension/` (not needed for the desktop app
 alone):

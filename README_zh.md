@@ -27,11 +27,7 @@ EasyPass 是一款**本地优先、开源**的密码管理器，使用 Flutter �
 - 自动锁定（1–30 分钟）与修改主密码（全库重新加密）
 - 密码健康报告：弱密码/重复密码/缺少 TOTP/缺少网址检测，0–100 评分
 
-**浏览器扩展**（Chrome MV3 / Edge）
-
-- 通过 Chrome Native Messaging 从桌面保险库自动填充登录表单
-- popup 支持锁定/解锁、搜索、密码生成与 TOTP 验证码
-- 双语界面（中文/英文）
+**浏览器扩展**（Chrome MV3 / Edge）—— **暂不可用**：扩展目前仅实现了与本地应用的联通（锁定/解锁、凭据读取）。核心功能计划在 3 个中版本内完成。
 
 **桌面端**
 
@@ -89,6 +85,8 @@ flutter build windows --release
 > 提示：克隆后直接构建即可——生成文件（`database.g.dart`、`app_localizations*.dart`）已入库。若你修改了 `tables.drift`，需执行 `dart run build_runner build --delete-conflicting-outputs`；修改了 `lib/l10n/*.arb`，需执行 `flutter gen-l10n`。
 
 **浏览器扩展**
+
+> ⚠️ **当前状态**：浏览器扩展目前仅实现了与本地应用的联通（锁定/解锁、凭据读取），核心功能——登录表单自动填充、popup 内密码生成、TOTP 展示等——**尚未实现**，扩展目前**不可使用**。我们将在 3 个中版本内完成该功能。如果你熟悉浏览器扩展开发，也可以选择自行构建使用。
 
 扩展位于 `browser_extension/`（仅桌面应用不需要它）：
 
