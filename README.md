@@ -143,9 +143,3 @@ flutter test      # 94 unit/integration tests
 - Sensitive fields are AES-256-CBC encrypted before touching SQLite; the
   derived key lives in memory only and is cleared on lock.
 - Nothing ever leaves your machine.
-
-## Roadmap
-
-Phase 1 (MVP) and Phase 2 (extension, TOTP, export/import) are complete;
-2.0 added the service architecture. Cloud sync, sharing, emergency access and
-more platforms are planned — see `Plan.md` for details.
