@@ -104,6 +104,10 @@
     "message": "EasyPass: Native host disconnected",
     "description": "Console log"
   },
+  "logNativeHostError": {
+    "message": "EasyPass: Native host error: $1",
+    "description": "Console error, $1 is the chrome.runtime.lastError message"
+  },
   "logConnectedToNativeHost": {
     "message": "EasyPass: Connected to native host",
     "description": "Console log"

@@ -16,7 +16,15 @@ function connectToNativeHost() {
     });
     
     nativePort.onDisconnect.addListener(() => {
-      console.log(chrome.i18n.getMessage('logNativeHostDisconnected'));
+      // Consume chrome.runtime.lastError synchronously inside the handler;
+      // otherwise Chrome logs "Unchecked runtime.lastError" and the real
+      // cause (e.g. "Specified native messaging host not found") is hidden.
+      const lastError = chrome.runtime.lastError;
+      if (lastError) {
+        console.error(chrome.i18n.getMessage('logNativeHostError', [lastError.message]));
+      } else {
+        console.log(chrome.i18n.getMessage('logNativeHostDisconnected'));
+      }
       nativePort = null;
       // Reject all pending requests
       for (const [id, reject] of pendingRequests) {
@@ -30,7 +38,8 @@ function connectToNativeHost() {
     
     console.log(chrome.i18n.getMessage('logConnectedToNativeHost'));
   } catch (e) {
-    console.error(chrome.i18n.getMessage('logFailedToConnect'), e);
+    const lastError = chrome.runtime.lastError;
+    console.error(chrome.i18n.getMessage('logFailedToConnect'), lastError ? lastError.message : e);
     setTimeout(connectToNativeHost, 5000);
   }
 }

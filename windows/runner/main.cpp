@@ -13,6 +13,54 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     CreateAndAttachConsole();
   }
 
+  // Native messaging host mode (launched by Chrome/Edge). The browser does
+  // NOT pass any command-line arguments -- the "args" field of the native
+  // messaging manifest is unsupported by Chrome/Edge -- so the mode is
+  // detected from startup signals instead:
+  //   1. --native-host flag (manual testing),
+  //   2. stdin being a pipe (browser launch; reliable for 64-bit launchers),
+  //   3. started hidden: Chromium launches native hosts with
+  //      STARTF_USESHOWWINDOW + SW_HIDE (start_hidden). This covers browser
+  //      launches where the pipe handle is not visible through GetStdHandle
+  //      (observed with 32-bit Edge spawning the 64-bit host: the host ran
+  //      the UI instead of serving the pipe). A normal double-click launch
+  //      is never started hidden.
+  // The detected mode is mirrored into an environment variable because
+  // Platform.executableArguments is not reliably populated on Flutter
+  // Windows.
+  STARTUPINFOW si = {sizeof(si)};
+  ::GetStartupInfoW(&si);
+  const bool started_hidden =
+      (si.dwFlags & STARTF_USESHOWWINDOW) != 0 && si.wShowWindow == SW_HIDE;
+  const bool is_native_host =
+      wcsstr(command_line, L"--native-host") != nullptr ||
+      ::GetFileType(::GetStdHandle(STD_INPUT_HANDLE)) == FILE_TYPE_PIPE ||
+      started_hidden;
+  if (is_native_host) {
+    ::SetEnvironmentVariableW(L"EASYPASS_NATIVE_HOST", L"1");
+  }
+
+  // Temporary diagnostic: log the startup facts so a failing browser launch
+  // can be traced. Written to %TEMP%\easypass_host_diag.log. Remove once the
+  // host launch is confirmed working. ASCII-only content.
+  {
+    wchar_t diag_path[MAX_PATH] = {};
+    ::GetTempPathW(MAX_PATH, diag_path);
+    wcscat_s(diag_path, MAX_PATH, L"easypass_host_diag.log");
+    FILE* diag = nullptr;
+    if (_wfopen_s(&diag, diag_path, L"a") == 0 && diag != nullptr) {
+      fprintf(diag,
+              "[tick=%llu] argv_flag=%d stdin_type=%lu started_hidden=%d "
+              "native_host=%d\n",
+              (unsigned long long)::GetTickCount64(),
+              wcsstr(command_line, L"--native-host") != nullptr ? 1 : 0,
+              (unsigned long)::GetFileType(
+                  ::GetStdHandle(STD_INPUT_HANDLE)),
+              started_hidden ? 1 : 0, is_native_host ? 1 : 0);
+      fclose(diag);
+    }
+  }
+
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -29,6 +77,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   Win32Window::Size size(1280, 720);
   if (!window.Create(L"easypass", origin, size)) {
     return EXIT_FAILURE;
+  }
+  // In native host mode the Dart code never renders UI; hide the window so
+  // no blank window pops up every time the browser connects. The message
+  // loop below still runs, which the Flutter engine needs.
+  if (is_native_host) {
+    ::ShowWindow(window.GetHandle(), SW_HIDE);
   }
   window.SetQuitOnClose(true);
 

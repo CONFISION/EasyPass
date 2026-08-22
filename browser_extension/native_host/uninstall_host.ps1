@@ -8,7 +8,9 @@ $ErrorActionPreference = "Stop"
 
 $regPaths = @(
   "HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.easypass.app",
-  "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.easypass.app"
+  "HKCU:\Software\WOW6432Node\Google\Chrome\NativeMessagingHosts\com.easypass.app",
+  "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.easypass.app",
+  "HKCU:\Software\WOW6432Node\Microsoft\Edge\NativeMessagingHosts\com.easypass.app"
 )
 
 foreach ($regPath in $regPaths) {

@@ -28,8 +28,10 @@ applyI18n();
 // ─── Initialize ───────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
+  // checkStatus drives the whole flow: locked -> unlock screen,
+  // unlocked -> entry list, failure -> error state. loadEntries is only
+  // called once the host reports unlocked.
   checkStatus();
-  loadEntries();
   
   searchInput.addEventListener('input', (e) => {
     const query = e.target.value.trim();
@@ -44,11 +46,46 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnOpenApp').addEventListener('click', openDesktopApp);
 });
 
+// The background script resolves with the payload on success and resolves
+// with { error: message } on failure (native host unavailable, locked, ...).
+function isErrorResponse(res) {
+  return res && typeof res === 'object' && res.error !== undefined;
+}
+
+function errorMessage(res) {
+  return res && res.error ? res.error : String(res);
+}
+
+// Popup-side timeout so a hung background/service-worker round-trip cannot
+// leave the popup stuck on the spinner forever; the error text then shows
+// exactly which stage stalled.
+function sendWithTimeout(message, ms = 8000) {
+  return Promise.race([
+    chrome.runtime.sendMessage(message),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('background timeout after ' + ms + 'ms')), ms)
+    )
+  ]);
+}
+
+function showErrorState(detail) {
+  contentDiv.innerHTML = `
+    <div class="empty-state">
+      <div class="icon">⚠️</div>
+      <div>${chrome.i18n.getMessage('cannotConnect')}</div>
+      <div style="margin-top: 8px; font-size: 12px;">${escapeHtml(detail || '')}</div>
+    </div>
+  `;
+}
+
 // ─── Check Connection Status ──────────────────────────────
 
 async function checkStatus() {
   try {
-    const status = await chrome.runtime.sendMessage({ action: 'getStatus' });
+    const status = await sendWithTimeout({ action: 'getStatus' });
+    if (isErrorResponse(status)) {
+      throw new Error(errorMessage(status));
+    }
     if (status && status.locked) {
       statusDot.className = 'status locked';
       statusDot.title = chrome.i18n.getMessage('vaultLocked');
@@ -56,10 +93,12 @@ async function checkStatus() {
     } else {
       statusDot.className = 'status connected';
       statusDot.title = chrome.i18n.getMessage('connected');
+      loadEntries();
     }
   } catch (e) {
     statusDot.className = 'status disconnected';
     statusDot.title = chrome.i18n.getMessage('statusDisconnected');
+    showErrorState(e.message);
   }
 }
 
@@ -67,7 +106,10 @@ async function checkStatus() {
 
 async function loadEntries() {
   try {
-    const entries = await chrome.runtime.sendMessage({ action: 'getAllCredentials' });
+    const entries = await sendWithTimeout({ action: 'getAllCredentials' });
+    if (isErrorResponse(entries)) {
+      throw new Error(errorMessage(entries));
+    }
     renderEntries(entries);
   } catch (e) {
     contentDiv.innerHTML = `
@@ -84,10 +126,13 @@ async function loadEntries() {
 
 async function searchEntries(query) {
   try {
-    const entries = await chrome.runtime.sendMessage({ 
+    const entries = await sendWithTimeout({ 
       action: 'searchCredentials', 
       query 
     });
+    if (isErrorResponse(entries)) {
+      throw new Error(errorMessage(entries));
+    }
     renderEntries(entries);
   } catch (e) {
     contentDiv.innerHTML = `<div class="empty-state"><div>${chrome.i18n.getMessage('searchFailed')}</div></div>`;
@@ -97,7 +142,7 @@ async function searchEntries(query) {
 // ─── Render Entry List ────────────────────────────────────
 
 function renderEntries(entries) {
-  if (!entries || entries.length === 0) {
+  if (!Array.isArray(entries) || entries.length === 0) {
     contentDiv.innerHTML = `
       <div class="empty-state">
         <div class="icon">📭</div>
@@ -141,12 +186,16 @@ async function fillCredentialsOnCurrentTab(entryId) {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
     // Request full credentials from native host
-    const credentials = await chrome.runtime.sendMessage({
+    const credentials = await sendWithTimeout({
       action: 'getCredentials',
       url: tab.url
     });
+    if (isErrorResponse(credentials)) {
+      throw new Error(errorMessage(credentials));
+    }
     
     // Find the matching entry
+    if (!Array.isArray(credentials)) return;
     const entry = credentials.find(c => c.id === entryId);
     
     if (entry && tab.id) {
@@ -189,7 +238,7 @@ function showLockedState() {
     const password = document.getElementById('masterPassword').value;
     try {
       await chrome.runtime.sendMessage({ action: 'unlock', password });
-      window.close();
+      await checkStatus(); // refresh in place: now unlocked, show the list
     } catch (e) {
       alert(chrome.i18n.getMessage('failedToUnlock') + ': ' + e.message);
     }

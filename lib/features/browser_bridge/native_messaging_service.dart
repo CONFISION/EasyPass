@@ -4,6 +4,8 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../../core/crypto/crypto_service.dart';
 import '../../core/crypto/totp_service.dart';
 import '../../data/database/database.dart';
@@ -33,33 +35,44 @@ class NativeMessagingService {
   Future<void> start() async {
     if (_running) return;
     _running = true;
+    _diag('host service started, unlocked=$isUnlocked');
 
-    // Read 4-byte length prefix, then the message
+    // One StreamIterator for the whole session: stdin is a single-subscription
+    // stream, so every frame must consume from the same iterator.
+    final iterator = StreamIterator(stdin);
     while (_running) {
       try {
-        final lengthBytes = await stdin.first;
-        if (lengthBytes.length < 4) break;
-
-        final length = (lengthBytes[0] & 0xff) |
-            ((lengthBytes[1] & 0xff) << 8) |
-            ((lengthBytes[2] & 0xff) << 16) |
-            ((lengthBytes[3] & 0xff) << 24);
-
-        final messageBytes = await stdin.first;
-        while (messageBytes.length < length) {
-          final remaining = await stdin.first;
-          messageBytes.addAll(remaining);
+        final message = await readMessage(iterator);
+        if (message == null) {
+          _diag('stdin EOF, host exiting');
+          break; // stdin closed (browser exited)
         }
-
-        final message = utf8.decode(messageBytes.sublist(0, length));
-        final response =
-            await handleRequest(jsonDecode(message) as Map<String, dynamic>);
-
-        _sendResponse(response);
+        _diag(
+            'recv requestId=${message['requestId']} action=${message['action']}');
+        final response = await handleRequest(message);
+        await _sendResponse(response);
+        _diag('sent requestId=${message['requestId']}');
       } catch (e) {
         if (!_running) break;
-        _sendResponse({'error': e.toString()});
+        _diag('loop error: $e');
+        await _sendResponse({'error': e.toString()});
       }
+    }
+  }
+
+  /// Temporary diagnostics for the browser-launch investigation. Writes to
+  /// %TEMP%\easypass_host_dart.log. NEVER logs message payloads (they may
+  /// contain secrets). Remove once the host launch is confirmed working.
+  void _diag(String message) {
+    try {
+      final temp = Platform.environment['TEMP'];
+      if (temp == null) return;
+      File('$temp\\easypass_host_dart.log').writeAsStringSync(
+          '${DateTime.now().toIso8601String()} $message\r\n',
+          mode: FileMode.append,
+          flush: true);
+    } catch (_) {
+      // Diagnostics must never break the host loop.
     }
   }
 
@@ -69,8 +82,18 @@ class NativeMessagingService {
   }
 
   /// Send a JSON response to the browser extension
-  void _sendResponse(Map<String, dynamic> response) {
-    final json = jsonEncode(response);
+  Future<void> _sendResponse(Map<String, dynamic> response) async {
+    stdout.add(encodeMessage(response));
+    // Dart's stdout buffers; the host process stays alive between requests,
+    // so without an explicit flush the browser never receives the response.
+    await stdout.flush();
+  }
+
+  /// Encode a JSON message as a native-messaging frame: a 4-byte little-endian
+  /// length prefix followed by the UTF-8 JSON bytes.
+  @visibleForTesting
+  static Uint8List encodeMessage(Map<String, dynamic> message) {
+    final json = jsonEncode(message);
     final bytes = utf8.encode(json);
     final length = bytes.length;
 
@@ -80,8 +103,45 @@ class NativeMessagingService {
     header[2] = (length >> 16) & 0xff;
     header[3] = (length >> 24) & 0xff;
 
-    stdout.add(header);
-    stdout.add(bytes);
+    return Uint8List.fromList([...header, ...bytes]);
+  }
+
+  /// Read one native-messaging frame from [iterator]: a 4-byte little-endian
+  /// length prefix followed by that many UTF-8 JSON bytes.
+  ///
+  /// The browser may write the header and the payload in a single write or
+  /// split them across arbitrary chunk boundaries (e.g. header in one write
+  /// and payload in another, or even the header itself split), so bytes are
+  /// accumulated until both the header and the full payload are available.
+  ///
+  /// Returns the decoded message, or null on EOF (browser closed the pipe).
+  @visibleForTesting
+  static Future<Map<String, dynamic>?> readMessage(
+      StreamIterator<List<int>> iterator) async {
+    final buffer = BytesBuilder(copy: false);
+
+    // Accumulate until we have the 4-byte length header.
+    while (buffer.length < 4) {
+      if (!await iterator.moveNext()) return null;
+      buffer.add(iterator.current);
+    }
+
+    final headBytes = buffer.takeBytes();
+    final length = (headBytes[0] & 0xff) |
+        ((headBytes[1] & 0xff) << 8) |
+        ((headBytes[2] & 0xff) << 16) |
+        ((headBytes[3] & 0xff) << 24);
+    if (length <= 0) return null;
+
+    final payload = BytesBuilder(copy: false)..add(headBytes.sublist(4));
+    while (payload.length < length) {
+      if (!await iterator.moveNext()) return null;
+      payload.add(iterator.current);
+    }
+
+    final messageBytes = payload.takeBytes();
+    final message = utf8.decode(messageBytes.sublist(0, length));
+    return jsonDecode(message) as Map<String, dynamic>;
   }
 
   /// Handle a single incoming message from the browser extension.

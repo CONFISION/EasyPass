@@ -4,10 +4,5 @@
   "path": "easypass.exe",
   "args": ["--native-host"],
   "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://*"
-  ],
-  "allowed_origins_edge": [
-    "extension://*"
-  ]
+  "allowed_origins": ["chrome-extension://hlkbbdlgaocmnjlgpafkimobnkfniike/"]
 }

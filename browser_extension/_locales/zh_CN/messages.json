@@ -104,6 +104,10 @@
     "message": "EasyPass：本机宿主已断开连接",
     "description": "控制台日志"
   },
+  "logNativeHostError": {
+    "message": "EasyPass：本机宿主错误：$1",
+    "description": "控制台错误，$1 为 chrome.runtime.lastError 消息"
+  },
   "logConnectedToNativeHost": {
     "message": "EasyPass：已连接到本机宿主",
     "description": "控制台日志"

@@ -47,3 +47,9 @@ app.*.map.json
 !**/.codewhale/constitution.json
 .deepseek/
 HANDOFF.md
+
+# Browser extension signing key (determines the fixed extension ID)
+keys/
+
+# Local diagnostic logs copied out of the browser
+log/
