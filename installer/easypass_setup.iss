@@ -4,11 +4,17 @@
 ; app must live in a user-writable directory (LocalAppData), not Program
 ; Files. No admin rights are required.
 ;
+; Native messaging host registration is done natively in [Code] (registry +
+; manifest file). No PowerShell is spawned by the installer — this keeps
+; Defender heuristics quiet: silently running powershell.exe with
+; -ExecutionPolicy Bypass from an unsigned installer is a classic
+; malware behavior and triggered Trojan:Win32/Wacatac.B!ml false positives.
+;
 ; Compile:
 ;   "C:\Program Files\Inno Setup 7\ISCC.exe" installer\easypass_setup.iss
 
 #define MyAppName "EasyPass"
-#define MyAppVersion "1.2.0"
+#define MyAppVersion "1.3.0"
 #define MyAppPublisher "easypass.com"
 #define MyAppExeName "easypass.exe"
 #define MyAppId "{{8F1E5B2A-6C4D-4E9F-9A1B-2C3D4E5F6071}"
@@ -62,7 +68,8 @@ Source: "..\build\windows\x64\runner\Release\vcruntime140_1.dll"; DestDir: "{app
 Source: "..\build\windows\x64\runner\Release\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Runtime-loaded fonts (FontLoader reads assets/fonts next to the exe)
 Source: "..\build\windows\x64\runner\Release\assets\fonts\*"; DestDir: "{app}\assets\fonts"; Flags: ignoreversion recursesubdirs createallsubdirs
-; Native messaging host registration scripts
+; Native messaging host scripts (manual registration only — the installer
+; registers the host natively in [Code], see below)
 Source: "..\browser_extension\native_host\install_host.ps1"; DestDir: "{app}\native_host"; Flags: ignoreversion
 Source: "..\browser_extension\native_host\uninstall_host.ps1"; DestDir: "{app}\native_host"; Flags: ignoreversion
 
@@ -71,8 +78,83 @@ Name: "{autoprograms}\EasyPass"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\EasyPass"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\native_host\install_host.ps1"" -ExePath ""{app}\easypass.exe"""; StatusMsg: "注册浏览器扩展主机..."; Flags: runhidden; Tasks: registerhost
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,EasyPass}"; Flags: nowait postinstall skipifsilent
 
-[UninstallRun]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\native_host\uninstall_host.ps1"""; Flags: runhidden
+; ─── Native messaging host registration (no PowerShell) ────────────────
+
+[Code]
+const
+  ExtensionId = 'hlkbbdlgaocmnjlgpafkimobnkfniike';
+  HostName = 'com.easypass.app';
+
+var
+  HostRegistered: Boolean;
+
+function JsonEscape(const S: String): String;
+begin
+  { JSON strings need backslashes escaped. The install dir may contain no
+    quotes, so escaping backslashes is sufficient for Windows paths. }
+  Result := S;
+  StringChangeEx(Result, '\', '\\', True);
+end;
+
+procedure RegisterNativeHost();
+var
+  ManifestDir, ManifestPath, ExePath, Manifest: String;
+begin
+  ManifestDir := ExpandConstant('{localappdata}\EasyPass');
+  if not DirExists(ManifestDir) then
+    ForceDirectories(ManifestDir);
+  ManifestPath := ManifestDir + '\' + HostName + '.json';
+  ExePath := ExpandConstant('{app}\' + '{#MyAppExeName}');
+
+  Manifest :=
+    '{' + #13#10 +
+    '  "name": "' + HostName + '",' + #13#10 +
+    '  "description": "EasyPass Password Manager Native Messaging Host",' + #13#10 +
+    '  "path": "' + JsonEscape(ExePath) + '",' + #13#10 +
+    '  "args": ["--native-host"],' + #13#10 +
+    '  "type": "stdio",' + #13#10 +
+    '  "allowed_origins": ["chrome-extension://' + ExtensionId + '/"]' + #13#10 +
+    '}';
+
+  { SaveStringToFile with Unicode=False writes ANSI -- since the manifest
+    content is pure ASCII, the output bytes equal UTF-8 WITHOUT a BOM, which
+    is what Chromium's JSON parser requires. Keep the content ASCII-only. }
+  if SaveStringToFile(ManifestPath, Manifest, False) then
+  begin
+    // Register BOTH registry views: 64-bit browsers read HKCU\Software\...
+    // while 32-bit browsers (Edge/Chrome x86) read the redirected
+    // HKCU\Software\WOW6432Node\... view. Missing one yields
+    // "Specified native messaging host not found".
+    RegWriteStringValue(HKCU64, 'Software\Google\Chrome\NativeMessagingHosts\' + HostName, '', ManifestPath);
+    RegWriteStringValue(HKCU64, 'Software\Microsoft\Edge\NativeMessagingHosts\' + HostName, '', ManifestPath);
+    RegWriteStringValue(HKCU32, 'Software\Google\Chrome\NativeMessagingHosts\' + HostName, '', ManifestPath);
+    RegWriteStringValue(HKCU32, 'Software\Microsoft\Edge\NativeMessagingHosts\' + HostName, '', ManifestPath);
+    HostRegistered := True;
+  end;
+end;
+
+procedure UnregisterNativeHost();
+begin
+  RegDeleteKeyIncludingSubkeys(HKCU64, 'Software\Google\Chrome\NativeMessagingHosts\' + HostName);
+  RegDeleteKeyIncludingSubkeys(HKCU64, 'Software\Microsoft\Edge\NativeMessagingHosts\' + HostName);
+  RegDeleteKeyIncludingSubkeys(HKCU32, 'Software\Google\Chrome\NativeMessagingHosts\' + HostName);
+  RegDeleteKeyIncludingSubkeys(HKCU32, 'Software\Microsoft\Edge\NativeMessagingHosts\' + HostName);
+  DeleteFile(ExpandConstant('{localappdata}\EasyPass\') + HostName + '.json');
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    if WizardIsTaskSelected('registerhost') then
+      RegisterNativeHost();
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usUninstall then
+    UnregisterNativeHost();
+end;
