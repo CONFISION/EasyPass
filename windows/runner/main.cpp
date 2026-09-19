@@ -61,7 +61,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(L"easypass", origin, size)) {
+  // Product name as shown in the title bar / taskbar; the in-app brand lives in
+  // the vault sidebar (see lib/features/vault/screens/vault_screen.dart).
+  if (!window.Create(L"EasyPass", origin, size)) {
     return EXIT_FAILURE;
   }
   // In native host / daemon mode the Dart code never renders UI; hide the

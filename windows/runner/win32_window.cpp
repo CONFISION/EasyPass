@@ -18,6 +18,16 @@ namespace {
 
 constexpr const wchar_t kWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
 
+// Minimum window size, in logical (96 dpi) pixels, enforced through
+// WM_GETMINMAXINFO below.
+//
+// Why: the vault layout is a fixed 248 px sidebar plus the entry pane next to
+// it; below roughly 900 logical px the sidebar header and the entry list start
+// to overflow, and the window becomes unusable. Keep these in sync with the
+// sidebar width in lib/features/vault/screens/vault_screen.dart.
+constexpr int kMinWindowWidth = 900;
+constexpr int kMinWindowHeight = 600;
+
 /// Registry key for app theme preference.
 ///
 /// A value of 0 indicates apps should use dark mode. A non-zero or missing
@@ -197,6 +207,40 @@ Win32Window::MessageHandler(HWND hwnd,
 
       return 0;
     }
+    case WM_GETMINMAXINFO: {
+      // Windows asks for the tracking limits whenever the user starts a resize
+      // (or maximizes): this is where the minimum size is enforced.
+      // ptMinTrackSize is in physical pixels, so convert the logical minimum
+      // through the window's current DPI -- otherwise the limit silently
+      // shrinks on 125%/150% displays.
+      auto* min_max_info = reinterpret_cast<MINMAXINFO*>(lparam);
+      const double scale_factor = FlutterDesktopGetDpiForHWND(hwnd) / 96.0;
+      LONG min_width = Scale(kMinWindowWidth, scale_factor);
+      LONG min_height = Scale(kMinWindowHeight, scale_factor);
+
+      // Never demand more room than the monitor's work area actually has:
+      // on a small, highly scaled display a hard 900x600 floor could make the
+      // window impossible to fit on screen.
+      MONITORINFO monitor_info = {sizeof(monitor_info)};
+      if (GetMonitorInfo(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
+                         &monitor_info)) {
+        const LONG work_width =
+            monitor_info.rcWork.right - monitor_info.rcWork.left;
+        const LONG work_height =
+            monitor_info.rcWork.bottom - monitor_info.rcWork.top;
+        if (work_width > 0 && min_width > work_width) {
+          min_width = work_width;
+        }
+        if (work_height > 0 && min_height > work_height) {
+          min_height = work_height;
+        }
+      }
+
+      min_max_info->ptMinTrackSize.x = min_width;
+      min_max_info->ptMinTrackSize.y = min_height;
+      return 0;
+    }
+
     case WM_SIZE: {
       RECT rect = GetClientArea();
       if (child_content_ != nullptr) {

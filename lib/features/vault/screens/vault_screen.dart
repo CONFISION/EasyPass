@@ -15,6 +15,26 @@ import '../widgets/entry_card.dart';
 class VaultScreen extends ConsumerWidget {
   const VaultScreen({super.key});
 
+  /// Fixed sidebar width in logical pixels.
+  ///
+  /// Deliberately a fixed width instead of the old `flex: 2 / maxWidth: 300`
+  /// ratio: in a narrow window the ratio squeezed the sidebar to ~130px, which
+  /// pushed the brand header past its Row and produced the overflow stripes the
+  /// user saw. A fixed 248px keeps the header and the folder list readable, and
+  /// at the 900px minimum window width (enforced natively in
+  /// `windows/runner/win32_window.cpp`) it still leaves ~650px for the entries.
+  static const double _sidebarWidth = 248;
+
+  /// Height of the top strip of **both** columns: the sidebar's brand header and
+  /// the right column's toolbar.
+  ///
+  /// Shared on purpose. Each side centres its own content inside a fixed-height
+  /// box of this value, so the divider under the brand header and the divider
+  /// under the toolbar land on the exact same y coordinate by construction —
+  /// not because padding and font metrics happen to add up. Change this one
+  /// value and both columns follow.
+  static const double _topBarHeight = 64;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final showFavorites = ref.watch(showFavoritesProvider);
@@ -24,74 +44,125 @@ class VaultScreen extends ConsumerWidget {
         : ref.watch(filteredVaultEntriesProvider);
     final l10n = AppLocalizations.of(context);
 
+    // Context title of the right pane. The brand is NOT part of it: "EasyPass"
+    // is shown once, at the top of the sidebar (see _buildSidebar).
     String title;
     if (showFavorites) {
       title = l10n.favoritesTitle;
     } else if (folderName != null) {
       title = folderName;
     } else {
-      title = l10n.appTitle;
+      title = l10n.allItems;
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-        centerTitle: false,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () {
-              showSearch(
-                context: context,
-                delegate: _VaultSearchDelegate(ref: ref),
-              );
-            },
-            tooltip: l10n.searchTooltip,
-          ),
-          IconButton(
-            icon: const Icon(Icons.auto_fix_high),
-            onPressed: () => context.push('/generator'),
-            tooltip: l10n.generatorTooltip,
-          ),
-          IconButton(
-            icon: const Icon(Icons.health_and_safety_outlined),
-            onPressed: () => context.push('/health'),
-            tooltip: l10n.healthReport,
-          ),
-          IconButton(
-            icon: const Icon(Icons.lock_outline),
-            onPressed: () {
-              ref.read(authProvider.notifier).lock();
-            },
-            tooltip: l10n.lockTooltip,
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => context.push('/settings'),
-            tooltip: l10n.settings,
-          ),
-        ],
-      ),
-      // Persistent sidebar (30%) + entries area (70%).
-      body: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Flexible(
-            flex: 2,
-            fit: FlexFit.loose,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 300),
-              child: _buildSidebar(context, ref),
+      // Two full-height columns and no top-level AppBar: the sidebar owns the
+      // brand and stretches from the very top to the very bottom of the window,
+      // while the right column carries its own toolbar (context title + the five
+      // global actions).
+      body: SafeArea(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SizedBox(width: _sidebarWidth, child: _buildSidebar(context, ref)),
+            const VerticalDivider(width: 1, thickness: 1),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildToolbar(context, ref, l10n, title),
+                  const Divider(height: 1, key: ValueKey('toolbarDivider')),
+                  Expanded(
+                    child: _buildEntriesArea(context, ref, entriesAsync),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const VerticalDivider(width: 1, thickness: 1),
-          Expanded(flex: 8, child: _buildEntriesArea(context, ref, entriesAsync)),
-        ],
+          ],
+        ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      // Icon-only on purpose (the user asked for a minimal UI): the tooltip
+      // stays so the button keeps an accessible name on hover / for screen
+      // readers without taking up visual space.
+      floatingActionButton: FloatingActionButton(
         onPressed: () => context.push('/vault/add'),
-        icon: const Icon(Icons.add),
-        label: Text(l10n.add),
+        tooltip: l10n.add,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  /// Right-column toolbar: the context title (all items / favorites / folder
+  /// name) followed by the five global actions.
+  ///
+  /// It carries no brand on purpose — "EasyPass" appears exactly once, at the top
+  /// of the sidebar. Keeping the context title means "which folder am I looking
+  /// at" stays visible after the AppBar is gone; if it ever feels redundant, drop
+  /// the [Expanded] Text and the toolbar becomes a pure action row.
+  Widget _buildToolbar(
+    BuildContext context,
+    WidgetRef ref,
+    AppLocalizations l10n,
+    String title,
+  ) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surface,
+      child: SizedBox(
+        // Same height as the sidebar's brand header (_topBarHeight): both columns
+        // centre their content in a fixed-height box of that value, which is what
+        // makes the two dividers below them line up exactly.
+        height: _topBarHeight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleLarge,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.search),
+                onPressed: () {
+                  showSearch(
+                    context: context,
+                    delegate: _VaultSearchDelegate(ref: ref),
+                  );
+                },
+                tooltip: l10n.searchTooltip,
+              ),
+              IconButton(
+                icon: const Icon(Icons.auto_fix_high),
+                onPressed: () => context.push('/generator'),
+                tooltip: l10n.generatorTooltip,
+              ),
+              IconButton(
+                icon: const Icon(Icons.health_and_safety_outlined),
+                onPressed: () => context.push('/health'),
+                tooltip: l10n.healthReport,
+              ),
+              IconButton(
+                icon: const Icon(Icons.lock_outline),
+                onPressed: () {
+                  ref.read(authProvider.notifier).lock();
+                },
+                tooltip: l10n.lockTooltip,
+              ),
+              IconButton(
+                icon: const Icon(Icons.settings_outlined),
+                onPressed: () => context.push('/settings'),
+                tooltip: l10n.settings,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -201,28 +272,42 @@ class VaultScreen extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Icon(Icons.security,
-                      size: 32, color: theme.colorScheme.primary),
-                  const SizedBox(width: 8),
-                  Text(
-                    l10n.appTitle,
-                    style: theme.textTheme.titleLarge
-                        ?.copyWith(fontWeight: FontWeight.bold),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+            // Header — the single place the brand is shown. Fixed height shared
+            // with the right toolbar (_topBarHeight), content centred inside it,
+            // so the divider below sits at the same y as the toolbar's.
+            SizedBox(
+              height: _topBarHeight,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Icon(Icons.security,
+                        size: 32, color: theme.colorScheme.primary),
+                    const SizedBox(width: 8),
+                    // Expanded is what makes `ellipsis` actually take effect: the
+                    // bare Text asked for its intrinsic width, so the Row overflowed
+                    // as soon as the sidebar got narrow (the yellow/black stripes).
+                    Expanded(
+                      child: Text(
+                        l10n.appTitle,
+                        style: theme.textTheme.titleLarge
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const Divider(height: 1),
+            const Divider(height: 1, key: ValueKey('sidebarHeaderDivider')),
             ListTile(
               leading: const Icon(Icons.inventory_2),
-              title: Text(l10n.allItems),
+              title: Text(
+                l10n.allItems,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
               selected: ref.watch(selectedFolderIdProvider) == null &&
                   !ref.watch(showFavoritesProvider),
               onTap: () {
@@ -232,7 +317,11 @@ class VaultScreen extends ConsumerWidget {
             ),
             ListTile(
               leading: const Icon(Icons.star),
-              title: Text(l10n.favorites),
+              title: Text(
+                l10n.favorites,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
               selected: ref.watch(showFavoritesProvider),
               onTap: () {
                 ref.read(showFavoritesProvider.notifier).state = true;
@@ -244,12 +333,15 @@ class VaultScreen extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: [
-                  Text(
-                    l10n.foldersSection,
-                    style: theme.textTheme.labelSmall
-                        ?.copyWith(fontWeight: FontWeight.bold),
+                  Expanded(
+                    child: Text(
+                      l10n.foldersSection,
+                      style: theme.textTheme.labelSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                  const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.add, size: 20),
                     onPressed: () => _showAddFolderDialog(context, ref),
@@ -267,7 +359,12 @@ class VaultScreen extends ConsumerWidget {
                     final folder = folders[index];
                     return ListTile(
                       leading: const Icon(Icons.folder),
-                      title: Text(folder.name),
+                      // Folder names are user input and can be arbitrarily long.
+                      title: Text(
+                        folder.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       selected: ref.watch(selectedFolderIdProvider) == folder.id &&
                           !ref.watch(showFavoritesProvider),
                       onTap: () {
@@ -281,14 +378,10 @@ class VaultScreen extends ConsumerWidget {
                 ),
               ),
             ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.auto_fix_high),
-              title: Text(l10n.passwordGenerator),
-              onTap: () => context.push('/generator'),
-            ),
-            // Settings entry lives in the top-right AppBar; it is intentionally
-            // not duplicated here.
+            // The generator and settings entries live in the right-column
+            // toolbar; they are intentionally not duplicated down here, and with
+            // nothing left below the folder list the separator above them is gone
+            // too.
           ],
         ),
       ),
