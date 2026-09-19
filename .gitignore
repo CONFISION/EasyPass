@@ -56,3 +56,4 @@ log/
 
 # Development roadmap (local only, not published)
 /Plan.md
+.vscode
