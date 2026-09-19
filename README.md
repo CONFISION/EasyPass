@@ -2,184 +2,323 @@
 
 **中文版**: [README_zh.md](README_zh.md)
 
-EasyPass is a **local-first, open-source password manager** for Windows, built
-with Flutter. It keeps your credentials safe on your own machine — nothing is
-ever uploaded to the cloud. A companion browser extension auto-fills your
-logins in Chrome and Edge.
+EasyPass is a **local-first password manager for Windows** with a companion
+Chrome/Edge extension: an encrypted vault on your own machine, a background
+service that keeps it available, and one-click auto-fill in the browser. The
+long-term goal is a **self-hostable Bitwarden alternative** — same convenience,
+no cloud you don't control.
 
-> **Current release: 2.2.1** — the browser extension is now usable: login-form
-> auto-fill, a popup password generator, TOTP codes, clipboard actions and a
-> password-health overview, all backed by the background daemon.
+![release](https://img.shields.io/badge/release-2.2.2-blue)
+![platform](https://img.shields.io/badge/platform-Windows-0078D6)
+![tests](https://img.shields.io/badge/tests-199%20passing-brightgreen)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+
+> **Current release: 2.2.2** — the browser extension is usable end to end
+> (auto-fill, popup generator, TOTP codes, clipboard actions, health overview,
+> unlock-once session), and the desktop UI was slimmed down: a full-height
+> sidebar with a single brand title, an icon-only add button, and a native
+> 900×600 minimum window size.
 
 ---
 
 ## Why EasyPass?
 
-- **Your data stays on your device.** The vault is encrypted (PBKDF2 +
-  AES-256-CBC) and stored in a local SQLite database. There is no server, no
-  account, no subscription — your passwords are yours, offline.
-- **Open source.** Every byte of the crypto and storage logic is in this
-  repository, auditable by anyone.
-- **A real background service.** Since 2.0 the vault core runs as a daemon
-  that starts with your system. The browser extension connects instantly,
-  with no cold-start delay, and keeps working after you close the app window.
-- **Tray-first desktop UX.** Closing the window hides EasyPass to the system
-  tray instead of quitting; the daemon keeps serving in the background.
-- **Native Windows app.** Built with Flutter for a fast, familiar desktop
-  experience, shipped as a per-user installer with no admin rights needed.
+- **Your data stays on your device.** The vault is a local SQLite file encrypted
+  with AES-256-CBC; the master password is never stored. There is no account, no
+  subscription and no telemetry — nothing is uploaded anywhere.
+- **A real background service, not a frozen app.** Since 2.0 the vault core runs
+  as a daemon that starts at logon and serves the browser extension over a
+  local-only channel. Closing the window keeps it in the tray; the extension
+  keeps working.
+- **Auto-fill that respects the page.** The extension injects nothing unless the
+  page actually has a visible password field, never puts a master-password box
+  into a web page, and only reads credentials after you click.
+- **Secrets stay in the desktop process.** TOTP secrets never reach the browser —
+  the daemon computes the six-digit code and sends only that.
+- **Fully open source and auditable.** Crypto, storage, the bridge protocol and
+  the extension are all in this repository.
+- **No admin rights required.** The installer is per-user and lands in your own
+  `%LOCALAPPDATA%`.
 
-## Features (v2.2.1)
+**North star:** a local-first, self-hostable Bitwarden replacement. Today
+EasyPass is deliberately local-only (no server, no sync); a self-hosted sync
+service is the headline item on the roadmap.
 
-**Vault**
+## Features
 
-- Master-password protection (PBKDF2-HMAC-SHA256, 100k iterations; the
-  password itself is never stored)
-- Entries with name, URL, username, password, notes and TOTP secret —
-  every sensitive field AES-256-CBC encrypted
-- Folders, favorites, instant search
-- Configurable password generator with a fresh suggestion on every new entry
-- Auto-lock (1–30 min) and change-master-password with full re-encryption
-- Password health report: weak/reused passwords, missing TOTP/URL, 0–100 score
+### Vault (desktop)
 
-**Browser extension** (Chrome MV3 / Edge) — usable:
+- Master-password protection: PBKDF2-HMAC-SHA256 with 100,000 iterations derives
+  the AES-256 key (32-byte key, 32-byte salt); the password itself is never stored
+- Entries hold name, URL, username, password, notes, TOTP secret, favorite flag
+  and folder; every sensitive field is encrypted with AES-256-CBC before it
+  reaches SQLite
+- Folders, favorites and instant search
+- Password generator (length 4–64, upper/lower/digits/symbols) with a fresh
+  suggestion pre-filled on every new entry
+- Auto-lock with selectable timeouts (1, 3, 5, 15 or 30 minutes; default 5) and
+  change-master-password with full re-encryption of the vault
+- Password health report: weak passwords (shorter than 12 characters, a single
+  character class, or a known common password), reused passwords, entries without
+  TOTP, entries without a URL — with a 0–100 score (good ≥ 80, fair ≥ 50)
 
-- **Auto-fill**: a small EasyPass icon appears inside login fields; click it to
-  fill the matching entry, pick from a list when several entries match, and get
-  a clear hint when the vault is locked or nothing matches
-- **Popup**: search the vault, copy username / password / URL, reveal
-  passwords, show TOTP codes with a live countdown, fill the current tab
-- **Password generator** using the desktop generator (length 8–64, character
-  sets), plus a **password health overview** (score and weak/reused/missing
-  2-step/missing URL counts)
-- **Unlock once**: the session lives in the daemon and is cleared after the
-  auto-lock idle timeout, when you press Lock in the popup, or as soon as you
-  lock the desktop app
+### Browser extension (Chrome MV3 / Edge)
 
-**Desktop**
+- **Auto-fill**: a small EasyPass icon is injected *inside* a password field when
+  the page has one. Clicking it checks the vault state, matches entries by
+  **domain**, then fills directly (one match) or shows its own picker list
+  (several matches); no match and locked-vault states are reported in a bubble
+  instead of failing silently
+- Works with React/Vue/Angular controlled inputs (native value setter plus
+  `input`/`change` events), open shadow roots, iframes (all frames) and SPA route
+  changes
+- **Popup, three tabs**:
+  - *Vault* — search (200 ms debounce), click a row to fill, copy username /
+    password / URL, reveal passwords, show TOTP codes with a one-second
+    countdown (and copy them), entry count
+  - *Generator* — length 8–64 and character sets, generated by the desktop
+    generator logic; still available while the vault is locked
+  - *Health* — the score plus the four issue counts
+- A status pill and a **Lock** button in the header
+- **Unlock once**: the session lives in the daemon memory, so closing the popup
+  or restarting the browser does not ask for the master password again. It is
+  cleared on the auto-lock idle timeout, when you press **Lock** in the popup, or
+  as soon as you lock the desktop app
+- The extension never injects a master-password box into a web page, never writes
+  credentials to `chrome.storage`, and reads them only on your click
 
-- Chinese / English UI, custom fonts, persistent sidebar, dark theme
-- Encrypted backup export/import (restorable) and plain JSON export
-- Background daemon + system tray (2.0)
+### Desktop & system integration
+
+- Background daemon (`easypass.exe --service`): windowless, cold-started on
+  demand by the native-messaging bridge, and it exits by itself after 10 minutes
+  idle
+- Tray icon: closing the window hides EasyPass instead of quitting; left click
+  restores it, right click offers *Open EasyPass* / *Exit*
+- Start at logon (HKCU Run key), optional in the installer
+- Architecture: browser → `easypass_native_host.exe` (x86 bridge) → loopback TCP
+  with a random per-run token handshake → daemon → encrypted SQLite
+- Chinese/English UI (follows the system locale, switchable in Settings), bundled
+  font, dark theme, persistent sidebar, 900×600 minimum window size
+
+## How it compares
+
+Honest snapshot of where EasyPass stands today. "Planned" means it is on the
+roadmap, not that it works now.
+
+| | **EasyPass 2.2.2** | **Bitwarden + Vaultwarden** | **KeePassXC** |
+|---|---|---|---|
+| Where data lives | Your PC (encrypted SQLite) | Your server (Vaultwarden) or Bitwarden cloud | Your PC (encrypted `.kdbx` file) |
+| Server required | No | Yes (for self-hosting) | No |
+| Browser auto-fill | Yes (Chrome/Edge) | Yes (all major browsers) | Yes (KeePassXC-Browser) |
+| Multi-device sync | **No** — *planned for 3.0* | Yes | Only via your own file sync |
+| Mobile apps | **No** — *planned* | Yes | Companion apps (not KeePassXC itself) |
+| Sharing / organizations | **No** — *planned* | Yes | No |
+| Self-hosting effort | Not applicable yet (no server) | Vaultwarden: low (single Docker container) | Not applicable (file-based) |
+| License | GPL-3.0 | Bitwarden clients: GPL-3.0; Vaultwarden server: AGPL-3.0 | GPL-2.0/3.0 |
+
+Where EasyPass wins today: single-machine users who want a native Windows app, a
+real background service for browser auto-fill, and no server, account or
+subscription involved. Where it clearly loses: anything multi-device.
 
 ## Installation
 
-### Option 1 — Windows users: download the installer (recommended)
+### Option 1 — Installer (recommended for Windows users)
 
-Grab `EasypassSetup.exe` from the
-[Releases](https://github.com/CONFISION/EasyPass/releases) page of this repository.
+Download `EasypassSetup.exe` from the
+[Releases](https://github.com/CONFISION/EasyPass/releases) page. If no release is
+published yet, build from source (option 2) — the build produces the same
+installer.
 
-- Per-user install to `%LOCALAPPDATA%\Programs\EasyPass` — **no admin rights**
-- Bundles the VC++ runtime and the native messaging bridge
-- Optional: register the browser host and start EasyPass at logon
-  (the vault daemon then runs in the background, tray-accessible)
+- Per-user install to `%LOCALAPPDATA%\Programs\EasyPass` — **no administrator
+  rights**
+- Bundles the VC++ runtime and the x86 native-messaging bridge
+- Registers the browser host for Chrome and Edge (both 64-bit and 32-bit registry
+  views) and can enable start-at-logon
+- ⚠️ **The installer is not code-signed yet**, so Windows SmartScreen may warn
+  about an unknown publisher. Use *More info → Run anyway* if you trust the
+  build, or build it yourself from source.
 
-### Option 2 — Build your own from source
-
-Building from source lets you review the code, patch it, or fork your own
-version.
+### Option 2 — Build from source
 
 **Prerequisites**
 
-| Requirement | Version / Notes |
-|-------------|-----------------|
+| Requirement | Version / notes |
+|---|---|
 | Windows | 10 or 11, 64-bit |
-| Git | any recent |
-| Flutter SDK | `^3.12.2` (with Dart 3.12+), on your `PATH` |
-| Visual Studio | 2022 or newer, **"Desktop development with C++"** workload (for the Windows runner and the x86 bridge) |
+| Git | any recent version |
+| Flutter SDK | stable channel, with Dart SDK `^3.12.2`, on your `PATH` |
+| Visual Studio | 2022 or newer with the **Desktop development with C++** workload (builds the Windows runner and the x86 bridge) |
 
 **Steps**
 
 ```powershell
-# 1. Clone the repository
+# 1. Clone
 git clone https://github.com/CONFISION/EasyPass.git
 cd easypass
 
-# 2. Fetch dependencies
+# 2. Dependencies
 flutter pub get
 
-# 3. Build the Windows release
-#    NOTE: this also compiles the x86 native-messaging bridge
-#    (easypass_native_host.exe) automatically as a POST_BUILD step.
-flutter build windows --release
+# 3. Release build
+#    This also compiles the x86 native-messaging bridge (easypass_native_host.exe)
+#    and copies the MSVC runtime DLLs next to the app, both as POST_BUILD steps.
+flutter build windows
 ```
 
-The app lands in `build\windows\x64\runner\Release\` — run
-`easypass.exe` directly, or package an installer with Inno Setup:
+The app lands in `build\windows\x64\runner\Release\` — run `easypass.exe` there,
+or package the per-user installer:
 
 ```powershell
-# Optional: build the per-user installer (requires Inno Setup 7)
+# Optional: build the installer (requires Inno Setup 7)
 & "C:\Program Files\Inno Setup 7\ISCC.exe" installer\easypass_setup.iss
 # output: build\installer\EasypassSetup.exe
 ```
 
-> If you modified the source after cloning, the generated files
-> (`database.g.dart`, `app_localizations*.dart`) are already committed, so a
-> plain clone builds as-is. When you change `tables.drift` run
-> `dart run build_runner build --delete-conflicting-outputs`; when you change
+> Generated files (`database.g.dart`, `app_localizations*.dart`) are committed,
+> so a fresh clone builds as-is. After changing `lib/data/database/tables.drift`
+> run `dart run build_runner build --delete-conflicting-outputs`; after changing
 > `lib/l10n/*.arb` run `flutter gen-l10n`.
 
-**Browser extension**
+## Browser extension
 
-The extension is in `browser_extension/` (not needed for the desktop app
-alone):
+The extension lives in `browser_extension/` and is not needed for the desktop app
+alone.
 
-1. Build once (above) so `easypass_native_host.exe` exists next to
-   `easypass.exe`
-2. Register the native host with your browser:
+1. Build once (above) so `easypass_native_host.exe` sits next to `easypass.exe`
+2. Register the native messaging host:
    ```powershell
    powershell -ExecutionPolicy Bypass -File browser_extension/native_host/install_host.ps1
    # optional: -ExePath "C:\path\to\your\easypass.exe"
    ```
 3. Open `edge://extensions` (or `chrome://extensions`), enable **Developer
    mode**, and **Load unpacked** the `browser_extension/` folder
-4. Restart the browser. Verify the extension ID is
-   `hlkbbdlgaocmnjlgpafkimobnkfniike` (fixed by the manifest `key`)
+4. Restart the browser and check that the extension ID is
+   `hlkbbdlgaocmnjlgpafkimobnkfniike` (fixed by the `key` field in the manifest)
 
-**Using it**: unlock the vault once — either in the desktop app or in the
-popup (the toolbar icon) — then click the EasyPass icon inside any login field
-to fill it. The vault stays unlocked in the daemon until the auto-lock idle
-timeout (Settings → auto-lock) expires, you press **Lock** in the popup, or you
-lock the desktop app. The extension never injects a master-password box into a
-web page and only reads credentials on your click.
+**Using it.** Unlock the vault once — in the desktop app or in the popup (toolbar
+icon) — then click the EasyPass icon inside any login field. The vault stays
+unlocked in the daemon until the auto-lock idle timeout expires, you press
+**Lock** in the popup, or you lock the desktop app.
 
-**Extension development checks** (no browser required):
+**Troubleshooting.**
 
-```bash
-node browser_extension/tools/check_extension.mjs   # syntax, i18n keys, manifest, protocol coverage, version parity
-node browser_extension/tools/smoke_popup.mjs       # drives the popup in jsdom against a fake native host
-node browser_extension/tools/smoke_popup_extra.mjs # guardrails: lock failure paths, a11y, DOM hooks
-node browser_extension/tools/smoke_content.mjs     # drives the content script on a fake login page in jsdom
-node browser_extension/tools/probe_bridge.mjs      # end-to-end: spawns the bridge and talks to the real daemon
-node browser_extension/tools/probe_daemon.mjs      # talks to an already-running daemon (see daemon.json)
-```
+- `Unknown action: …` in the popup means the extension is talking to an **older
+  daemon that is still running** after an upgrade. Quit EasyPass from the tray
+  icon, start it again, then retry. (2.2+ also stamps a protocol version, so a
+  stale daemon is detected and retired automatically.)
+- To find out which layer is broken without opening a browser:
+  ```bash
+  node browser_extension/tools/probe_bridge.mjs   # end-to-end: bridge + daemon + protocol
+  node browser_extension/tools/probe_daemon.mjs   # talks to an already-running daemon
+  ```
+  A working chain answers `getStatus`; `Vault is locked` means the chain is fine
+  and the vault simply needs unlocking.
+- The injected icon only appears on pages with a visible password field, so
+  `chrome://` pages, the extension store and PDF viewers are never touched — use
+  the popup there (it falls back to copying the password).
 
-The two smoke scripts need `jsdom` (development only):
-`cd %TEMP% && mkdir easypass-smoke && cd easypass-smoke && npm i jsdom`
-
-**Troubleshooting**: if the popup reports `Unknown action: …`, the extension is
-talking to an **older daemon** that is still running after an upgrade — quit
-EasyPass from the tray icon, start it again, then retry. `probe_bridge.mjs`
-tells you which layer is at fault (bridge, daemon or extension).
-
-**Tests**
+## Development & testing
 
 ```bash
-flutter analyze
-flutter test      # unit/integration tests (crypto, TOTP, generator, export/import, auth, daemon, bridge)
+flutter analyze                  # static analysis (flutter_lints)
+flutter test                     # 199 unit/integration tests: crypto, TOTP, generator,
+                                 # export/import, auth, daemon, bridge, session, URL
+                                 # matching and desktop widget tests
 ```
+
+Extension checks (no browser required):
+
+```bash
+node browser_extension/tools/check_extension.mjs    # syntax, i18n keys, manifest, protocol
+                                                    # coverage, version parity
+node browser_extension/tools/smoke_popup.mjs        # drives the popup in jsdom (21 assertions)
+node browser_extension/tools/smoke_popup_extra.mjs  # lock failure paths, a11y, DOM contract (55)
+node browser_extension/tools/smoke_content.mjs      # drives the content script on a fake page (15)
+```
+
+The smoke scripts need `jsdom` (development only, installed outside the repo):
+
+```powershell
+cd %TEMP%; mkdir easypass-smoke; cd easypass-smoke; npm i jsdom
+```
+
+Windows runner C++ can be syntax-checked without a full build:
+
+```powershell
+cmd /c windows\runner\check_syntax.bat   # cl /Zs with the same flags the build uses
+```
+
+Contributions: please read [AGENTS.md](AGENTS.md) first — it documents the build
+split, the version-sync rule and the coding conventions.
 
 ## Data & security model
 
-- **Vault database**: `easypass.db`, stored **next to the executable**
-  (in the install dir, or in `build\windows\x64\runner\Release\` for source
-  builds). Keep backups (Settings → export, or copy the file).
-- **Master-password state & settings**: `%APPDATA%\easypass.com\easypass\`
-  (DPAPI-protected): salt + hash for unlock verification and preferences.
-- Sensitive fields are AES-256-CBC encrypted before touching SQLite; the
-  derived key lives in memory only and is cleared on lock.
-- **Browser session**: unlocking from the extension derives the key again and
-  keeps it in the daemon process memory only. It is cleared on the auto-lock
-  idle timeout (default 5 min, following Settings → auto-lock), on **Lock** in
-  the popup, and whenever the desktop vault is locked. TOTP secrets never reach
-  the browser: the daemon computes codes and sends only the 6-digit values.
-- Nothing ever leaves your machine.
+- **Vault database** — `easypass.db`, stored **next to the executable** (the
+  install directory, or `build\windows\x64\runner\Release\` for source builds).
+  Back it up with Settings → export, or by copying the file.
+- **Master-password state and preferences** — `%APPDATA%\easypass.com\easypass\`,
+  protected by DPAPI on Windows: the salt plus the master-password hash used to
+  verify the unlock, and the app settings.
+- **Cryptography** — PBKDF2-HMAC-SHA256 (100,000 iterations) derives the AES-256
+  key from the master password; sensitive fields are encrypted with AES-256-CBC
+  (`IV || ciphertext`, base64). The master password is never written to disk, and
+  the derived key lives in memory only.
+- **Browser session** — unlocking from the extension derives the key again and
+  keeps it in the daemon process memory only; it is cleared on the auto-lock idle
+  timeout, on Lock in the popup, and whenever the desktop vault is locked.
+- **TOTP secrets never reach the browser** — the daemon decrypts the secret,
+  computes the six-digit code and sends only that; entries expose a
+  `hasTotp` flag, never the secret.
+- **Local channel only** — credentials travel over loopback TCP guarded by a
+  random token generated per daemon run; the port and token live in
+  `%LOCALAPPDATA%\EasyPass\daemon.json`, a user-writable directory.
+- **Nothing leaves your machine.** There is no server component, no account and
+  no telemetry in this version.
+
+## Roadmap
+
+**2.3 — distribution.** Publish the extension to the Chrome Web Store and Edge
+Add-ons so it no longer needs *Load unpacked*.
+
+**3.0 — self-hosted sync.** A server component (Docker-deployable) with accounts,
+device pairing and an organizational key hierarchy, bringing multi-device sync and
+sharing to the same client — the step that turns EasyPass into a Bitwarden
+alternative you host yourself.
+
+**After 3.0 (not scheduled).** Bitwarden / Vaultwarden import and export
+compatibility; attachments; passkeys; an Android-first mobile app; macOS and
+Linux desktop builds; emergency access; Argon2id as the key-derivation option;
+code signing and CI.
+
+## Known limitations
+
+- **Windows only** — no macOS, Linux or mobile client yet
+- **No cloud sync** — one machine per vault; moving the database file manually is
+  the only "sync" today
+- **The extension is not published** to any store; it must be loaded unpacked
+- **The installer is not code-signed**, so SmartScreen warns about an unknown
+  publisher
+- **No CI** — `flutter analyze`, `flutter test` and the extension checks are run
+  manually
+- Two-step sign-in flows (username page first, password page next) only fill the
+  step that actually shows a password field; custom non-`<input>` password
+  widgets and closed shadow roots are not supported
+- No sharing, no organizations, no attachments, no passkeys yet
+- The extension's health tab is read-only: it reports issues but cannot jump to
+  the entry in the desktop app
+
+## License
+
+EasyPass is released under the **GNU General Public License v3.0**. The full text
+is in the [`LICENSE`](LICENSE) file at the root of this repository.
+
+In short: you are free to use, study, modify, self-host and redistribute
+EasyPass, but any derivative work must be released under the same license.
+
+## Acknowledgements
+
+EasyPass stands on other people's work: [Flutter](https://flutter.dev) for the
+desktop client, [drift](https://drift.simonbinder.eu) and SQLite for storage,
+the [Catppuccin](https://catppuccin.com) palette for the colour scheme,
+[Inno Setup](https://jrsoftware.org/isinfo.php) for the installer, and the
+bundled Maple Mono NF CN font for the Chinese UI.
