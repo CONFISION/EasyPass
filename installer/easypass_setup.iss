@@ -1,4 +1,4 @@
-; EasyPass 2.0.0 — Inno Setup installer script
+; EasyPass 2.2.2 — Inno Setup installer script
 ;
 ; Per-user install: easypass.db is written next to the executable, so the
 ; app must live in a user-writable directory (LocalAppData), not Program
@@ -14,10 +14,42 @@
 ;   "C:\Program Files\Inno Setup 7\ISCC.exe" installer\easypass_setup.iss
 
 #define MyAppName "EasyPass"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.2.2"
 #define MyAppPublisher "easypass.com"
 #define MyAppExeName "easypass.exe"
 #define MyAppId "{{8F1E5B2A-6C4D-4E9F-9A1B-2C3D4E5F6071}"
+
+; ─── App-local MSVC runtime source ──────────────────────────────────────
+; easypass.exe and the plugin DLLs import MSVCP140 / VCRUNTIME140 /
+; VCRUNTIME140_1 (everything else is the UCRT that ships with Windows 10+), so
+; the installer bundles them next to the app.
+;
+; Flutter's generated Windows runner does NOT copy them into the build output;
+; installer\copy_vc_runtime.bat does (hooked into the build via a POST_BUILD
+; step in windows\runner\CMakeLists.txt). Because `windows/` is gitignored and
+; can be regenerated, this script falls back to the build machine's system
+; directory instead of aborting the compile -- a missing runtime DLL would
+; otherwise break packaging with a "Source file ... does not exist" error.
+#define ReleaseDir "..\build\windows\x64\runner\Release"
+#define SystemDir GetEnv('SystemRoot') + "\System32"
+
+#if FileExists(AddBackslash(ReleaseDir) + "msvcp140.dll")
+  #define CrtMsvcp140 AddBackslash(ReleaseDir) + "msvcp140.dll"
+#else
+  #define CrtMsvcp140 AddBackslash(SystemDir) + "msvcp140.dll"
+#endif
+
+#if FileExists(AddBackslash(ReleaseDir) + "vcruntime140.dll")
+  #define CrtVcruntime140 AddBackslash(ReleaseDir) + "vcruntime140.dll"
+#else
+  #define CrtVcruntime140 AddBackslash(SystemDir) + "vcruntime140.dll"
+#endif
+
+#if FileExists(AddBackslash(ReleaseDir) + "vcruntime140_1.dll")
+  #define CrtVcruntime140_1 AddBackslash(ReleaseDir) + "vcruntime140_1.dll"
+#else
+  #define CrtVcruntime140_1 AddBackslash(SystemDir) + "vcruntime140_1.dll"
+#endif
 
 [Setup]
 AppId={#MyAppId}
@@ -27,9 +59,9 @@ AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppComments=Local-first, open-source password manager for Windows
 AppCopyright=Copyright (C) 2026 easypass.com
-; Version resource of the generated Setup.exe (file version 2.0.0.0).
-VersionInfoVersion=2.0.0.0
-VersionInfoProductVersion=2.0.0.0
+; Version resource of the generated Setup.exe (file version 2.2.2.0).
+VersionInfoVersion=2.2.2.0
+VersionInfoProductVersion=2.2.2.0
 VersionInfoProductName=EasyPass
 VersionInfoDescription=EasyPass Password Manager Installer
 DefaultDirName={localappdata}\Programs\EasyPass
@@ -70,10 +102,14 @@ Source: "..\build\windows\x64\runner\Release\share_plus_plugin.dll"; DestDir: "{
 Source: "..\build\windows\x64\runner\Release\sqlite3_flutter_libs_plugin.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\build\windows\x64\runner\Release\url_launcher_windows_plugin.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\build\windows\x64\runner\Release\sqlite3.dll"; DestDir: "{app}"; Flags: ignoreversion
-; VC++ runtime (app-local deployment)
-Source: "..\build\windows\x64\runner\Release\msvcp140.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\build\windows\x64\runner\Release\vcruntime140.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\build\windows\x64\runner\Release\vcruntime140_1.dll"; DestDir: "{app}"; Flags: ignoreversion
+; VC++ runtime (app-local deployment). Default source is the build output
+; directory (filled in by installer\copy_vc_runtime.bat during the build); if it
+; is not there -- e.g. `windows/` was regenerated and the POST_BUILD hook is
+; gone -- the preprocessor above points at the system directory instead, so the
+; compile still succeeds instead of failing with "Source file does not exist".
+Source: "{#CrtMsvcp140}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CrtVcruntime140}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#CrtVcruntime140_1}"; DestDir: "{app}"; Flags: ignoreversion
 ; Flutter AOT snapshot, ICU data and bundled assets
 Source: "..\build\windows\x64\runner\Release\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; Runtime-loaded fonts (FontLoader reads assets/fonts next to the exe)

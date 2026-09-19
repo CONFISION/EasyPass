@@ -53,3 +53,17 @@ add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
   COMMENT "Building EasyPass native messaging host bridge (x86)"
   VERBATIM
 )
+
+# Ship the app-local x64 MSVC runtime next to the executable.
+# The installer collects these DLLs from the build output directory, but nothing
+# in the build produces them (windows/CMakeLists.txt installs the app, ICU data,
+# plugin DLLs, fonts and assets only), so packaging used to fail with
+# "Source file ... does not exist". Keep this hook: this file is tracked in git.
+# installer/easypass_setup.iss also has a system-directory fallback.
+add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+  COMMAND cmd /c call
+          "${CMAKE_CURRENT_SOURCE_DIR}/../../installer/copy_vc_runtime.bat"
+          "$<TARGET_FILE_DIR:${BINARY_NAME}>"
+  COMMENT "Copying MSVC runtime DLLs (msvcp140 / vcruntime140*)"
+  VERBATIM
+)
