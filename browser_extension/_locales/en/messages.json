@@ -127,5 +127,243 @@
   "logFailedToFill": {
     "message": "Failed to fill credentials:",
     "description": "Console error prefix"
+  },
+  "tabVault": {
+    "message": "Vault",
+    "description": "Popup vault tab"
+  },
+  "tabGenerator": {
+    "message": "Generator",
+    "description": "Popup password generator tab"
+  },
+  "tabHealth": {
+    "message": "Health",
+    "description": "Popup health report tab"
+  },
+  "lock": {
+    "message": "Lock",
+    "description": "Lock button/state"
+  },
+  "unlockFirst": {
+    "message": "Unlock first",
+    "description": "Hint shown while the vault is locked"
+  },
+  "entriesCount": {
+    "message": "$count$ entries",
+    "description": "Entry count, $count$ is a number",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "fillOnPage": {
+    "message": "Fill on this page",
+    "description": "Tooltip for the fill action on an entry"
+  },
+  "fillSuccess": {
+    "message": "Filled",
+    "description": "Credentials filled successfully"
+  },
+  "fillFailed": {
+    "message": "Fill failed",
+    "description": "Filling credentials failed"
+  },
+  "fillFallbackCopied": {
+    "message": "Can't fill on this page — password copied",
+    "description": "Shown when injection is impossible and the password was copied instead"
+  },
+  "restrictedPage": {
+    "message": "This page can't be filled",
+    "description": "Shown on browser-internal and other restricted pages"
+  },
+  "noMatchForPage": {
+    "message": "No entry matches this page",
+    "description": "Shown when no entry matches the current hostname"
+  },
+  "copyUsername": {
+    "message": "Copy username",
+    "description": "Tooltip for the copy-username action"
+  },
+  "copyPassword": {
+    "message": "Copy password",
+    "description": "Tooltip for the copy-password action"
+  },
+  "copyUrl": {
+    "message": "Copy URL",
+    "description": "Tooltip for the copy-URL action"
+  },
+  "copyTotp": {
+    "message": "Copy code",
+    "description": "Tooltip for the copy-TOTP action"
+  },
+  "showPassword": {
+    "message": "Show password",
+    "description": "Tooltip for revealing the plaintext password"
+  },
+  "hidePassword": {
+    "message": "Hide password",
+    "description": "Tooltip for hiding the plaintext password"
+  },
+  "copiedUsername": {
+    "message": "Username copied",
+    "description": "Username copied toast"
+  },
+  "copiedPassword": {
+    "message": "Password copied",
+    "description": "Password copied toast"
+  },
+  "copiedUrl": {
+    "message": "URL copied",
+    "description": "URL copied toast"
+  },
+  "copiedTotp": {
+    "message": "Code copied",
+    "description": "TOTP code copied toast"
+  },
+  "copiedGenerated": {
+    "message": "Generated password copied",
+    "description": "Generated password copied toast"
+  },
+  "nothingToCopy": {
+    "message": "Nothing to copy",
+    "description": "Shown when copying empty content"
+  },
+  "copyFailed": {
+    "message": "Copy failed",
+    "description": "Shown when writing to the clipboard fails"
+  },
+  "staleDaemon": {
+    "message": "The EasyPass background service is outdated",
+    "description": "Shown when the connected daemon is an older build that does not know new actions"
+  },
+  "restartApp": {
+    "message": "Quit EasyPass from the tray icon, start it again, then retry",
+    "description": "Recovery hint for an outdated background service"
+  },
+  "totpLabel": {
+    "message": "2-step code",
+    "description": "Label of the TOTP area"
+  },
+  "totpUnavailable": {
+    "message": "No 2-step verification for this entry",
+    "description": "Shown when an entry has no TOTP secret"
+  },
+  "sessionActive": {
+    "message": "Session kept unlocked",
+    "description": "Status hint while the session stays unlocked"
+  },
+  "autoLockIn": {
+    "message": "Auto-locks in $minutes$ min",
+    "description": "Idle auto-lock countdown, $minutes$ is minutes",
+    "placeholders": {
+      "minutes": {
+        "content": "$1"
+      }
+    }
+  },
+  "sessionExpired": {
+    "message": "Session expired — unlock again",
+    "description": "Shown when the idle timeout cleared the session"
+  },
+  "generatorLength": {
+    "message": "Length",
+    "description": "Generator length label"
+  },
+  "generatorUpper": {
+    "message": "Uppercase",
+    "description": "Generator uppercase option"
+  },
+  "generatorLower": {
+    "message": "Lowercase",
+    "description": "Generator lowercase option"
+  },
+  "generatorNumbers": {
+    "message": "Numbers",
+    "description": "Generator numbers option"
+  },
+  "generatorSymbols": {
+    "message": "Symbols",
+    "description": "Generator symbols option"
+  },
+  "generatorRegenerate": {
+    "message": "Regenerate",
+    "description": "Regenerate password button"
+  },
+  "generatorCopy": {
+    "message": "Copy",
+    "description": "Copy generated password button"
+  },
+  "generatorHint": {
+    "message": "Generated locally by the desktop app",
+    "description": "Generator footer hint"
+  },
+  "healthScore": {
+    "message": "Health score",
+    "description": "Health score label"
+  },
+  "healthLevel": {
+    "message": "Health level",
+    "description": "Health level label"
+  },
+  "healthGood": {
+    "message": "Good",
+    "description": "Health level: good"
+  },
+  "healthFair": {
+    "message": "Fair",
+    "description": "Health level: fair"
+  },
+  "healthPoor": {
+    "message": "Poor",
+    "description": "Health level: poor"
+  },
+  "healthWeak": {
+    "message": "Weak passwords",
+    "description": "Weak password count label"
+  },
+  "healthReused": {
+    "message": "Reused passwords",
+    "description": "Reused password count label"
+  },
+  "healthNoTotp": {
+    "message": "Missing 2-step",
+    "description": "Entries without TOTP label"
+  },
+  "healthNoUrl": {
+    "message": "Missing URL",
+    "description": "Entries without URL label"
+  },
+  "healthRefresh": {
+    "message": "Refresh",
+    "description": "Refresh health report button"
+  },
+  "healthLocked": {
+    "message": "Unlock to view the health report",
+    "description": "Health tab hint while locked"
+  },
+  "healthAllClear": {
+    "message": "All clear! No health issues found.",
+    "description": "Shown for a perfect score"
+  },
+  "healthEmpty": {
+    "message": "No entries to analyze",
+    "description": "Health tab hint for an empty vault"
+  },
+  "contentLockedHint": {
+    "message": "EasyPass is locked — click the toolbar icon to unlock",
+    "description": "In-page bubble: vault locked"
+  },
+  "contentNoMatch": {
+    "message": "No matching login found",
+    "description": "In-page bubble: no matching entry"
+  },
+  "contentMultiple": {
+    "message": "Choose an entry to fill",
+    "description": "In-page bubble: multiple matching entries"
+  },
+  "contentFillHint": {
+    "message": "Click to fill with EasyPass",
+    "description": "In-page bubble hint for the field icon"
   }
 }

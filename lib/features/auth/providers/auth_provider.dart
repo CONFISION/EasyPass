@@ -8,6 +8,7 @@ import '../../../core/crypto/crypto_service.dart';
 import '../../../data/database/database.dart';
 import '../../../data/repositories/vault_repository.dart';
 import '../../../l10n/app_localizations.dart';
+import '../../browser_bridge/browser_session_registry.dart';
 
 /// Error codes stored in [AuthState.errorMessage]. UI layers map these to
 /// localized strings via `AppLocalizations`.
@@ -281,6 +282,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
   void lock() {
     _autoLockTimer?.cancel();
     _ref.read(encryptionKeyProvider.notifier).state = null;
+    // The browser extension keeps its own session inside the daemon (C 方案),
+    // so lock that one too: "lock the app" must not leave the browser unlocked
+    // until the idle timeout expires. No-op when no daemon runs in this process.
+    BrowserSessionRegistry.lockIfAny();
     state = state.copyWith(status: AuthStatus.locked, errorMessage: null);
   }
 

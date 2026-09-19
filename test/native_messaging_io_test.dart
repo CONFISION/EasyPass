@@ -86,6 +86,37 @@ void main() {
       expect(await NativeMessagingService.readMessage(it), isNull);
     });
 
+    test('reads two frames that arrive inside one chunk', () async {
+      // 一个 chunk 里含两帧（bridge 把"握手帧 + 首个请求"一起写，或扩展连发
+      // 两个请求被 loopback TCP 合并）：逐帧新建缓冲的读法会丢掉第二帧，
+      // 对端于是永远等不到响应。这里钉住"残余字节必须留给下一次读取"。
+      final a = frameOf({'requestId': 'a', 'action': 'getStatus'});
+      final b = frameOf({'requestId': 'b', 'action': 'lock'});
+      final it = StreamIterator(Stream.fromIterable([
+        [...a, ...b]
+      ]));
+      expect(await NativeMessagingService.readMessage(it),
+          {'requestId': 'a', 'action': 'getStatus'});
+      expect(await NativeMessagingService.readMessage(it),
+          {'requestId': 'b', 'action': 'lock'});
+      expect(await NativeMessagingService.readMessage(it), isNull);
+    });
+
+    test('NativeMessageReader consumes coalesced frames in order', () async {
+      final a = frameOf({'requestId': 'a', 'action': 'getStatus'});
+      final b = frameOf({'requestId': 'b', 'action': 'lock'});
+      final c = frameOf({'requestId': 'c', 'action': 'getStatus'});
+      final reader = NativeMessageReader(StreamIterator(Stream.fromIterable([
+        [...a, ...b.sublist(0, 3)],
+        b.sublist(3),
+        c,
+      ])));
+      expect(await reader.read(), {'requestId': 'a', 'action': 'getStatus'});
+      expect(await reader.read(), {'requestId': 'b', 'action': 'lock'});
+      expect(await reader.read(), {'requestId': 'c', 'action': 'getStatus'});
+      expect(await reader.read(), isNull);
+    });
+
     test('returns null on EOF before any byte', () async {
       final message = await readWith([]);
       expect(message, isNull);

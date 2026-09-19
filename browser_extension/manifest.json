@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extName__",
-  "version": "2.0.0",
+  "version": "2.2.2",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjq7uqPm4jYtzAfX8l7U45ym/CK5U1W1svnlgcBv25kQfZ2lkZ5/7hi7yz0MConOJmfcsZkf6bEzxL5e7fYmN9PFay/RyvJTbN6ut52y6ngoYnAnhrMNJMuJilwoS2FAgbGnlJONUwrzvD7vRTcxAbholijAh4qFTdZxOGR+fVEBFg4A+iswYb14ME6NsufDADk8HghUh5lYdzcHM4KmwwQBh5hSx3EbfTzXIdUhz2+6CjZ0qVh9q8CbgOF6mL/70QjuoLrB2e9Inr+SMDLq8UICkhb6gbOPnxe7/KC/WgtlQ4u1mrdipFz7AR1n1MdXdFrsRCaCF4+nAeK7igZJx3QIDAQAB",
   "default_locale": "zh_CN",
   "description": "__MSG_extDescription__",
@@ -9,6 +9,7 @@
     "activeTab",
     "scripting",
     "storage",
+    "clipboardWrite",
     "nativeMessaging"
   ],
   "host_permissions": [

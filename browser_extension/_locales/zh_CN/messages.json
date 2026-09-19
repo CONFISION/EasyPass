@@ -127,5 +127,243 @@
   "logFailedToFill": {
     "message": "填充凭据失败：",
     "description": "控制台错误前缀"
+  },
+  "tabVault": {
+    "message": "密码库",
+    "description": "popup 密码库标签页"
+  },
+  "tabGenerator": {
+    "message": "生成器",
+    "description": "popup 密码生成器标签页"
+  },
+  "tabHealth": {
+    "message": "健康",
+    "description": "popup 健康报告标签页"
+  },
+  "lock": {
+    "message": "锁定",
+    "description": "锁定按钮/状态"
+  },
+  "unlockFirst": {
+    "message": "请先解锁",
+    "description": "未解锁时的提示"
+  },
+  "entriesCount": {
+    "message": "$count$ 个条目",
+    "description": "条目数量，$count$ 为数字",
+    "placeholders": {
+      "count": {
+        "content": "$1"
+      }
+    }
+  },
+  "fillOnPage": {
+    "message": "填充到当前页面",
+    "description": "条目填充按钮的悬停提示"
+  },
+  "fillSuccess": {
+    "message": "已填充",
+    "description": "凭据填充成功提示"
+  },
+  "fillFailed": {
+    "message": "填充失败",
+    "description": "凭据填充失败提示"
+  },
+  "fillFallbackCopied": {
+    "message": "无法在此页面填充，已复制密码",
+    "description": "无法注入脚本时回退复制密码的提示"
+  },
+  "restrictedPage": {
+    "message": "此页面不支持填充",
+    "description": "浏览器内部页面等受限页面的提示"
+  },
+  "noMatchForPage": {
+    "message": "当前页面没有匹配的条目",
+    "description": "按域名匹配不到条目时的提示"
+  },
+  "copyUsername": {
+    "message": "复制用户名",
+    "description": "复制用户名按钮的悬停提示"
+  },
+  "copyPassword": {
+    "message": "复制密码",
+    "description": "复制密码按钮的悬停提示"
+  },
+  "copyUrl": {
+    "message": "复制网址",
+    "description": "复制网址按钮的悬停提示"
+  },
+  "copyTotp": {
+    "message": "复制验证码",
+    "description": "复制两步验证码按钮的悬停提示"
+  },
+  "showPassword": {
+    "message": "显示密码",
+    "description": "显示明文密码按钮的悬停提示"
+  },
+  "hidePassword": {
+    "message": "隐藏密码",
+    "description": "隐藏明文密码按钮的悬停提示"
+  },
+  "copiedUsername": {
+    "message": "已复制用户名",
+    "description": "复制用户名成功提示"
+  },
+  "copiedPassword": {
+    "message": "已复制密码",
+    "description": "复制密码成功提示"
+  },
+  "copiedUrl": {
+    "message": "已复制网址",
+    "description": "复制网址成功提示"
+  },
+  "copiedTotp": {
+    "message": "已复制验证码",
+    "description": "复制验证码成功提示"
+  },
+  "copiedGenerated": {
+    "message": "已复制生成的密码",
+    "description": "复制生成密码成功提示"
+  },
+  "nothingToCopy": {
+    "message": "没有可复制的内容",
+    "description": "内容为空时的复制提示"
+  },
+  "copyFailed": {
+    "message": "复制失败",
+    "description": "写入剪贴板失败时的提示"
+  },
+  "staleDaemon": {
+    "message": "EasyPass 后台服务版本过旧",
+    "description": "扩展连到的守护进程是旧版本（不认识新动作）时的提示"
+  },
+  "restartApp": {
+    "message": "请退出并重新启动 EasyPass（托盘图标 → 退出），再重试",
+    "description": "版本过旧时的处理建议"
+  },
+  "totpLabel": {
+    "message": "两步验证码",
+    "description": "TOTP 验证码区域标签"
+  },
+  "totpUnavailable": {
+    "message": "该条目未配置两步验证",
+    "description": "条目没有 TOTP 密钥时的提示"
+  },
+  "sessionActive": {
+    "message": "保持解锁中",
+    "description": "解锁会话保持中的状态提示"
+  },
+  "autoLockIn": {
+    "message": "$minutes$ 分钟后自动锁定",
+    "description": "空闲自动锁定倒计时，$minutes$ 为分钟数",
+    "placeholders": {
+      "minutes": {
+        "content": "$1"
+      }
+    }
+  },
+  "sessionExpired": {
+    "message": "会话已过期，请重新解锁",
+    "description": "空闲超时导致会话清除时的提示"
+  },
+  "generatorLength": {
+    "message": "长度",
+    "description": "生成器长度标签"
+  },
+  "generatorUpper": {
+    "message": "大写字母",
+    "description": "生成器大写字母选项"
+  },
+  "generatorLower": {
+    "message": "小写字母",
+    "description": "生成器小写字母选项"
+  },
+  "generatorNumbers": {
+    "message": "数字",
+    "description": "生成器数字选项"
+  },
+  "generatorSymbols": {
+    "message": "符号",
+    "description": "生成器符号选项"
+  },
+  "generatorRegenerate": {
+    "message": "重新生成",
+    "description": "重新生成密码按钮"
+  },
+  "generatorCopy": {
+    "message": "复制",
+    "description": "复制生成密码按钮"
+  },
+  "generatorHint": {
+    "message": "由桌面端本地生成，与 EasyPass 应用一致",
+    "description": "生成器底部说明"
+  },
+  "healthScore": {
+    "message": "健康评分",
+    "description": "健康评分标签"
+  },
+  "healthLevel": {
+    "message": "健康等级",
+    "description": "健康等级标签"
+  },
+  "healthGood": {
+    "message": "良好",
+    "description": "健康等级：良好"
+  },
+  "healthFair": {
+    "message": "一般",
+    "description": "健康等级：一般"
+  },
+  "healthPoor": {
+    "message": "危险",
+    "description": "健康等级：危险"
+  },
+  "healthWeak": {
+    "message": "弱密码",
+    "description": "弱密码统计标签"
+  },
+  "healthReused": {
+    "message": "重复使用的密码",
+    "description": "重复密码统计标签"
+  },
+  "healthNoTotp": {
+    "message": "缺少两步验证",
+    "description": "无 TOTP 条目统计标签"
+  },
+  "healthNoUrl": {
+    "message": "缺少网址",
+    "description": "无网址条目统计标签"
+  },
+  "healthRefresh": {
+    "message": "刷新",
+    "description": "刷新健康报告按钮"
+  },
+  "healthLocked": {
+    "message": "解锁后可查看健康报告",
+    "description": "锁定状态下的健康页提示"
+  },
+  "healthAllClear": {
+    "message": "一切正常！未发现健康问题。",
+    "description": "满分健康提示"
+  },
+  "healthEmpty": {
+    "message": "没有条目可分析",
+    "description": "保险库为空时的健康页提示"
+  },
+  "contentLockedHint": {
+    "message": "EasyPass 已锁定，请点击工具栏图标解锁",
+    "description": "网页密码框气泡：保险库已锁定"
+  },
+  "contentNoMatch": {
+    "message": "没有匹配的登录信息",
+    "description": "网页密码框气泡：无匹配条目"
+  },
+  "contentMultiple": {
+    "message": "选择要填充的条目",
+    "description": "网页密码框气泡：多个匹配条目的选择提示"
+  },
+  "contentFillHint": {
+    "message": "点击使用 EasyPass 填充",
+    "description": "网页密码框内图标的气泡提示"
   }
 }

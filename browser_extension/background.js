@@ -4,6 +4,37 @@
 let nativePort = null;
 let pendingRequests = new Map();
 
+// ─── Daemon error grading ─────────────────────────────────
+//
+// 扩展比桌面端新时（刚升级、旧的 daemon 进程还在跑），旧 daemon 对本构建新增
+// 的动作只会回 `Unknown action: xxx`。原样抛给 popup，用户看到的是"未知操作：
+// getHealthReport"这类无从下手的字眼，会被误读成"扩展坏了"。这里按类型分级：
+// 这类错误翻译成"后台服务版本过旧 + 请重启应用"；连接类错误（未连接/断开/超时）
+// 保持原样，它们已经由扩展自己本地化，原因也不该被吞掉。
+//
+// EXPECTED_PROTOCOL_VERSION 必须与桌面端
+// lib/core/constants/app_constants.dart 的 bridgeProtocolVersion 一致。
+const EXPECTED_PROTOCOL_VERSION = 2;
+
+function gradeDaemonError(text) {
+  const message = String(text === undefined || text === null ? '' : text);
+  if (/unknown action/i.test(message)) {
+    return chrome.i18n.getMessage('staleDaemon') + ' — ' +
+      chrome.i18n.getMessage('restartApp');
+  }
+  return message;
+}
+
+/** 成功响应里也能看出后台服务是不是旧版本：旧 daemon 不回报 protocolVersion。
+ *  这里只记一条控制台警告 —— 不改消息契约，也不把"可用"变成"错误"
+ *  （解锁/列表仍可用，只有新动作会走上面的 unknown-action 分级）。 */
+function warnIfStaleDaemon(status) {
+  if (!status || typeof status !== 'object') return;
+  if (status.protocolVersion === EXPECTED_PROTOCOL_VERSION) return;
+  console.warn('EasyPass: ' + chrome.i18n.getMessage('staleDaemon') + ' — ' +
+    chrome.i18n.getMessage('restartApp'));
+}
+
 // ─── Native Messaging Connection ──────────────────────────
 
 function connectToNativeHost() {
@@ -52,7 +83,7 @@ function handleNativeMessage(message) {
     pendingRequests.delete(message.requestId);
     
     if (message.error) {
-      reject(new Error(message.error));
+      reject(new Error(gradeDaemonError(message.error)));
     } else {
       resolve(message.data);
     }
@@ -122,14 +153,26 @@ async function handleExtensionMessage(request) {
     case 'searchCredentials':
       return await sendToNativeHost('searchCredentials', { query: request.query });
     
-    case 'getStatus':
-      return await sendToNativeHost('getStatus');
+    case 'getStatus': {
+      const status = await sendToNativeHost('getStatus');
+      warnIfStaleDaemon(status);
+      return status;
+    }
     
     case 'unlock':
       return await sendToNativeHost('unlock', { password: request.password });
     
+    case 'lock':
+      return await sendToNativeHost('lock');
+    
     case 'generatePassword':
       return await sendToNativeHost('generatePassword', request.options || {});
+    
+    case 'getTotp':
+      return await sendToNativeHost('getTotp', { entryId: request.entryId });
+    
+    case 'getHealthReport':
+      return await sendToNativeHost('getHealthReport');
     
     default:
       throw new Error(chrome.i18n.getMessage('unknownAction', [request.action]));

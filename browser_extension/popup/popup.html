@@ -4,172 +4,163 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EasyPass</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      width: 360px;
-      min-height: 400px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #1e1e2e;
-      color: #cdd6f4;
-    }
-    .header {
-      padding: 16px;
-      background: #181825;
-      border-bottom: 1px solid #313244;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .header h1 {
-      font-size: 18px;
-      font-weight: 700;
-      color: #89b4fa;
-    }
-    .status {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      display: inline-block;
-    }
-    .status.connected { background: #a6e3a1; }
-    .status.disconnected { background: #f38ba8; }
-    .status.locked { background: #f9e2af; }
-    
-    .search-box {
-      padding: 12px 16px;
-    }
-    .search-box input {
-      width: 100%;
-      padding: 8px 12px;
-      border: 1px solid #313244;
-      border-radius: 8px;
-      background: #313244;
-      color: #cdd6f4;
-      font-size: 14px;
-      outline: none;
-    }
-    .search-box input:focus {
-      border-color: #89b4fa;
-    }
-    
-    .entry-list {
-      max-height: 300px;
-      overflow-y: auto;
-    }
-    .entry-item {
-      padding: 12px 16px;
-      border-bottom: 1px solid #313244;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      transition: background 0.2s;
-    }
-    .entry-item:hover {
-      background: #313244;
-    }
-    .entry-icon {
-      width: 36px;
-      height: 36px;
-      border-radius: 8px;
-      background: #45475a;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 18px;
-    }
-    .entry-info {
-      flex: 1;
-    }
-    .entry-name {
-      font-size: 14px;
-      font-weight: 600;
-    }
-    .entry-username {
-      font-size: 12px;
-      color: #a6adc8;
-    }
-    .entry-url {
-      font-size: 11px;
-      color: #6c7086;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      max-width: 200px;
-    }
-    
-    .actions {
-      padding: 16px;
-      border-top: 1px solid #313244;
-      display: flex;
-      gap: 8px;
-    }
-    .btn {
-      flex: 1;
-      padding: 8px 16px;
-      border: none;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: opacity 0.2s;
-    }
-    .btn:hover { opacity: 0.8; }
-    .btn-primary { background: #89b4fa; color: #1e1e2e; }
-    .btn-secondary { background: #45475a; color: #cdd6f4; }
-    
-    .empty-state {
-      padding: 32px 16px;
-      text-align: center;
-      color: #6c7086;
-    }
-    .empty-state .icon {
-      font-size: 48px;
-      margin-bottom: 12px;
-    }
-    
-    .loading {
-      padding: 32px;
-      text-align: center;
-      color: #6c7086;
-    }
-    .spinner {
-      width: 32px;
-      height: 32px;
-      border: 3px solid #313244;
-      border-top-color: #89b4fa;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin: 0 auto 12px;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-  </style>
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="header">
-    <h1>🔐 EasyPass</h1>
-    <span id="statusDot" class="status disconnected" data-i18n-title="disconnected"></span>
+  <div class="app">
+    <!-- ─── Header: brand · status pill · lock ─────────────── -->
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">🔐</span>
+        <h1 class="brand-name" data-i18n="extName">EasyPass</h1>
+      </div>
+      <div class="header-actions">
+        <span id="statusPill" class="status-pill" role="status" aria-live="polite">
+          <span id="statusDot" class="status loading" aria-hidden="true"></span>
+          <span id="statusText" class="status-text" data-i18n="loading"></span>
+        </span>
+        <button type="button" id="btnLock" class="btn-lock" data-i18n-title="lock"
+                data-i18n-aria="lock" hidden>
+          <span id="btnLockIcon" class="btn-lock-icon" aria-hidden="true">🔒</span>
+          <span id="btnLockLabel" data-i18n="lock"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- ─── Segmented tabs (reachable while locked too) ────── -->
+    <nav id="tabBar" class="tab-bar" role="tablist" hidden>
+      <button type="button" id="tabVault" class="tab" data-tab="vault" role="tab"
+              aria-selected="true" aria-controls="panelVault" data-i18n="tabVault"></button>
+      <button type="button" id="tabGenerator" class="tab" data-tab="generator" role="tab"
+              aria-selected="false" aria-controls="panelGenerator" data-i18n="tabGenerator"></button>
+      <button type="button" id="tabHealth" class="tab" data-tab="health" role="tab"
+              aria-selected="false" aria-controls="panelHealth" data-i18n="tabHealth"></button>
+    </nav>
+
+    <main id="content" class="content">
+      <!-- ─── Booting ─────────────────────────────────────── -->
+      <section id="loadingView" class="view">
+        <div class="center-state">
+          <div class="spinner" aria-hidden="true"></div>
+          <div data-i18n="loading"></div>
+        </div>
+      </section>
+
+      <!-- ─── Native host unreachable / outdated ──────────── -->
+      <section id="errorView" class="view" hidden>
+        <div class="empty-state">
+          <div class="icon" aria-hidden="true">⚠️</div>
+          <div id="errorTitle" class="empty-title" data-i18n="cannotConnect"></div>
+          <div id="errorDetail" class="empty-detail" hidden></div>
+          <button type="button" id="btnRetry" class="btn btn-secondary btn-small empty-action"
+                  data-i18n="healthRefresh"></button>
+        </div>
+      </section>
+
+      <!-- ─── Locked: unlock card (vault tab) ─────────────── -->
+      <section id="unlockView" class="view" hidden>
+        <div class="unlock">
+          <div class="unlock-icon" aria-hidden="true">🔒</div>
+          <div class="unlock-title" data-i18n="vaultLocked"></div>
+          <div class="unlock-hint" data-i18n="unlockHint"></div>
+          <label class="sr-only" for="masterPassword" data-i18n="masterPassword"></label>
+          <input type="password" id="masterPassword" data-i18n-placeholder="masterPassword"
+                 autocomplete="off" spellcheck="false" />
+          <div id="unlockError" class="form-error" role="alert" hidden></div>
+          <button type="button" id="btnUnlock" class="btn btn-primary btn-block"
+                  data-i18n="unlock"></button>
+        </div>
+      </section>
+
+      <!-- ─── Unlocked: panels ────────────────────────────── -->
+      <section id="mainView" class="view" hidden>
+        <!-- Vault -->
+        <div id="panelVault" class="panel" role="tabpanel" aria-labelledby="tabVault">
+          <div class="search-box">
+            <span aria-hidden="true">🔎</span>
+            <label class="sr-only" for="searchInput" data-i18n="searchPlaceholder"></label>
+            <input type="text" id="searchInput" data-i18n-placeholder="searchPlaceholder"
+                   autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="list-meta">
+            <span id="vaultCount" class="meta-text"></span>
+            <span id="pageBanner" class="meta-banner" hidden></span>
+          </div>
+          <div id="entryList" class="entry-list" aria-live="polite"></div>
+        </div>
+
+        <!-- Generator -->
+        <div id="panelGenerator" class="panel" role="tabpanel" aria-labelledby="tabGenerator" hidden>
+          <div class="gen-wrap">
+            <output id="genResult" class="gen-result" aria-live="polite">—</output>
+            <div id="genError" class="gen-error" role="alert" hidden>
+              <span id="genErrorTitle"></span>
+              <span id="genErrorDetail" class="gen-error-detail" hidden></span>
+            </div>
+
+            <div class="gen-controls">
+              <div class="gen-row">
+                <label class="gen-label" for="genLength" data-i18n="generatorLength"></label>
+                <span id="genLengthValue" class="gen-length-value">16</span>
+              </div>
+              <input type="range" id="genLength" min="8" max="64" step="1" value="16"
+                     aria-labelledby="genLength" />
+
+              <div class="gen-options">
+                <label class="checkbox">
+                  <input type="checkbox" id="genUpper" checked />
+                  <span data-i18n="generatorUpper"></span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" id="genLower" checked />
+                  <span data-i18n="generatorLower"></span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" id="genNumbers" checked />
+                  <span data-i18n="generatorNumbers"></span>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" id="genSymbols" checked />
+                  <span data-i18n="generatorSymbols"></span>
+                </label>
+              </div>
+
+              <div class="gen-actions">
+                <button type="button" id="btnRegenerate" class="btn btn-secondary">
+                  <span aria-hidden="true">🔄</span> <span data-i18n="generatorRegenerate"></span>
+                </button>
+                <button type="button" id="btnCopyGenerated" class="btn btn-primary">
+                  <span aria-hidden="true">📋</span> <span data-i18n="generatorCopy"></span>
+                </button>
+              </div>
+
+              <p class="hint" data-i18n="generatorHint"></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Health -->
+        <div id="panelHealth" class="panel" role="tabpanel" aria-labelledby="tabHealth" hidden>
+          <div class="health-head-bar">
+            <button type="button" id="btnHealthRefresh" class="btn btn-secondary btn-small">
+              <span aria-hidden="true">🔄</span> <span data-i18n="healthRefresh"></span>
+            </button>
+          </div>
+          <div id="healthBody" class="health-body" aria-live="polite"></div>
+        </div>
+      </section>
+    </main>
   </div>
-  
-  <div class="search-box">
-    <input type="text" id="searchInput" data-i18n-placeholder="searchPlaceholder" />
-  </div>
-  
-  <div id="content">
-    <div class="loading">
-      <div class="spinner"></div>
-      <div data-i18n="loading"></div>
+
+  <!-- ─── Toast ─────────────────────────────────────────── -->
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden>
+    <span id="toastIcon" class="toast-icon" aria-hidden="true"></span>
+    <div class="toast-body">
+      <div id="toastText"></div>
+      <div id="toastDetail" class="toast-detail" hidden></div>
     </div>
   </div>
-  
-  <div class="actions">
-    <button class="btn btn-secondary" id="btnGenerator">🔑 <span data-i18n="generator"></span></button>
-    <button class="btn btn-primary" id="btnOpenApp">📱 <span data-i18n="openApp"></span></button>
-  </div>
-  
+
   <script src="popup.js"></script>
 </body>
 </html>
