@@ -24,17 +24,34 @@ flutter pub get          # install deps
 dart run build_runner build --delete-conflicting-outputs   # regenerate database.g.dart (drift)
 flutter gen-l10n        # regenerate app_localizations.dart after editing lib/l10n/*.arb
 flutter analyze         # lint (flutter_lints)
-flutter test            # 38 unit tests: crypto, TOTP (RFC 6238 vectors), generator, export/import, auth lifecycle
+flutter test            # 190+ unit/integration tests: crypto, TOTP, generator, export/import, auth, daemon, bridge
 flutter run -d windows  # run desktop app
 flutter build windows   # release build
 ```
 
 - **Windows 构建命令固定为 `flutter build windows`** — 每次需要构建 Windows 发布版时都使用这条命令。
+- **C++ runner 改动可以不用 MSBuild 验证** — `windows\runner\check_syntax.bat` 用与真实构建相同的开关
+  （`/W4 /WX`、`cl /Zs`）对 `windows/runner/*.cpp` 做语法与类型检查，不产出任何文件、不调用 MSBuild。
+  改过 `windows/runner/**` 后先跑它，别把编译错误留给用户。
+- **窗口最小尺寸在原生层强制** — `windows/runner/win32_window.cpp` 的 `WM_GETMINMAXINFO`
+  （`kMinWindowWidth/kMinWindowHeight` = 900×600 逻辑像素，按 DPI 缩放，并夹到显示器工作区内）。
+  这两个常量必须与 `lib/features/vault/screens/vault_screen.dart` 里侧边栏的固定宽度保持一致，
+  否则窄窗又会溢出。
 - **构建分工（重要约定）** — Windows 原生构建（`flutter build windows` / `flutter run -d windows`）
   由用户亲自执行；agent 负责到构建前的完整测试与 debug（`flutter analyze`、`flutter test`、
   代码审查与修复）。agent 的执行环境与 MSBuild 存在兼容问题（FileTracker 崩溃），
   不要尝试在 agent 侧执行原生构建，也不要将其结果作为交付依据。
-- **版本号约定（`major.minor.patch`，见下方 Versioning）** — 推进版本时同步更新 `pubspec.yaml` 的 `version` 字段与 `settings_screen.dart` 中显示的版本号。
+- **版本号约定（`major.minor.patch`，见下方 Versioning）** — 推进版本时同步更新 `pubspec.yaml` 的
+  `version` 字段、`settings_screen.dart` 中显示的版本号、扩展 `manifest.json` 的 `version`
+  与 `installer/easypass_setup.iss` 的 `MyAppVersion` / `VersionInfoVersion`
+  （`browser_extension/tools/check_extension.mjs` 会校验这四处一致）。
+- **打包安装包** — `& "C:\Program Files\Inno Setup 7\ISCC.exe" installer\easypass_setup.iss`
+  （用户执行；产物在 `build\installer\EasypassSetup.exe`）。安装包需要 app-local 的
+  MSVC 运行时（`msvcp140.dll` / `vcruntime140.dll` / `vcruntime140_1.dll`），而 Flutter 生成的
+  runner **不会**把它拷进 `build\windows\x64\runner\Release`（`windows/CMakeLists.txt` 的 `install()`
+  只带 app/ICU/插件 DLL/字体/资源）：`installer/copy_vc_runtime.bat` 负责拷贝，并由
+  `windows/runner/CMakeLists.txt` 的 POST_BUILD 调用（**该文件入库受版本控制，别把这段 hook 删了**）；
+  `.iss` 里还有一层系统目录兜底，缺文件时不会中止编译。
 
 - Regenerating code: after editing `lib/data/database/tables.drift`, you **must**
   rerun build_runner — `AppDatabase` and companions in `database.g.dart` are generated.
@@ -65,7 +82,8 @@ lib/app.dart                   MaterialApp.router; go_router routes + auth redir
     ├── vault/    vault_provider.dart (stream/future providers), vault CRUD screens, entry_card widget
     ├── generator/ generator_provider.dart, generator_screen.dart
     ├── settings/ settings_screen.dart
-    └── browser_bridge/native_messaging_service.dart  stdin/stdout native messaging host
+    └── browser_bridge/  native_messaging_service.dart (protocol), vault_session.dart (session),
+                         url_matcher.dart (URL↔entry), browser_session_registry.dart, easypass_daemon.dart
 browser_extension/                      Chrome MV3 extension (see below)
 windows/                                Generated Flutter Windows runner (CMake)
 ```
@@ -76,10 +94,11 @@ encrypts sensitive fields → drift/SQLite (`easypass.db` next to the executable
 
 **Browser bridge flow:** content-script/popup → `chrome.runtime` message →
 `background.js` service worker → native messaging (4-byte length prefix + JSON,
-host id `com.easypass.app`) → `NativeMessagingService` → DB queries. Actions:
-`getCredentials`, `getAllCredentials`, `searchCredentials`, `getStatus`, `unlock`,
-`generatePassword`, `getTotp`. Response always echoes `requestId`; errors come
-back in an `error` field.
+host id `com.easypass.app`) → bridge exe → daemon (`easypass.exe --service`) →
+`NativeMessagingService` → DB queries. Actions: `getStatus`, `unlock`, `lock`,
+`getCredentials`, `getAllCredentials`, `searchCredentials`, `generatePassword`,
+`getTotp`, `getHealthReport`. Response always echoes `requestId`; errors come
+back in an `error` field. Entry JSON carries `hasTotp` (never the TOTP secret).
 
 **Routing / auth gating** is centralized in `lib/app.dart` (`_routerProvider`
 redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
@@ -96,8 +115,8 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
   messaging host implementation; the bridge contract lives here.
 - **`browser_extension/manifest.json`** — MV3 manifest; `nativeMessaging` permission.
 - **`browser_extension/native_host/com.easypass.app.json`** — host registration
-  pointing at `easypass_native_host.exe`. Note: no CMake target or script in the
-  repo currently produces that exe — the host build is not wired up yet.
+  pointing at `easypass_native_host.exe`; the installer rewrites the equivalent
+  manifest under `%LOCALAPPDATA%\EasyPass\` to point at the install directory.
 - **`windows/`** — generated runner; binary name `easypass`; DB file is written
   next to the executable (see `_openConnection()` in `database.dart`).
 - **`Plan.md`** — roadmap (Chinese); keep checklist items in sync with feature work.
@@ -151,7 +170,9 @@ Rule of thumb: 功能变更 → `y`，纯优化/修复 → `z`，架构/安全�
 
 - Branch: `master`; commits are few and direct-to-master (no PR workflow yet).
 - Commit messages are **Chinese**, `type: description` style (e.g. `add:添加了浏览器扩展的图标`, `init`).
-- `.gitignore` ignores `windows/` and the whole `build/` output tree.
+- `.gitignore` ignores the whole `build/` output tree; `windows/flutter/ephemeral/` is
+  ignored by `windows/.gitignore`. **The rest of `windows/` IS tracked** (runner sources,
+  CMake files, icon) — treat it as normal source, not as disposable generated output.
 
 ## CI/CD
 
@@ -165,11 +186,12 @@ any pipeline; `flutter analyze` and `flutter test` are manual gates.
   dir (`easypass.db`). Widget/unit tests that construct `AppDatabase()` will hit
   the real file — use `AppDatabase.forTesting()` with `NativeDatabase.memory()`
   and override `cryptoServiceProvider` with `FakeSecureStorage` (`test/fakes.dart`).
-- **The native host exe is not built by any target.** If you touch
-  `NativeMessagingService`, you cannot end-to-end test the extension unless the
-  host binary is produced manually; the bridge protocol contract is the single
-  source of truth on both sides — keep `background.js` actions in sync with
-  `_handleMessage`'s switch.
+- **The native host exe IS built by the Windows build.** `windows/runner/CMakeLists.txt`
+  (tracked in git) has a POST_BUILD step that runs `browser_extension/native_host/build_bridge.bat`
+  (cl.exe, x86, no MSBuild) next to `easypass.exe`; a second POST_BUILD step copies the MSVC
+  runtime DLLs via `installer/copy_vc_runtime.bat`. Keep both hooks when touching that file.
+  The bridge protocol contract is the single source of truth on both sides —
+  keep `background.js` actions in sync with `handleRequest`'s switch.
 - **Auth state is async** — `app.dart` redirects on `isLoading` by returning
   `null`; don't assume `authProvider` is resolved when a screen builds.
 - **Portrait-locked** in `main.dart`; Windows desktop still respects it via
@@ -178,3 +200,15 @@ any pipeline; `flutter analyze` and `flutter test` are manual gates.
   existing pattern of passing `Uint8List` keys around by reference only.
 - **Plan.md** tracks Phase 1/2 checkboxes — mark them done when features land;
   Phase 3 items (sync, sharing, health report, emergency access) are not implemented.
+- **Protocol versioning (2.2.1+):** the daemon stamps `protocolVersion` + `pid` into
+  `daemon.json` and returns `protocolVersion` from `getStatus`.
+  `AppConstants.bridgeProtocolVersion` (`lib/core/constants/app_constants.dart`) and
+  `EXPECTED_PROTOCOL_VERSION` (`browser_extension/background.js`) **must be bumped
+  together** whenever the bridge protocol changes incompatibly. This is what lets the app
+  retire a stale daemon after an upgrade — without it the extension keeps talking to the
+  old process and reports `Unknown action: …`.
+- **Debug tools (no browser needed):** `node browser_extension/tools/probe_bridge.mjs`
+  (end-to-end: spawns the bridge, talks to the real daemon) and
+  `node browser_extension/tools/probe_daemon.mjs` (talks to an already-running daemon)
+  tell you whether the bridge, the daemon or the extension is at fault. The jsdom smoke
+  scripts plus `check_extension.mjs` are the regression net for extension changes.

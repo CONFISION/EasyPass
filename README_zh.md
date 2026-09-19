@@ -4,7 +4,7 @@
 
 EasyPass 是一款**本地优先、开源**的密码管理器，使用 Flutter 构建，面向 Windows 桌面。你的凭据安全地保存在自己的设备上——**绝不联网上传**。配套的浏览器扩展可在 Chrome/Edge 中自动填充登录信息。
 
-> **当前版本：2.0.0** — 服务化架构 + 托盘常驻 + 后台守护进程，关闭应用窗口后扩展依然可用。
+> **当前版本：2.2.1** — 浏览器扩展已可用：登录表单自动填充、popup 内密码生成器、TOTP 验证码、复制操作与密码健康概览，全部由后台守护进程支撑。
 
 ---
 
@@ -16,7 +16,7 @@ EasyPass 是一款**本地优先、开源**的密码管理器，使用 Flutter �
 - **托盘优先的桌面体验。** 关闭窗口时 EasyPass 隐藏到系统托盘而非退出，守护进程在后台持续服务。
 - **原生 Windows 应用。** 使用 Flutter 构建，提供快速熟悉的桌面体验；单用户安装包，无需管理员权限。
 
-## 功能特性（v2.0.0）
+## 功能特性（v2.2.1）
 
 **保险库**
 
@@ -27,7 +27,12 @@ EasyPass 是一款**本地优先、开源**的密码管理器，使用 Flutter �
 - 自动锁定（1–30 分钟）与修改主密码（全库重新加密）
 - 密码健康报告：弱密码/重复密码/缺少 TOTP/缺少网址检测，0–100 评分
 
-**浏览器扩展**（Chrome MV3 / Edge）—— **暂不可用**：扩展目前仅实现了与本地应用的联通（锁定/解锁、凭据读取）。核心功能计划在 3 个中版本内完成。
+**浏览器扩展**（Chrome MV3 / Edge）—— **可用**：
+
+- **自动填充**：登录框内出现 EasyPass 小锁图标，点击即填充匹配条目；同域名多条时弹出列表选择；锁定或无匹配时给出明确提示
+- **popup**：搜索保险库、复制用户名/密码/网址、显示隐藏密码、查看带倒计时的 TOTP 验证码、一键填充当前页面
+- **密码生成器**（调用桌面端生成逻辑，长度 8–64、字符类型可选）与**密码健康概览**（评分 + 弱密码/重复密码/缺两步验证/缺网址计数）
+- **解锁一次即可**：会话保存在守护进程中，空闲超时、在 popup 点「锁定」、或锁定桌面端时立即清除
 
 **桌面端**
 
@@ -86,8 +91,6 @@ flutter build windows --release
 
 **浏览器扩展**
 
-> ⚠️ **当前状态**：浏览器扩展目前仅实现了与本地应用的联通（锁定/解锁、凭据读取），核心功能——登录表单自动填充、popup 内密码生成、TOTP 展示等——**尚未实现**，扩展目前**不可使用**。我们将在 3 个中版本内完成该功能。如果你熟悉浏览器扩展开发，也可以选择自行构建使用。
-
 扩展位于 `browser_extension/`（仅桌面应用不需要它）：
 
 1. 先完成上面的构建，确保 `easypass_native_host.exe` 与 `easypass.exe` 同目录
@@ -99,11 +102,30 @@ flutter build windows --release
 3. 打开 `edge://extensions`（或 `chrome://extensions`），开启**开发者模式**，选择**加载已解压的扩展程序**并指向 `browser_extension/` 文件夹
 4. 重启浏览器，确认扩展 ID 为 `hlkbbdlgaocmnjlgpafkimobnkfniike`（由 manifest 的 `key` 固定）
 
+**使用方式**：先解锁一次保险库（桌面端或工具栏 popup 内均可），然后在任意登录框里点 EasyPass 小锁图标即可填充。会话在守护进程中保持解锁，直到空闲超时（设置 → 自动锁定）、在 popup 点**锁定**、或锁定桌面端为止。扩展**不会**往网页里注入主密码输入框，且只在你点击时才读取凭据。
+
+**扩展开发自检**（无需浏览器）：
+
+```bash
+node browser_extension/tools/check_extension.mjs   # 语法 / i18n 键 / manifest / 协议动作覆盖 / 版本号一致性
+node browser_extension/tools/smoke_popup.mjs       # jsdom 里真跑 popup（假本机宿主）
+node browser_extension/tools/smoke_popup_extra.mjs # popup 护栏：锁定失败路径 / 无障碍 / DOM 契约
+node browser_extension/tools/smoke_content.mjs     # jsdom 里真跑 content script（假登录页）
+node browser_extension/tools/probe_bridge.mjs      # 端到端：拉起桥接 exe 与真实 daemon 对话
+node browser_extension/tools/probe_daemon.mjs      # 直连已在运行的 daemon（读 daemon.json）
+```
+
+两个 smoke 脚本需要 `jsdom`（仅开发期）：
+`cd %TEMP% && mkdir easypass-smoke && cd easypass-smoke && npm i jsdom`
+
+**排障**：若扩展提示 `Unknown action: …`，说明扩展连的是**升级前遗留的旧 daemon 进程** ——
+在托盘图标里退出 EasyPass 再重新启动即可；`probe_bridge.mjs` 能直接告出问题出在桥接、daemon 还是扩展。
+
 **测试**
 
 ```bash
 flutter analyze
-flutter test      # 94 个单元/集成测试
+flutter test      # 单元/集成测试（加密、TOTP、生成器、导入导出、认证、守护进程、桥接）
 ```
 
 ## 数据与安全模型
@@ -111,4 +133,5 @@ flutter test      # 94 个单元/集成测试
 - **保险库数据库**：`easypass.db`，存放于**可执行文件同目录**（安装目录，或源码构建的 `build\windows\x64\runner\Release\`）。请定期备份（设置 → 导出，或直接复制该文件）。
 - **主密码状态与设置**：`%APPDATA%\easypass.com\easypass\`（DPAPI 保护）：用于解锁验证的盐值+哈希与偏好设置。
 - 敏感字段在写入 SQLite 前均经 AES-256-CBC 加密；派生密钥仅存在于内存，锁定即清除。
+- **浏览器会话**：从扩展解锁时重新派生密钥，仅保存在守护进程内存中。空闲超时（默认 5 分钟，跟随「设置 → 自动锁定」）、在 popup 点「锁定」、以及锁定桌面端时会立即清除。TOTP 密钥**绝不下发到浏览器**：验证码由守护进程计算，只回传 6 位数字。
 - 数据绝不离开你的设备。

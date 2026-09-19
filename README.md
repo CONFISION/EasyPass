@@ -7,8 +7,9 @@ with Flutter. It keeps your credentials safe on your own machine — nothing is
 ever uploaded to the cloud. A companion browser extension auto-fills your
 logins in Chrome and Edge.
 
-> **Current release: 2.0.0** — service-based architecture, tray residency and
-> a background daemon so the extension works even when the app is closed.
+> **Current release: 2.2.1** — the browser extension is now usable: login-form
+> auto-fill, a popup password generator, TOTP codes, clipboard actions and a
+> password-health overview, all backed by the background daemon.
 
 ---
 
@@ -27,7 +28,7 @@ logins in Chrome and Edge.
 - **Native Windows app.** Built with Flutter for a fast, familiar desktop
   experience, shipped as a per-user installer with no admin rights needed.
 
-## Features (v2.0.0)
+## Features (v2.2.1)
 
 **Vault**
 
@@ -40,10 +41,19 @@ logins in Chrome and Edge.
 - Auto-lock (1–30 min) and change-master-password with full re-encryption
 - Password health report: weak/reused passwords, missing TOTP/URL, 0–100 score
 
-**Browser extension** (Chrome MV3 / Edge) — **not usable yet**:
-the extension currently only links to the desktop vault (lock/unlock,
-credential queries). Core features are planned within the next 3 minor
-releases.
+**Browser extension** (Chrome MV3 / Edge) — usable:
+
+- **Auto-fill**: a small EasyPass icon appears inside login fields; click it to
+  fill the matching entry, pick from a list when several entries match, and get
+  a clear hint when the vault is locked or nothing matches
+- **Popup**: search the vault, copy username / password / URL, reveal
+  passwords, show TOTP codes with a live countdown, fill the current tab
+- **Password generator** using the desktop generator (length 8–64, character
+  sets), plus a **password health overview** (score and weak/reused/missing
+  2-step/missing URL counts)
+- **Unlock once**: the session lives in the daemon and is cleared after the
+  auto-lock idle timeout, when you press Lock in the popup, or as soon as you
+  lock the desktop app
 
 **Desktop**
 
@@ -110,13 +120,6 @@ The app lands in `build\windows\x64\runner\Release\` — run
 
 **Browser extension**
 
-> ⚠️ **Status**: the browser extension currently only *links* to the desktop
-> vault (lock/unlock, credential queries). Core features — login-form
-> auto-fill, password generation, TOTP display — are **not implemented yet**,
-> so the extension is **not usable** at this time. We plan to complete it
-> within the next 3 minor releases. If you are familiar with browser
-> extension development, you are welcome to build and use your own.
-
 The extension is in `browser_extension/` (not needed for the desktop app
 alone):
 
@@ -132,11 +135,37 @@ alone):
 4. Restart the browser. Verify the extension ID is
    `hlkbbdlgaocmnjlgpafkimobnkfniike` (fixed by the manifest `key`)
 
+**Using it**: unlock the vault once — either in the desktop app or in the
+popup (the toolbar icon) — then click the EasyPass icon inside any login field
+to fill it. The vault stays unlocked in the daemon until the auto-lock idle
+timeout (Settings → auto-lock) expires, you press **Lock** in the popup, or you
+lock the desktop app. The extension never injects a master-password box into a
+web page and only reads credentials on your click.
+
+**Extension development checks** (no browser required):
+
+```bash
+node browser_extension/tools/check_extension.mjs   # syntax, i18n keys, manifest, protocol coverage, version parity
+node browser_extension/tools/smoke_popup.mjs       # drives the popup in jsdom against a fake native host
+node browser_extension/tools/smoke_popup_extra.mjs # guardrails: lock failure paths, a11y, DOM hooks
+node browser_extension/tools/smoke_content.mjs     # drives the content script on a fake login page in jsdom
+node browser_extension/tools/probe_bridge.mjs      # end-to-end: spawns the bridge and talks to the real daemon
+node browser_extension/tools/probe_daemon.mjs      # talks to an already-running daemon (see daemon.json)
+```
+
+The two smoke scripts need `jsdom` (development only):
+`cd %TEMP% && mkdir easypass-smoke && cd easypass-smoke && npm i jsdom`
+
+**Troubleshooting**: if the popup reports `Unknown action: …`, the extension is
+talking to an **older daemon** that is still running after an upgrade — quit
+EasyPass from the tray icon, start it again, then retry. `probe_bridge.mjs`
+tells you which layer is at fault (bridge, daemon or extension).
+
 **Tests**
 
 ```bash
 flutter analyze
-flutter test      # 94 unit/integration tests
+flutter test      # unit/integration tests (crypto, TOTP, generator, export/import, auth, daemon, bridge)
 ```
 
 ## Data & security model
@@ -148,4 +177,9 @@ flutter test      # 94 unit/integration tests
   (DPAPI-protected): salt + hash for unlock verification and preferences.
 - Sensitive fields are AES-256-CBC encrypted before touching SQLite; the
   derived key lives in memory only and is cleared on lock.
+- **Browser session**: unlocking from the extension derives the key again and
+  keeps it in the daemon process memory only. It is cleared on the auto-lock
+  idle timeout (default 5 min, following Settings → auto-lock), on **Lock** in
+  the popup, and whenever the desktop vault is locked. TOTP secrets never reach
+  the browser: the daemon computes codes and sends only the 6-digit values.
 - Nothing ever leaves your machine.
