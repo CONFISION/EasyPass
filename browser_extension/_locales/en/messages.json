@@ -365,5 +365,273 @@
   "contentFillHint": {
     "message": "Click to fill with EasyPass",
     "description": "In-page bubble hint for the field icon"
+  },
+  "entryTypeAll": {
+    "message": "All",
+    "description": "Type filter chip: no filter"
+  },
+  "entryTypeLogin": {
+    "message": "Login",
+    "description": "Entry type: login"
+  },
+  "entryTypeSecureNote": {
+    "message": "Secure note",
+    "description": "Entry type: secure note"
+  },
+  "entryTypeIdentity": {
+    "message": "Identity",
+    "description": "Entry type: identity"
+  },
+  "entryTypeSshKey": {
+    "message": "SSH key",
+    "description": "Entry type: SSH key"
+  },
+  "entryTypeFilterTooltip": {
+    "message": "Filter by type",
+    "description": "Tooltip / aria label of the type filter"
+  },
+  "typeBadgeLogin": {
+    "message": "Login",
+    "description": "Row type badge: login"
+  },
+  "typeBadgeSecureNote": {
+    "message": "Note",
+    "description": "Row type badge: secure note"
+  },
+  "typeBadgeIdentity": {
+    "message": "Identity",
+    "description": "Row type badge: identity"
+  },
+  "typeBadgeSshKey": {
+    "message": "SSH",
+    "description": "Row type badge: SSH key"
+  },
+  "entriesCountFiltered": {
+    "message": "$shown$ / $total$ entries",
+    "description": "Filtered entry count, $shown$ visible of $total$ loaded",
+    "placeholders": {
+      "shown": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "noEntriesForFilter": {
+    "message": "No entries of this type",
+    "description": "Empty state when the type filter hides every loaded entry"
+  },
+  "showNote": {
+    "message": "Show note",
+    "description": "Tooltip for revealing a secure note body"
+  },
+  "hideNote": {
+    "message": "Hide note",
+    "description": "Tooltip for hiding a secure note body"
+  },
+  "copyNote": {
+    "message": "Copy note",
+    "description": "Tooltip for the copy-note action"
+  },
+  "copiedNote": {
+    "message": "Note copied",
+    "description": "Secure note copied toast"
+  },
+  "copyFullName": {
+    "message": "Copy full name",
+    "description": "Tooltip for copying an identity full name"
+  },
+  "copyEmail": {
+    "message": "Copy email",
+    "description": "Tooltip for copying an identity email"
+  },
+  "copyPhone": {
+    "message": "Copy phone",
+    "description": "Tooltip for copying an identity phone"
+  },
+  "copyIdNumber": {
+    "message": "Copy ID number",
+    "description": "Tooltip for copying an identity ID number"
+  },
+  "copiedFullName": {
+    "message": "Name copied",
+    "description": "Identity full name copied toast"
+  },
+  "copiedEmail": {
+    "message": "Email copied",
+    "description": "Identity email copied toast"
+  },
+  "copiedPhone": {
+    "message": "Phone copied",
+    "description": "Identity phone copied toast"
+  },
+  "copiedIdNumber": {
+    "message": "ID number copied",
+    "description": "Identity ID number copied toast"
+  },
+  "copyPublicKey": {
+    "message": "Copy public key",
+    "description": "Tooltip for copying an SSH public key"
+  },
+  "copyFingerprint": {
+    "message": "Copy fingerprint",
+    "description": "Tooltip for copying an SSH key fingerprint"
+  },
+  "copyPrivateKey": {
+    "message": "Copy private key",
+    "description": "Tooltip for copying an SSH private key (explicit click only)"
+  },
+  "copiedPublicKey": {
+    "message": "Public key copied",
+    "description": "SSH public key copied toast"
+  },
+  "copiedFingerprint": {
+    "message": "Fingerprint copied",
+    "description": "SSH fingerprint copied toast"
+  },
+  "copiedPrivateKey": {
+    "message": "Private key copied",
+    "description": "SSH private key copied toast"
+  },
+  "showPrivateKey": {
+    "message": "Show private key",
+    "description": "Tooltip for revealing an SSH private key"
+  },
+  "hidePrivateKey": {
+    "message": "Hide private key",
+    "description": "Tooltip for hiding an SSH private key"
+  },
+  "sshPublicKeyLabel": {
+    "message": "Public key",
+    "description": "SSH public key field label"
+  },
+  "sshPrivateKeyLabel": {
+    "message": "Private key",
+    "description": "SSH private key field label"
+  },
+  "sshPassphraseLabel": {
+    "message": "Key passphrase",
+    "description": "SSH private key passphrase field label"
+  },
+  "copyField": {
+    "message": "Copy value",
+    "description": "Tooltip for copying an identity / custom field value"
+  },
+  "copiedField": {
+    "message": "Value copied",
+    "description": "Generic field copied toast"
+  },
+  "revealValue": {
+    "message": "Reveal value",
+    "description": "Tooltip for revealing a hidden custom field value"
+  },
+  "hideValue": {
+    "message": "Hide value",
+    "description": "Tooltip for hiding a revealed value"
+  },
+  "customFieldsLabel": {
+    "message": "Custom fields",
+    "description": "Custom fields section label"
+  },
+  "customFieldFallback": {
+    "message": "Custom field",
+    "description": "Placeholder label for an unlabelled custom field"
+  },
+  "customFieldTypeBoolean": {
+    "message": "Checked",
+    "description": "Rendered value of a boolean custom field"
+  },
+  "identityPersonalSection": {
+    "message": "Personal",
+    "description": "Identity section: personal details"
+  },
+  "identityContactSection": {
+    "message": "Contact",
+    "description": "Identity section: contact details"
+  },
+  "identityDocumentSection": {
+    "message": "Documents",
+    "description": "Identity section: documents"
+  },
+  "identityAddressSection": {
+    "message": "Address",
+    "description": "Identity section: address"
+  },
+  "identityTitleLabel": {
+    "message": "Title",
+    "description": "Identity field label"
+  },
+  "identityFirstNameLabel": {
+    "message": "First name",
+    "description": "Identity field label"
+  },
+  "identityMiddleNameLabel": {
+    "message": "Middle name",
+    "description": "Identity field label"
+  },
+  "identityLastNameLabel": {
+    "message": "Last name",
+    "description": "Identity field label"
+  },
+  "identityUsernameLabel": {
+    "message": "Username",
+    "description": "Identity field label"
+  },
+  "identityCompanyLabel": {
+    "message": "Company",
+    "description": "Identity field label"
+  },
+  "identityBirthdayLabel": {
+    "message": "Birthday",
+    "description": "Identity field label"
+  },
+  "identitySexLabel": {
+    "message": "Gender",
+    "description": "Identity field label"
+  },
+  "identityEmailLabel": {
+    "message": "Email",
+    "description": "Identity field label"
+  },
+  "identityPhoneLabel": {
+    "message": "Phone",
+    "description": "Identity field label"
+  },
+  "identityIdNumberLabel": {
+    "message": "ID number",
+    "description": "Identity field label"
+  },
+  "identityPassportLabel": {
+    "message": "Passport number",
+    "description": "Identity field label"
+  },
+  "identityLicenseLabel": {
+    "message": "License number",
+    "description": "Identity field label"
+  },
+  "identityAddress1Label": {
+    "message": "Address",
+    "description": "Identity field label"
+  },
+  "identityAddress2Label": {
+    "message": "Address line 2",
+    "description": "Identity field label"
+  },
+  "identityCityLabel": {
+    "message": "City",
+    "description": "Identity field label"
+  },
+  "identityStateLabel": {
+    "message": "State / Province",
+    "description": "Identity field label"
+  },
+  "identityPostalCodeLabel": {
+    "message": "Postal code",
+    "description": "Identity field label"
+  },
+  "identityCountryLabel": {
+    "message": "Country / Region",
+    "description": "Identity field label"
   }
 }

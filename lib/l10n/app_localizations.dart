@@ -362,6 +362,24 @@ abstract class AppLocalizations {
   /// **'Folder \"{name}\" deleted'**
   String folderDeleted(String name);
 
+  /// No description provided for @folderActions.
+  ///
+  /// In en, this message translates to:
+  /// **'Folder actions'**
+  String get folderActions;
+
+  /// No description provided for @deleteFolderNotEmptyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete \"{name}\"? It still contains {count} entries. They will NOT be deleted — they move to \"No Folder\". This cannot be undone.'**
+  String deleteFolderNotEmptyMessage(String name, int count);
+
+  /// No description provided for @deleteFolderKeepEntries.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete folder, keep entries'**
+  String get deleteFolderKeepEntries;
+
   /// No description provided for @delete.
   ///
   /// In en, this message translates to:
@@ -1213,6 +1231,516 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Failed to load health report: {error}'**
   String healthLoadFailed(String error);
+
+  /// No description provided for @entryTypeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Type'**
+  String get entryTypeLabel;
+
+  /// No description provided for @entryTypeLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Login'**
+  String get entryTypeLogin;
+
+  /// No description provided for @entryTypeSecureNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Secure note'**
+  String get entryTypeSecureNote;
+
+  /// No description provided for @entryTypeIdentity.
+  ///
+  /// In en, this message translates to:
+  /// **'Identity'**
+  String get entryTypeIdentity;
+
+  /// No description provided for @entryTypeSshKey.
+  ///
+  /// In en, this message translates to:
+  /// **'SSH key'**
+  String get entryTypeSshKey;
+
+  /// No description provided for @entryTypeAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All types'**
+  String get entryTypeAll;
+
+  /// No description provided for @entryTypeLoginDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Username, password, website and two-factor code'**
+  String get entryTypeLoginDesc;
+
+  /// No description provided for @entryTypeSecureNoteDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Free-form text, stored encrypted'**
+  String get entryTypeSecureNoteDesc;
+
+  /// No description provided for @entryTypeIdentityDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Name, ID numbers, contact details and address'**
+  String get entryTypeIdentityDesc;
+
+  /// No description provided for @entryTypeSshKeyDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Public key, private key and fingerprint'**
+  String get entryTypeSshKeyDesc;
+
+  /// No description provided for @entryTypeFilterTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Filter by type'**
+  String get entryTypeFilterTooltip;
+
+  /// No description provided for @entryTypeSwitchTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch entry type?'**
+  String get entryTypeSwitchTitle;
+
+  /// No description provided for @entryTypeSwitchMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Fields that belong to \"{from}\" will be discarded. The name, notes and custom fields are kept.'**
+  String entryTypeSwitchMessage(String from);
+
+  /// No description provided for @entryTypeSwitchConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch'**
+  String get entryTypeSwitchConfirm;
+
+  /// No description provided for @entryTypeEmptyForType.
+  ///
+  /// In en, this message translates to:
+  /// **'No {type} entries yet'**
+  String entryTypeEmptyForType(String type);
+
+  /// No description provided for @customFieldsSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom fields'**
+  String get customFieldsSection;
+
+  /// No description provided for @customFieldAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add field'**
+  String get customFieldAdd;
+
+  /// No description provided for @customFieldLabelHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Label'**
+  String get customFieldLabelHint;
+
+  /// No description provided for @customFieldValueHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Value'**
+  String get customFieldValueHint;
+
+  /// No description provided for @customFieldTypeText.
+  ///
+  /// In en, this message translates to:
+  /// **'Text'**
+  String get customFieldTypeText;
+
+  /// No description provided for @customFieldTypeHidden.
+  ///
+  /// In en, this message translates to:
+  /// **'Hidden'**
+  String get customFieldTypeHidden;
+
+  /// No description provided for @customFieldTypeBoolean.
+  ///
+  /// In en, this message translates to:
+  /// **'Checkbox'**
+  String get customFieldTypeBoolean;
+
+  /// No description provided for @customFieldRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove field'**
+  String get customFieldRemove;
+
+  /// No description provided for @customFieldNoFields.
+  ///
+  /// In en, this message translates to:
+  /// **'No custom fields'**
+  String get customFieldNoFields;
+
+  /// No description provided for @secureNoteBodyLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Note'**
+  String get secureNoteBodyLabel;
+
+  /// No description provided for @secureNoteBodyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Anything you want to keep encrypted'**
+  String get secureNoteBodyHint;
+
+  /// No description provided for @identityPersonalSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Personal'**
+  String get identityPersonalSection;
+
+  /// No description provided for @identityContactSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Contact'**
+  String get identityContactSection;
+
+  /// No description provided for @identityDocumentSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Documents'**
+  String get identityDocumentSection;
+
+  /// No description provided for @identityAddressSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Address'**
+  String get identityAddressSection;
+
+  /// No description provided for @identityTitleLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Title'**
+  String get identityTitleLabel;
+
+  /// No description provided for @identityTitleHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Mr / Ms / Dr'**
+  String get identityTitleHint;
+
+  /// No description provided for @identityFirstNameLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'First name'**
+  String get identityFirstNameLabel;
+
+  /// No description provided for @identityMiddleNameLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Middle name'**
+  String get identityMiddleNameLabel;
+
+  /// No description provided for @identityLastNameLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Last name'**
+  String get identityLastNameLabel;
+
+  /// No description provided for @identityCompanyLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Company'**
+  String get identityCompanyLabel;
+
+  /// No description provided for @identityEmailLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Email'**
+  String get identityEmailLabel;
+
+  /// No description provided for @identityPhoneLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone'**
+  String get identityPhoneLabel;
+
+  /// No description provided for @identityIdNumberLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'ID number'**
+  String get identityIdNumberLabel;
+
+  /// No description provided for @identityPassportLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Passport number'**
+  String get identityPassportLabel;
+
+  /// No description provided for @identityLicenseLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'License number'**
+  String get identityLicenseLabel;
+
+  /// No description provided for @identityAddress1Label.
+  ///
+  /// In en, this message translates to:
+  /// **'Address'**
+  String get identityAddress1Label;
+
+  /// No description provided for @identityAddress2Label.
+  ///
+  /// In en, this message translates to:
+  /// **'Address line 2'**
+  String get identityAddress2Label;
+
+  /// No description provided for @identityCityLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'City'**
+  String get identityCityLabel;
+
+  /// No description provided for @identityStateLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'State / Province'**
+  String get identityStateLabel;
+
+  /// No description provided for @identityPostalCodeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Postal code'**
+  String get identityPostalCodeLabel;
+
+  /// No description provided for @identityCountryLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Country / Region'**
+  String get identityCountryLabel;
+
+  /// No description provided for @identityBirthdayLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Birthday'**
+  String get identityBirthdayLabel;
+
+  /// No description provided for @identityBirthdayHint.
+  ///
+  /// In en, this message translates to:
+  /// **'YYYY-MM-DD'**
+  String get identityBirthdayHint;
+
+  /// No description provided for @identitySexLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Gender'**
+  String get identitySexLabel;
+
+  /// No description provided for @sshKeySection.
+  ///
+  /// In en, this message translates to:
+  /// **'Key material'**
+  String get sshKeySection;
+
+  /// No description provided for @sshPublicKeyLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Public key'**
+  String get sshPublicKeyLabel;
+
+  /// No description provided for @sshPublicKeyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'ssh-ed25519 AAAA… user@host'**
+  String get sshPublicKeyHint;
+
+  /// No description provided for @sshPrivateKeyLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Private key'**
+  String get sshPrivateKeyLabel;
+
+  /// No description provided for @sshPrivateKeyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'-----BEGIN OPENSSH PRIVATE KEY-----'**
+  String get sshPrivateKeyHint;
+
+  /// No description provided for @sshPassphraseLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Key passphrase'**
+  String get sshPassphraseLabel;
+
+  /// No description provided for @sshFingerprintLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Fingerprint'**
+  String get sshFingerprintLabel;
+
+  /// No description provided for @sshFingerprintAuto.
+  ///
+  /// In en, this message translates to:
+  /// **'Computed from the public key'**
+  String get sshFingerprintAuto;
+
+  /// No description provided for @sshKeyTypeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Key type'**
+  String get sshKeyTypeLabel;
+
+  /// No description provided for @sshBitsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Key size'**
+  String get sshBitsLabel;
+
+  /// No description provided for @sshBitsValue.
+  ///
+  /// In en, this message translates to:
+  /// **'{bits} bits'**
+  String sshBitsValue(int bits);
+
+  /// No description provided for @sshCommentLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Comment'**
+  String get sshCommentLabel;
+
+  /// No description provided for @sshPrivateKeyFormatLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Detected format'**
+  String get sshPrivateKeyFormatLabel;
+
+  /// No description provided for @sshPublicKeyInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not parse this public key'**
+  String get sshPublicKeyInvalid;
+
+  /// No description provided for @sshKeyRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a public key or a private key'**
+  String get sshKeyRequired;
+
+  /// No description provided for @sshPrivateKeyFormatValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Detected format: {format}'**
+  String sshPrivateKeyFormatValue(String format);
+
+  /// No description provided for @sshNoPrivateKey.
+  ///
+  /// In en, this message translates to:
+  /// **'No private key stored'**
+  String get sshNoPrivateKey;
+
+  /// No description provided for @sshRevealPrivateKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Reveal private key'**
+  String get sshRevealPrivateKey;
+
+  /// No description provided for @totpCodeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'One-time code'**
+  String get totpCodeLabel;
+
+  /// No description provided for @totpCopyTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy code'**
+  String get totpCopyTooltip;
+
+  /// No description provided for @totpRefreshesIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Refreshes in {seconds}s'**
+  String totpRefreshesIn(int seconds);
+
+  /// No description provided for @totpNotSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Not configured'**
+  String get totpNotSet;
+
+  /// No description provided for @searchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search the vault'**
+  String get searchHint;
+
+  /// No description provided for @searchPrefixesHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Prefixes: type: login · folder: Work · url: example.com'**
+  String get searchPrefixesHint;
+
+  /// No description provided for @folderIconLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Icon'**
+  String get folderIconLabel;
+
+  /// No description provided for @folderEditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit folder'**
+  String get folderEditTitle;
+
+  /// No description provided for @folderRenamed.
+  ///
+  /// In en, this message translates to:
+  /// **'Folder updated'**
+  String get folderRenamed;
+
+  /// No description provided for @renameFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename'**
+  String get renameFolder;
+
+  /// No description provided for @healthOnlyLogins.
+  ///
+  /// In en, this message translates to:
+  /// **'Health is scored on login entries only'**
+  String get healthOnlyLogins;
+
+  /// No description provided for @healthLoginCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} login entries analysed'**
+  String healthLoginCount(int count);
+
+  /// No description provided for @fieldCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Copied to clipboard'**
+  String get fieldCopied;
+
+  /// No description provided for @detailsSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Details'**
+  String get detailsSection;
+
+  /// No description provided for @themeLight.
+  ///
+  /// In en, this message translates to:
+  /// **'Light'**
+  String get themeLight;
+
+  /// No description provided for @themeDark.
+  ///
+  /// In en, this message translates to:
+  /// **'Dark'**
+  String get themeDark;
+
+  /// No description provided for @themeApplied.
+  ///
+  /// In en, this message translates to:
+  /// **'Theme: {value}'**
+  String themeApplied(String value);
 }
 
 class _AppLocalizationsDelegate

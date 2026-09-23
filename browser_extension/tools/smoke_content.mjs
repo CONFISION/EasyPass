@@ -319,6 +319,41 @@ function clickEl(window, el) {
   }
 }
 
+// ─── 场景 7：陈旧 daemon 返回非登录条目 → 绝不填充（协议 3 回归）──────────
+// daemon 侧的 getCredentials 只应返回登录条目；这里故意返回安全笔记 / 身份信息 /
+// SSH 密钥，验证 content-script 自己再挡一道：既不出现在选择面板里，也不会被
+// 填进页面（笔记 / 密钥的 username / password 是空串，一旦放行就是"看起来填了、
+// 其实什么都没填"或更糟）。
+{
+  const FOREIGN = [
+    { id: 'n1', type: 'secure_note', name: 'Bank note', username: '', password: '', notes: 'secret note body' },
+    { id: 'i1', type: 'identity', name: 'Alice ID', username: '', password: '', notes: '' },
+    { id: 'k1', type: 'ssh_key', name: 'Deploy key', username: '', password: '', notes: '' },
+  ];
+  const { window, doc, state } = await bootPage(LOGIN_PAGE, { entries: FOREIGN });
+  const nodes = injectedNodes(doc);
+  if (nodes.length) {
+    clickEl(window, nodes[0]);
+    await tick(400);
+  }
+  const user = doc.getElementById('user');
+  const pass = doc.getElementById('pass');
+  check('非登录条目不会被填充',
+    (!user || user.value === '') && (!pass || pass.value === ''),
+    `user=${user && user.value} pass=${pass && pass.value}`);
+  check('非登录条目不进入填充面板',
+    !doc.body.textContent.includes('Bank note') &&
+      !doc.body.textContent.includes('Alice ID') &&
+      !doc.body.textContent.includes('Deploy key'),
+    doc.body.textContent.slice(0, 200));
+  check('非登录条目只得到"没有匹配"提示',
+    doc.body.textContent.includes(t('contentNoMatch')),
+    doc.body.textContent.slice(0, 200));
+  check('仍向本机宿主取过凭据（是过滤而不是没请求）',
+    state.hostCalls.some((c) => c.action === 'getCredentials'),
+    JSON.stringify(state.hostCalls.map((c) => c.action)));
+}
+
 // ─── 输出 ─────────────────────────────────────────────────
 console.log('EasyPass content-script 冒烟测试（jsdom）');
 for (const p of passes) console.log(`  ✅ ${p}`);

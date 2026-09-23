@@ -12,6 +12,7 @@ import '../../../data/repositories/vault_repository.dart';
 import '../../../data/services/font_discovery_service.dart';
 import '../../../data/services/export_import_provider.dart';
 import '../providers/font_settings_provider.dart';
+import '../providers/theme_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -22,6 +23,7 @@ class SettingsScreen extends ConsumerWidget {
     final l10n = AppLocalizations.of(context);
     final autoLockMinutes = ref.watch(authProvider).autoLockMinutes;
     final fontSetting = ref.watch(fontFamilyProvider);
+    final themeMode = ref.watch(themeModeProvider);
 
     return Scaffold(
       appBar: AppBar(title: Text(l10n.settingsTitle)),
@@ -81,13 +83,9 @@ class SettingsScreen extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.palette_outlined),
                   title: Text(l10n.theme),
-                  subtitle: Text(l10n.themeComingSoon),
+                  subtitle: Text(_themeSubtitle(l10n, themeMode)),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(l10n.themeComingSoon)),
-                    );
-                  },
+                  onTap: () => _pickTheme(context, ref),
                 ),
                 ListTile(
                   leading: const Icon(Icons.font_download_outlined),
@@ -120,7 +118,7 @@ class SettingsScreen extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.info),
                   title: Text(l10n.version),
-                  subtitle: Text('2.2.2'),
+                  subtitle: Text('2.3.2'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.code),
@@ -153,6 +151,50 @@ class SettingsScreen extends ConsumerWidget {
   // ─── Language ──────────────────────────────────────────
 
   // ─── Appearance ─────────────────────────────────────────
+
+  String _themeSubtitle(AppLocalizations l10n, ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.light:
+        return l10n.themeLight;
+      case ThemeMode.dark:
+        return l10n.themeDark;
+      case ThemeMode.system:
+        return l10n.followSystem;
+    }
+  }
+
+  void _pickTheme(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
+    final current = ref.read(themeModeProvider);
+    const options = [ThemeMode.system, ThemeMode.light, ThemeMode.dark];
+
+    showDialog(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(l10n.theme),
+        children: options.map((mode) {
+          final isSelected = mode == current;
+          return ListTile(
+            title: Text(_themeSubtitle(l10n, mode)),
+            trailing:
+                isSelected ? const Icon(Icons.check, color: Colors.green) : null,
+            onTap: () async {
+              Navigator.pop(ctx);
+              await ref.read(themeModeProvider.notifier).setThemeMode(mode);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content:
+                        Text(l10n.themeApplied(_themeSubtitle(l10n, mode))),
+                  ),
+                );
+              }
+            },
+          );
+        }).toList(),
+      ),
+    );
+  }
 
   String _fontSubtitle(AppLocalizations l10n, String? setting) {
     if (setting == null || setting.isEmpty) return l10n.fontDefault;
@@ -501,7 +543,9 @@ class SettingsScreen extends ConsumerWidget {
   void _pickAutoLockTimeout(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context);
     final current = ref.read(authProvider).autoLockMinutes;
-    const options = [1, 3, 5, 15, 30];
+    // 与 AuthNotifier.setAutoLockMinutes 的 clamp(1, 60) 对齐：
+    // 每一个可存下来的值都要能在 UI 里选到，60 分钟也要能选（旧列表止于 30）。
+    const options = [1, 3, 5, 15, 30, 60];
 
     showDialog(
       context: context,
@@ -655,6 +699,8 @@ class _FontPickerListState extends State<_FontPickerList> {
                     if (q.isEmpty) ...[
                       tile(l10n.fontDefault, null),
                       tile(l10n.fontSystem, AppConstants.systemFontOption),
+                      tile(l10n.fontMonospace,
+                          AppConstants.monospaceFontOption),
                     ],
                     if (bundled.isNotEmpty) ...[
                       groupHeader(l10n.fontAssetSection),

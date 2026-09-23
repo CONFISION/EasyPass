@@ -1,8 +1,12 @@
-import '../../data/database/database.dart';
+import '../../data/models/entry_type.dart';
+import '../../data/models/vault_item.dart';
 
 /// URL ↔ 条目匹配（契约 2.4，纯函数、可单测）。
 ///
 /// 用于扩展的自动填充：给定当前页面 URL，挑出这个站点该用哪些条目。
+/// 2.3.0 起条目有四种类别，这里**只认登录条目**（`EntryType.login`）——
+/// 安全笔记 / 身份 / SSH 密钥不参与自动填充；非登录条目即便在内存里挂了
+/// 与类型不符的登录字段块，也一律跳过。
 /// 刻意**不做** TLD/公共后缀推断（没有 PSL 数据），只按域名层级比较，
 /// 规则简单、结果可预测：
 ///
@@ -63,18 +67,20 @@ class UrlMatcher {
     return host.isEmpty ? null : host;
   }
 
-  /// 从 [entries] 中挑出与 [pageUrl] 匹配的条目，按契约 2.4 排序。
+  /// 从 [items] 中挑出与 [pageUrl] 匹配的**登录**条目，按契约 2.4 排序。
   ///
-  /// `entry.url` 为空或不可解析的条目不参与 URL 匹配（但仍会出现在
-  /// `getAllCredentials` / `searchCredentials` 的结果里）。
-  static List<PasswordEntry> match(
-      List<PasswordEntry> entries, String pageUrl) {
+  /// 非登录类型（笔记 / 身份 / SSH）直接跳过；登录条目的 `url` 为空或不可
+  /// 解析时不参与 URL 匹配（但仍会出现在 `getAllCredentials` /
+  /// `searchCredentials` 的结果里）。
+  static List<VaultItem> match(List<VaultItem> items, String pageUrl) {
     final pageHost = hostOf(pageUrl);
     if (pageHost == null) return const [];
 
-    final ranked = <_RankedEntry>[];
-    for (final entry in entries) {
-      final entryHost = hostOf(entry.url);
+    final ranked = <_RankedItem>[];
+    for (final item in items) {
+      if (item.type != EntryType.login) continue;
+
+      final entryHost = hostOf(item.loginOrEmpty.url);
       if (entryHost == null) continue;
 
       final int rank;
@@ -87,7 +93,7 @@ class UrlMatcher {
       } else {
         continue; // 不匹配
       }
-      ranked.add(_RankedEntry(rank, entry));
+      ranked.add(_RankedItem(rank, item));
     }
 
     // List.sort 不保证稳定，所以把 name 不区分大小写、原始 name、id 全部
@@ -96,14 +102,14 @@ class UrlMatcher {
       final byRank = a.rank.compareTo(b.rank);
       if (byRank != 0) return byRank;
       final byName =
-          a.entry.name.toLowerCase().compareTo(b.entry.name.toLowerCase());
+          a.item.name.toLowerCase().compareTo(b.item.name.toLowerCase());
       if (byName != 0) return byName;
-      final byRawName = a.entry.name.compareTo(b.entry.name);
+      final byRawName = a.item.name.compareTo(b.item.name);
       if (byRawName != 0) return byRawName;
-      return a.entry.id.compareTo(b.entry.id);
+      return a.item.id.compareTo(b.item.id);
     });
 
-    return [for (final r in ranked) r.entry];
+    return [for (final r in ranked) r.item];
   }
 
   /// [child] 是否为 [parent] 的真子域（要求 `.` 边界，避免
@@ -116,9 +122,9 @@ class UrlMatcher {
 }
 
 /// 匹配结果 + 命中规则序号，仅用于排序。
-class _RankedEntry {
+class _RankedItem {
   final int rank;
-  final PasswordEntry entry;
+  final VaultItem item;
 
-  const _RankedEntry(this.rank, this.entry);
+  const _RankedItem(this.rank, this.item);
 }

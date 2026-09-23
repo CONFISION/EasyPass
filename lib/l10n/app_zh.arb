@@ -62,6 +62,15 @@
       "name": {"type": "String"}
     }
   },
+  "folderActions": "文件夹操作",
+  "deleteFolderNotEmptyMessage": "删除“{name}”？里面还有 {count} 个条目。**这些条目不会被删除**，它们会被移到“无文件夹”。此操作无法撤销。",
+  "@deleteFolderNotEmptyMessage": {
+    "placeholders": {
+      "name": {"type": "String"},
+      "count": {"type": "int"}
+    }
+  },
+  "deleteFolderKeepEntries": "删除文件夹（保留条目）",
   "delete": "删除",
   "searchFailed": "搜索失败",
   "noResultsFound": "未找到结果",
@@ -273,6 +282,136 @@
   "@healthLoadFailed": {
     "placeholders": {
       "error": {"type": "String"}
+    }
+  },
+
+  "entryTypeLabel": "类型",
+  "entryTypeLogin": "登录",
+  "entryTypeSecureNote": "安全笔记",
+  "entryTypeIdentity": "身份信息",
+  "entryTypeSshKey": "SSH 密钥",
+  "entryTypeAll": "全部类型",
+  "entryTypeLoginDesc": "用户名、密码、网址与两步验证",
+  "entryTypeSecureNoteDesc": "自由文本，加密保存",
+  "entryTypeIdentityDesc": "姓名、证件号、联系方式与地址",
+  "entryTypeSshKeyDesc": "公钥、私钥与指纹",
+  "entryTypeFilterTooltip": "按类型筛选",
+  "entryTypeSwitchTitle": "切换条目类型？",
+  "entryTypeSwitchMessage": "「{from}」类型的字段会被丢弃，名称、备注与自定义字段会保留。",
+  "@entryTypeSwitchMessage": {
+    "placeholders": {
+      "from": {"type": "String"}
+    }
+  },
+  "entryTypeSwitchConfirm": "切换",
+  "entryTypeEmptyForType": "还没有{type}条目",
+  "@entryTypeEmptyForType": {
+    "placeholders": {
+      "type": {"type": "String"}
+    }
+  },
+
+  "customFieldsSection": "自定义字段",
+  "customFieldAdd": "添加字段",
+  "customFieldLabelHint": "字段名",
+  "customFieldValueHint": "字段值",
+  "customFieldTypeText": "文本",
+  "customFieldTypeHidden": "隐藏",
+  "customFieldTypeBoolean": "勾选",
+  "customFieldRemove": "删除字段",
+  "customFieldNoFields": "没有自定义字段",
+
+  "secureNoteBodyLabel": "笔记内容",
+  "secureNoteBodyHint": "任何需要加密保存的内容",
+
+  "identityPersonalSection": "个人信息",
+  "identityContactSection": "联系方式",
+  "identityDocumentSection": "证件",
+  "identityAddressSection": "地址",
+  "identityTitleLabel": "称谓",
+  "identityTitleHint": "先生 / 女士 / 博士",
+  "identityFirstNameLabel": "名",
+  "identityMiddleNameLabel": "中间名",
+  "identityLastNameLabel": "姓",
+  "identityCompanyLabel": "公司",
+  "identityEmailLabel": "邮箱",
+  "identityPhoneLabel": "电话",
+  "identityIdNumberLabel": "证件号",
+  "identityPassportLabel": "护照号",
+  "identityLicenseLabel": "驾照号",
+  "identityAddress1Label": "地址",
+  "identityAddress2Label": "地址（第二行）",
+  "identityCityLabel": "城市",
+  "identityStateLabel": "省 / 州",
+  "identityPostalCodeLabel": "邮政编码",
+  "identityCountryLabel": "国家 / 地区",
+  "identityBirthdayLabel": "生日",
+  "identityBirthdayHint": "YYYY-MM-DD",
+  "identitySexLabel": "性别",
+
+  "sshKeySection": "密钥内容",
+  "sshPublicKeyLabel": "公钥",
+  "sshPublicKeyHint": "ssh-ed25519 AAAA… 用户@主机",
+  "sshPrivateKeyLabel": "私钥",
+  "sshPrivateKeyHint": "-----BEGIN OPENSSH PRIVATE KEY-----",
+  "sshPassphraseLabel": "私钥口令",
+  "sshFingerprintLabel": "指纹",
+  "sshFingerprintAuto": "由公钥自动计算",
+  "sshKeyTypeLabel": "密钥类型",
+  "sshBitsLabel": "密钥长度",
+  "sshBitsValue": "{bits} 位",
+  "@sshBitsValue": {
+    "placeholders": {
+      "bits": {"type": "int"}
+    }
+  },
+  "sshCommentLabel": "注释",
+  "sshPrivateKeyFormatLabel": "识别到的格式",
+  "sshPublicKeyInvalid": "无法解析这个公钥",
+  "sshKeyRequired": "请填写公钥或私钥（至少一项）",
+  "sshPrivateKeyFormatValue": "识别到的格式：{format}",
+  "@sshPrivateKeyFormatValue": {
+    "placeholders": {
+      "format": {"type": "String"}
+    }
+  },
+  "sshNoPrivateKey": "未保存私钥",
+  "sshRevealPrivateKey": "显示私钥",
+
+  "totpCodeLabel": "动态验证码",
+  "totpCopyTooltip": "复制验证码",
+  "totpRefreshesIn": "{seconds} 秒后刷新",
+  "@totpRefreshesIn": {
+    "placeholders": {
+      "seconds": {"type": "int"}
+    }
+  },
+  "totpNotSet": "未配置",
+
+  "searchHint": "搜索保险库",
+  "searchPrefixesHint": "支持前缀：type: login · folder: 工作 · url: example.com",
+
+  "folderIconLabel": "图标",
+  "folderEditTitle": "编辑文件夹",
+  "folderRenamed": "文件夹已更新",
+  "renameFolder": "重命名",
+
+  "healthOnlyLogins": "健康分只统计登录条目",
+  "healthLoginCount": "已分析 {count} 条登录条目",
+  "@healthLoginCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+
+  "fieldCopied": "已复制到剪贴板",
+  "detailsSection": "详细信息",
+  "themeLight": "浅色",
+  "themeDark": "深色",
+  "themeApplied": "主题：{value}",
+  "@themeApplied": {
+    "placeholders": {
+      "value": {"type": "String"}
     }
   }
 }

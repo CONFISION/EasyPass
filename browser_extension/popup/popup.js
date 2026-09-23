@@ -5,12 +5,19 @@
  * forwards to the native host, and to the page only through
  * chrome.tabs.sendMessage({action:'fillCredentials'}).
  *
+ * Entry types (bridge protocol v3, docs/entry-types.md §5): getAllCredentials /
+ * searchCredentials return all four types (login / secure_note / identity /
+ * ssh_key), each rendered with its own icon, badge, subtitle and copy actions.
+ * Autofill stays login-only: only a login row carries data-action="fill".
+ * Secrets (password, SSH private key, hidden custom fields) are never rendered
+ * as text until the user explicitly reveals them.
+ *
  * Discipline:
- *  - every user-visible string goes through chrome.i18n.getMessage() using the
- *    keys frozen in HANDOFF_V21_CONTRACT.md §4 (no hard-coded copy);
+ *  - every user-visible string goes through chrome.i18n.getMessage() (no
+ *    hard-coded copy);
  *  - every dynamic value inserted into the DOM is escaped (escapeHtml/escapeAttr);
- *  - plaintext passwords / TOTP codes live in memory only: never logged, never
- *    written to chrome.storage.
+ *  - plaintext passwords / TOTP codes / private keys live in memory only: never
+ *    logged, never written to chrome.storage.
  */
 
 'use strict';
@@ -18,6 +25,13 @@
 // ─── Constants ────────────────────────────────────────────
 
 const TABS = ['vault', 'generator', 'health'];
+// Per-type filter values; 'all' is not an entry type, it is "no filter".
+const TYPE_FILTERS = ['all', 'login', 'secure_note', 'identity', 'ssh_key'];
+// A stale daemon (or a pre-2.3.0 vault row) may omit `type` entirely; every
+// untyped entry is treated as a login, exactly like the desktop side does.
+const DEFAULT_ENTRY_TYPE = 'login';
+// Custom-field types that carry a secret the user has to reveal explicitly.
+const HIDDEN_FIELD_TYPES = { hidden: 1, password: 1 };
 const SEARCH_DEBOUNCE_MS = 200;
 const GENERATOR_DEBOUNCE_MS = 150;
 const STATUS_TIMEOUT_MS = 8000;
@@ -29,6 +43,7 @@ const CLOSE_AFTER_FILL_MS = 700;
 const DEFAULT_TOTP_PERIOD = 30;
 const GENERATOR_MIN_LENGTH = 8;
 const GENERATOR_MAX_LENGTH = 64;
+const SUBTITLE_MAX_CHARS = 72;
 
 // ─── State (in-memory only) ───────────────────────────────
 
@@ -39,7 +54,8 @@ const state = {
   tab: 'vault',
   entries: [],            // current vault list (may contain plaintext fields)
   searchQuery: '',
-  rows: new Map(),        // entryId -> { showPassword, totp }
+  typeFilter: 'all',      // client-side view filter over the loaded list
+  rows: new Map(),        // entryId -> { showPassword, totp, showNote, showPrivateKey, custom, customFields }
   lastStatusAt: 0,        // ms timestamp of the last successful getStatus
   locking: false,         // a lock round-trip is in flight
   unlocking: false,       // an unlock round-trip is in flight
@@ -159,6 +175,118 @@ function getEntryIcon(name) {
   if (lowerName.includes('bank') || lowerName.includes('finance')) return '🏦';
   if (lowerName.includes('mail') || lowerName.includes('email')) return '✉️';
   return '🔑';
+}
+
+// ─── Entry types (bridge protocol v3) ─────────────────────
+//
+// The wire vocabulary is snake_case (`secure_note`, `ssh_key`); the daemon
+// tolerates aliases on its own side (EntryType.fromWire) and so do we: an
+// unknown or missing type degrades to a login, never to a crash.
+
+const TYPE_META = {
+  login: { icon: '🔑', labelKey: 'entryTypeLogin', badgeKey: 'typeBadgeLogin' },
+  secure_note: { icon: '📝', labelKey: 'entryTypeSecureNote', badgeKey: 'typeBadgeSecureNote' },
+  identity: { icon: '🪪', labelKey: 'entryTypeIdentity', badgeKey: 'typeBadgeIdentity' },
+  ssh_key: { icon: '🗝️', labelKey: 'entryTypeSshKey', badgeKey: 'typeBadgeSshKey' }
+};
+
+function normalizeEntryType(value) {
+  if (value === undefined || value === null) return DEFAULT_ENTRY_TYPE;
+  const raw = String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (TYPE_META[raw]) return raw;
+  if (raw === 'ssh' || raw === 'sshkey' || raw === 'key') return 'ssh_key';
+  if (raw === 'note' || raw === 'securenote' || raw === 'securenotes') return 'secure_note';
+  if (raw === 'id' || raw === 'identity_card' || raw === 'personal') return 'identity';
+  return DEFAULT_ENTRY_TYPE;
+}
+
+function entryTypeOf(entry) {
+  return normalizeEntryType(entry ? entry.type : null);
+}
+
+function entryTypeMeta(entry) {
+  return TYPE_META[entryTypeOf(entry)] || TYPE_META[DEFAULT_ENTRY_TYPE];
+}
+
+/** Autofill is login-only — a stale daemon must not be able to get a note filled. */
+function isLoginEntry(entry) {
+  return entryTypeOf(entry) === 'login';
+}
+
+/** First non-empty string of a flat object, matching the wire keys we expect. */
+function pickString(source, keys) {
+  if (!source || typeof source !== 'object') return '';
+  for (let i = 0; i < keys.length; i++) {
+    const value = source[keys[i]];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && isFinite(value)) return String(value);
+  }
+  return '';
+}
+
+/** One-line, length-capped preview for a multi-line value (note bodies). */
+function firstLinePreview(text, limit) {
+  const raw = typeof text === 'string' ? text : '';
+  const first = raw.split(/\r?\n/).map(line => line.trim()).find(line => !!line) || '';
+  const max = limit || SUBTITLE_MAX_CHARS;
+  return first.length > max ? first.slice(0, max - 1) + '…' : first;
+}
+
+/** Identity full name, assembled from whichever parts the user filled in. */
+function identityFullName(identity) {
+  const parts = [
+    pickString(identity, ['title', 'salutation']),
+    pickString(identity, ['first_name', 'firstName']),
+    pickString(identity, ['middle_name', 'middleName']),
+    pickString(identity, ['last_name', 'lastName'])
+  ].filter(Boolean);
+  return parts.join(' ');
+}
+
+/** Row subtitle per type — never a secret (no password / private key / hidden field). */
+function entrySubtitle(entry) {
+  if (!entry) return '';
+  switch (entryTypeOf(entry)) {
+    case 'secure_note':
+      return firstLinePreview(entry.notes);
+    case 'identity': {
+      const fullName = identityFullName(entry.identity);
+      if (fullName) return fullName;
+      return pickString(entry.identity, ['id_number', 'idNumber']);
+    }
+    case 'ssh_key':
+      return pickString(entry.sshKey, ['fingerprint']);
+    default:
+      return typeof entry.username === 'string' ? entry.username : '';
+  }
+}
+
+/** Custom fields, tolerant of a daemon that sends nothing / a non-array. */
+function customFieldsOf(entry) {
+  const list = entry && Array.isArray(entry.customFields) ? entry.customFields : [];
+  const fields = [];
+  list.forEach(item => {
+    if (!item || typeof item !== 'object') return;
+    const label = typeof item.label === 'string' ? item.label.trim() : '';
+    const value = item.value === undefined || item.value === null ? '' : String(item.value);
+    if (!label && !value) return;
+    fields.push({
+      label: label,
+      value: value,
+      type: typeof item.type === 'string' ? item.type.toLowerCase() : 'text'
+    });
+  });
+  return fields;
+}
+
+function isHiddenField(field) {
+  return !!field && HIDDEN_FIELD_TYPES[field.type] === 1;
+}
+
+/** True when a field actually carries something worth copying. */
+function fieldHasValue(field) {
+  if (!field || typeof field.value !== 'string') return false;
+  return !!field.value.trim();
 }
 
 // ─── Messaging ────────────────────────────────────────────
@@ -499,6 +627,8 @@ function clearVaultData() {
   state.entries = [];
   state.rows.clear();
   state.searchQuery = '';
+  state.typeFilter = 'all';
+  syncTypeFilter();
   state.generator = { result: '', error: null };
   state.health = { loading: false, data: null, error: null, expanded: {} };
   if (dom.searchInput) dom.searchInput.value = '';
@@ -735,9 +865,17 @@ function rowStateOf(entry) {
   const id = entry && entry.id !== undefined && entry.id !== null ? String(entry.id) : '';
   let rowState = state.rows.get(id);
   if (!rowState) {
-    rowState = { showPassword: false, totp: null };
+    rowState = {
+      showPassword: false,
+      totp: null,
+      showNote: false,      // secure_note: note body revealed in the row
+      showPrivateKey: false, // ssh_key: private key revealed (explicit click only)
+      custom: false,        // custom-field block expanded
+      customFields: {}      // field index -> true once that hidden value is revealed
+    };
     state.rows.set(id, rowState);
   }
+  if (!rowState.customFields) rowState.customFields = {};
   return rowState;
 }
 
@@ -843,22 +981,125 @@ async function refreshPageMatch() {
 
 function updateVaultMeta() {
   if (!dom.vaultCount) return;
-  const count = state.entries.length;
-  dom.vaultCount.textContent = count ? msg('entriesCount', [String(count)]) : '';
-  const showBanner = !state.searchQuery && count > 0 &&
+  const total = state.entries.length;
+  const shown = visibleEntries().length;
+  let countText = '';
+  if (total && state.typeFilter !== 'all') {
+    // "N / M entries" so a filtered list never looks like a lost vault.
+    countText = msg('entriesCountFiltered', [String(shown), String(total)]);
+  } else if (total) {
+    countText = msg('entriesCount', [String(total)]);
+  }
+  dom.vaultCount.textContent = countText;
+  const showBanner = !state.searchQuery && total > 0 &&
     state.pageMatch.known && !state.pageMatch.hasMatch;
   dom.pageBanner.hidden = !showBanner;
   dom.pageBanner.textContent = showBanner ? msg('noMatchForPage') : '';
 }
 
-function iconButtonHtml(action, icon, title, extraClass) {
-  const safeTitle = escapeAttr(title);
-  return '<button type="button" class="icon-btn' + (extraClass || '') +
-    '" data-action="' + escapeAttr(action) + '" title="' + safeTitle +
-    '" aria-label="' + safeTitle + '">' + escapeHtml(icon) + '</button>';
+// ─── Type filter (client-side view over the loaded list) ──
+
+/** Entries matching the active filter. Search stays server-side: the filter
+ *  only narrows whatever `searchCredentials` / `getAllCredentials` returned. */
+function visibleEntries() {
+  if (state.typeFilter === 'all') return state.entries;
+  return state.entries.filter(entry => entryTypeOf(entry) === state.typeFilter);
+}
+function syncTypeFilter() {
+  const chips = dom.typeFilter ? dom.typeFilter.querySelectorAll('[data-action="filter-type"]') : [];
+  chips.forEach(chip => {
+    const active = chip.dataset.type === state.typeFilter;
+    chip.classList.toggle('active', active);
+    chip.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
 }
 
+/** Switch the filter and re-render from the already loaded list (no host call). */
+function setTypeFilter(type) {
+  const target = TYPE_FILTERS.indexOf(type) === -1 ? 'all' : type;
+  if (target === state.typeFilter) return;
+  state.typeFilter = target;
+  syncTypeFilter();
+  renderEntries();
+}
+
+/** Chip clicks are delegated: the chips are static markup, so no re-binding. */
+function onTypeFilterClick(event) {
+  const target = event.target;
+  if (!target || !target.closest) return;
+  const chip = target.closest('[data-action="filter-type"]');
+  if (!chip) return;
+  setTypeFilter(chip.dataset.type);
+}
+
+function iconButtonHtml(action, icon, title, extraClass, dataValue, dataField) {
+  const safeTitle = escapeAttr(title);
+  let attrs = ' data-action="' + escapeAttr(action) + '" title="' + safeTitle +
+    '" aria-label="' + safeTitle + '"';
+  // Values ride on the button so identity / custom-field copies need no lookup
+  // table keyed by field name; escapeAttr keeps the payload inert.
+  if (dataValue !== undefined && dataValue !== null) {
+    attrs += ' data-value="' + escapeAttr(dataValue) + '"';
+  }
+  // Deliberately NOT named data-index: the button lives inside the row, and a
+  // second data-index there would shadow the row's own (entry) index for
+  // anyone doing closest('[data-index]').
+  if (dataField !== undefined && dataField !== null) {
+    attrs += ' data-field="' + escapeAttr(dataField) + '"';
+  }
+  return '<button type="button" class="icon-btn' + (extraClass || '') + '"' + attrs + '>' +
+    escapeHtml(icon) + '</button>';
+}
+
+/** Per-type row actions. Only a login row gets `fill`; nothing else is ever
+ *  offered a fill affordance, so a note / identity / key can never be "filled"
+ *  into a page by accident. */
 function rowButtonsHtml(entry, rowState) {
+  const type = entryTypeOf(entry);
+  const hasUsername = typeof entry.username === 'string' && !!entry.username;
+
+  if (type === 'secure_note') {
+    return [
+      iconButtonHtml(
+        'toggle-note',
+        rowState.showNote ? '🙈' : '👁️',
+        rowState.showNote ? msg('hideNote') : msg('showNote'),
+        rowState.showNote ? ' active' : ''
+      ),
+      iconButtonHtml('copy-note', '📋', msg('copyNote'))
+    ].join('');
+  }
+
+  if (type === 'identity') {
+    const buttons = [
+      iconButtonHtml('copy-full-name', '🪪', msg('copyFullName')),
+      iconButtonHtml('copy-email', '✉️', msg('copyEmail')),
+      iconButtonHtml('copy-phone', '📞', msg('copyPhone')),
+      iconButtonHtml('copy-id-number', '🔢', msg('copyIdNumber'))
+    ];
+    // identity.username is a separate field from the login username; offer it
+    // only when the entry actually has one.
+    if (hasUsername) buttons.push(iconButtonHtml('copy-username', '👤', msg('copyUsername')));
+    return buttons.join('');
+  }
+
+  if (type === 'ssh_key') {
+    return [
+      iconButtonHtml('copy-public-key', '🔓', msg('copyPublicKey')),
+      iconButtonHtml('copy-fingerprint', '🧬', msg('copyFingerprint')),
+      // The private key is behind its own explicit click, and that click only
+      // copies / reveals — it is never part of the row's default output.
+      iconButtonHtml(
+        'toggle-private-key',
+        rowState.showPrivateKey ? '🙈' : '👁️',
+        rowState.showPrivateKey ? msg('hidePrivateKey') : msg('showPrivateKey'),
+        rowState.showPrivateKey ? ' active' : ''
+      ),
+      iconButtonHtml('copy-private-key', '🗝️', msg('copyPrivateKey'))
+    ].join('');
+  }
+
+  // login (and anything untyped): unchanged fill / copy set.
   const buttons = [
     iconButtonHtml('copy-username', '👤', msg('copyUsername')),
     iconButtonHtml('copy-password', '🗝️', msg('copyPassword')),
@@ -875,15 +1116,190 @@ function rowButtonsHtml(entry, rowState) {
   return buttons.join('');
 }
 
-function rowExtraHtml(entry, rowState) {
-  let html = '';
-  if (rowState.showPassword) {
-    html += '<div class="entry-extra">' +
-      '<code class="secret">' + escapeHtml(entry.password || '') + '</code>' +
-      iconButtonHtml('copy-password', '📋', msg('copyPassword')) +
-      '</div>';
+function secretBlockHtml(copyAction, value) {
+  return '<div class="entry-extra">' +
+    '<code class="secret">' + escapeHtml(value || '') + '</code>' +
+    iconButtonHtml(copyAction, '📋', msg('copyPassword')) +
+    '</div>';
+}
+
+/** Secure-note body: the note text *is* the entry (docs/entry-types.md §5). */
+function noteBlockHtml(entry) {
+  const body = typeof entry.notes === 'string' ? entry.notes : '';
+  return '<div class="entry-extra entry-note">' +
+    '<pre class="note-body">' + escapeHtml(body) + '</pre>' +
+    iconButtonHtml('copy-note', '📋', msg('copyNote')) +
+    '</div>';
+}
+
+/** SSH private key (+ optional passphrase) — only ever built after a click. */
+function sshPrivateBlockHtml(entry, rowState) {
+  const key = entry.sshKey && typeof entry.sshKey === 'object' ? entry.sshKey : {};
+  const privateKey = pickString(key, ['private_key', 'privateKey']);
+  let fields = '<div class="field"><span class="field-label">' +
+    escapeHtml(msg('sshPrivateKeyLabel')) + '</span>' +
+    '<code class="secret secret-block">' + escapeHtml(privateKey || '—') + '</code></div>';
+  const passphrase = pickString(key, ['passphrase']);
+  if (passphrase) {
+    const revealed = rowState.customFields && rowState.customFields.passphrase;
+    fields += '<div class="field"><span class="field-label">' +
+      escapeHtml(msg('sshPassphraseLabel')) + '</span>' +
+      '<code class="secret">' + escapeHtml(revealed ? passphrase : '••••••••') + '</code>' +
+      iconButtonHtml(
+        'toggle-passphrase',
+        revealed ? '🙈' : '👁️',
+        revealed ? msg('hideValue') : msg('revealValue')
+      ) + '</div>';
   }
-  if (rowState.totp) {
+  return '<div class="entry-extra entry-private">' + fields +
+    iconButtonHtml('copy-private-key', '📋', msg('copyPrivateKey')) +
+    '</div>';
+}
+
+/** Identity: every non-empty field, grouped, with a copy button per value. */
+function identityBlockHtml(entry) {
+  if (!entry.identity || typeof entry.identity !== 'object') return '';
+  const identity = entry.identity;
+  const groups = [
+    {
+      titleKey: 'identityPersonalSection',
+      fields: [
+        ['identityTitleLabel', ['title']],
+        ['identityFirstNameLabel', ['first_name', 'firstName']],
+        ['identityMiddleNameLabel', ['middle_name', 'middleName']],
+        ['identityLastNameLabel', ['last_name', 'lastName']],
+        ['identityUsernameLabel', ['username']],
+        ['identityCompanyLabel', ['company']],
+        ['identityBirthdayLabel', ['birthday']],
+        ['identitySexLabel', ['sex']]
+      ]
+    },
+    {
+      titleKey: 'identityContactSection',
+      fields: [
+        ['identityEmailLabel', ['email']],
+        ['identityPhoneLabel', ['phone']]
+      ]
+    },
+    {
+      titleKey: 'identityDocumentSection',
+      fields: [
+        ['identityIdNumberLabel', ['id_number', 'idNumber']],
+        ['identityPassportLabel', ['passport_number', 'passportNumber']],
+        ['identityLicenseLabel', ['license_number', 'licenseNumber']]
+      ]
+    },
+    {
+      titleKey: 'identityAddressSection',
+      fields: [
+        ['identityAddress1Label', ['address1']],
+        ['identityAddress2Label', ['address2']],
+        ['identityCityLabel', ['city']],
+        ['identityStateLabel', ['state']],
+        ['identityPostalCodeLabel', ['postal_code', 'postalCode']],
+        ['identityCountryLabel', ['country']]
+      ]
+    }
+  ];
+
+  let rows = '';
+  groups.forEach(group => {
+    let items = '';
+    group.fields.forEach(pair => {
+      const value = pickString(identity, pair[1]);
+      if (!value) return;
+      items += '<div class="field"><span class="field-label">' +
+        escapeHtml(msg(pair[0])) + '</span>' +
+        '<span class="field-value">' + escapeHtml(value) + '</span>' +
+        iconButtonHtml('copy-field', '📋', msg('copyField'), '', value) +
+        '</div>';
+    });
+    if (items) {
+      rows += '<div class="field-group"><div class="field-group-title">' +
+        escapeHtml(msg(group.titleKey)) + '</div>' + items + '</div>';
+    }
+  });
+  if (!rows) return '';
+  return '<div class="entry-extra entry-fields">' + rows + '</div>';
+}
+
+function customFieldsBlockHtml(entry, rowState) {
+  const fields = customFieldsOf(entry);
+  if (!fields.length) return '';
+  if (!rowState.custom) return '';
+  const rows = fields.map((field, index) => {
+    const hidden = isHiddenField(field);
+    const revealed = !hidden || !!(rowState.customFields && rowState.customFields['f' + index]);
+    let shown = '';
+    if (field.type === 'boolean') {
+      // A boolean custom field is a checkbox: showing its raw wire value
+      // ("true" / "false") as text would just look like a typo.
+      shown = '<span class="field-value field-bool">' +
+        escapeHtml(field.value === 'true' ? '☑ ' + msg('customFieldTypeBoolean')
+          : '☐ ' + msg('customFieldTypeBoolean')) + '</span>';
+    } else if (!fieldHasValue(field)) {
+      shown = '<span class="field-value field-empty">—</span>';
+    } else if (revealed) {
+      shown = '<span class="field-value">' + escapeHtml(field.value) + '</span>';
+    } else {
+      // Hidden value that has not been revealed: the secret never enters the DOM.
+      shown = '<span class="field-value field-masked" data-field-masked="' + index +
+        '" aria-hidden="true">••••••••</span>';
+    }
+    let html = '<div class="field"><span class="field-label">' +
+      escapeHtml(field.label || msg('customFieldFallback')) + '</span>' + shown;
+    if (hidden && fieldHasValue(field)) {
+      html += iconButtonHtml(
+        'toggle-field',
+        revealed ? '🙈' : '👁️',
+        revealed ? msg('hideValue') : msg('revealValue'),
+        '',
+        '',
+        String(index)
+      );
+    }
+    // Boolean fields carry no copyable payload of their own.
+    //
+    // Copy buttons carry the field **index** instead of the value: a hidden
+    // field that has not been revealed must not have its plaintext sitting in
+    // the DOM (the mask above would be purely cosmetic). The click handler
+    // reads the value out of `state.entries` instead.
+    if (fieldHasValue(field) && field.type !== 'boolean') {
+      html += iconButtonHtml('copy-field', '📋', msg('copyField'), '', undefined, String(index));
+    }
+    return html + '</div>';
+  }).join('');
+  return '<div class="entry-extra entry-custom">' +
+    '<div class="field-group-title">' + escapeHtml(msg('customFieldsLabel')) + '</div>' +
+    rows + '</div>';
+}
+
+function rowExtraHtml(entry, rowState) {
+  const type = entryTypeOf(entry);
+  let html = '';
+
+  if (type === 'login' && rowState.showPassword) {
+    html += secretBlockHtml('copy-password', entry.password);
+  }
+  if (type === 'secure_note' && rowState.showNote) {
+    html += noteBlockHtml(entry);
+  }
+  if (type === 'identity') {
+    html += identityBlockHtml(entry);
+  }
+  if (type === 'ssh_key') {
+    if (rowState.showPrivateKey) html += sshPrivateBlockHtml(entry, rowState);
+    const publicKey = pickString(entry.sshKey, ['public_key', 'publicKey']);
+    if (publicKey) {
+      html += '<div class="entry-extra entry-public"><div class="field">' +
+        '<span class="field-label">' + escapeHtml(msg('sshPublicKeyLabel')) + '</span>' +
+        '<code class="secret secret-block">' + escapeHtml(publicKey) + '</code></div>' +
+        iconButtonHtml('copy-public-key', '📋', msg('copyPublicKey')) +
+        '</div>';
+    }
+  }
+
+  if (type === 'login' && rowState.totp) {
     html += '<div class="entry-extra">' +
       '<span class="extra-label">' + escapeHtml(msg('totpLabel')) + '</span>';
     if (rowState.totp.loading) {
@@ -901,22 +1317,46 @@ function rowExtraHtml(entry, rowState) {
     }
     html += '</div>';
   }
+
+  html += customFieldsBlockHtml(entry, rowState);
   return html;
 }
 
 function entryRowHtml(entry, index) {
   const rowState = rowStateOf(entry);
+  const meta = entryTypeMeta(entry);
+  const type = entryTypeOf(entry);
+  const isLogin = isLoginEntry(entry);
   const name = escapeHtml(entry && entry.name ? entry.name : '');
-  const username = escapeHtml(entry && entry.username ? entry.username : '');
-  return '<div class="entry" data-index="' + index + '">' +
-    '<div class="entry-item" data-action="fill" title="' + escapeAttr(msg('fillOnPage')) + '">' +
-    '<div class="entry-icon">' + escapeHtml(getEntryIcon(entry && entry.name)) + '</div>' +
+  const subtitle = escapeHtml(entrySubtitle(entry));
+  const url = isLogin ? truncateUrl(entry && entry.url) : '';
+  const customCount = customFieldsOf(entry).length;
+  const customToggle = customCount
+    ? iconButtonHtml(
+      'toggle-custom',
+      '🧩',
+      msg('customFieldsLabel'),
+      rowState.custom ? ' active' : ''
+    )
+    : '';
+
+  return '<div class="entry" data-index="' + index + '" data-entry-type="' + escapeAttr(type) +
+    '" data-entry-id="' + escapeAttr(entry && entry.id !== undefined && entry.id !== null ? entry.id : '') + '">' +
+    '<div class="entry-item"' + (isLogin
+      ? ' data-action="fill" title="' + escapeAttr(msg('fillOnPage')) + '"'
+      : '') + '>' +
+    '<div class="entry-icon" data-icon-type="' + escapeAttr(type) + '">' +
+    escapeHtml(isLogin ? getEntryIcon(entry && entry.name) : meta.icon) + '</div>' +
     '<div class="entry-info">' +
     '<div class="entry-name">' + (name || '—') + '</div>' +
-    '<div class="entry-username">' + username + '</div>' +
-    '<div class="entry-url">' + escapeHtml(truncateUrl(entry && entry.url)) + '</div>' +
+    '<div class="entry-meta">' +
+    '<span class="entry-type-badge" data-type="' + escapeAttr(type) + '">' +
+    escapeHtml(msg(meta.badgeKey)) + '</span>' +
+    (subtitle ? '<span class="entry-subtitle">' + subtitle + '</span>' : '') +
     '</div>' +
-    '<div class="entry-actions">' + rowButtonsHtml(entry, rowState) + '</div>' +
+    (url ? '<div class="entry-url">' + escapeHtml(url) + '</div>' : '') +
+    '</div>' +
+    '<div class="entry-actions">' + rowButtonsHtml(entry, rowState) + customToggle + '</div>' +
     '</div>' +
     rowExtraHtml(entry, rowState) +
     '</div>';
@@ -927,7 +1367,18 @@ function renderEntries() {
   if (!state.entries.length) {
     dom.entryList.innerHTML = emptyStateHtml('📭', msg('noPasswordsFound'), msg('addPasswordsHint'));
   } else {
-    dom.entryList.innerHTML = state.entries.map(entryRowHtml).join('');
+    const visible = visibleEntries();
+    if (!visible.length) {
+      dom.entryList.innerHTML = emptyStateHtml('🔎', msg('noEntriesForFilter'), '');
+    } else {
+      // data-index keeps pointing at the *unfiltered* array, so the click
+      // handler resolves the entry without a second lookup table.
+      const rows = [];
+      state.entries.forEach((entry, index) => {
+        if (visible.indexOf(entry) !== -1) rows.push(entryRowHtml(entry, index));
+      });
+      dom.entryList.innerHTML = rows.join('');
+    }
   }
   updateVaultMeta();
   dom.entryList.scrollTop = scrollTop;
@@ -943,6 +1394,17 @@ function onEntryListClick(event) {
   const entry = state.entries[toInt(wrapper.dataset.index, -1)];
   if (!entry) return;
   const action = actionEl.dataset.action;
+  const type = entryTypeOf(entry);
+
+  // ── Type filter: acts on the list, not on an entry ──
+  if (action === 'filter-type') {
+    setTypeFilter(actionEl.dataset.type);
+    return;
+  }
+  // Per-type fence: only the actions declared for this row's type run, so a
+  // stale list can never make a note answer a login action (or vice versa).
+  // `toggle-custom` / `copy-field` are type-agnostic and allowed everywhere.
+  if (!TYPE_ACTIONS[type][action]) return;
 
   if (action === 'fill') {
     fillEntry(entry);
@@ -961,8 +1423,104 @@ function onEntryListClick(event) {
     renderEntries();
   } else if (action === 'totp') {
     toggleTotp(entry);
+  } else if (action === 'copy-note') {
+    copyValue(entry.notes, 'copiedNote');
+  } else if (action === 'toggle-note') {
+    const rowState = rowStateOf(entry);
+    rowState.showNote = !rowState.showNote;
+    renderEntries();
+  } else if (action === 'copy-full-name') {
+    copyValue(identityFullName(entry.identity), 'copiedFullName');
+  } else if (action === 'copy-email') {
+    copyValue(pickString(entry.identity, ['email']), 'copiedEmail');
+  } else if (action === 'copy-phone') {
+    copyValue(pickString(entry.identity, ['phone']), 'copiedPhone');
+  } else if (action === 'copy-id-number') {
+    copyValue(pickString(entry.identity, ['id_number', 'idNumber']), 'copiedIdNumber');
+  } else if (action === 'copy-public-key') {
+    copyValue(pickString(entry.sshKey, ['public_key', 'publicKey']), 'copiedPublicKey');
+  } else if (action === 'copy-fingerprint') {
+    copyValue(pickString(entry.sshKey, ['fingerprint']), 'copiedFingerprint');
+  } else if (action === 'copy-private-key') {
+    // Explicit user click — the only path that touches the private key.
+    copyValue(pickString(entry.sshKey, ['private_key', 'privateKey']), 'copiedPrivateKey');
+  } else if (action === 'toggle-private-key') {
+    const rowState = rowStateOf(entry);
+    rowState.showPrivateKey = !rowState.showPrivateKey;
+    renderEntries();
+  } else if (action === 'toggle-passphrase') {
+    const rowState = rowStateOf(entry);
+    rowState.customFields.passphrase = !rowState.customFields.passphrase;
+    renderEntries();
+  } else if (action === 'copy-field') {
+    // Custom fields hand over only their index (see customFieldRowHtml): the
+    // value is read from state so a masked secret never has to exist in the
+    // DOM. Identity rows still pass the value directly (nothing secret there).
+    const fieldIndex = actionEl.dataset.field;
+    if (fieldIndex !== undefined && fieldIndex !== null && fieldIndex !== '') {
+      const fields = customFieldsOf(entry);
+      const field = fields[toInt(fieldIndex, -1)];
+      copyValue(field ? field.value : '', 'copiedField');
+    } else {
+      copyValue(actionEl.dataset.value, 'copiedField');
+    }
+  } else if (action === 'toggle-field') {
+    const rowState = rowStateOf(entry);
+    const key = 'f' + toInt(actionEl.dataset.field, 0);
+    rowState.customFields[key] = !rowState.customFields[key];
+    renderEntries();
+  } else if (action === 'toggle-custom') {
+    const rowState = rowStateOf(entry);
+    rowState.custom = !rowState.custom;
+    renderEntries();
   }
 }
+
+/** Every action a row of a given type may dispatch. Anything not listed here is
+ *  ignored, which is what keeps a login action from ever firing on a note row
+ *  (autofill stays login-only even against a stale list). */
+const TYPE_ACTIONS = {
+  login: {
+    fill: 1,
+    'copy-username': 1,
+    'copy-password': 1,
+    'copy-url': 1,
+    'copy-totp': 1,
+    'toggle-password': 1,
+    totp: 1,
+    // Custom fields exist on every type.
+    'toggle-custom': 1,
+    'toggle-field': 1,
+    'copy-field': 1
+  },
+  secure_note: {
+    'copy-note': 1,
+    'toggle-note': 1,
+    'toggle-custom': 1,
+    'toggle-field': 1,
+    'copy-field': 1
+  },
+  identity: {
+    'copy-username': 1,
+    'copy-full-name': 1,
+    'copy-email': 1,
+    'copy-phone': 1,
+    'copy-id-number': 1,
+    'toggle-custom': 1,
+    'toggle-field': 1,
+    'copy-field': 1
+  },
+  ssh_key: {
+    'copy-public-key': 1,
+    'copy-fingerprint': 1,
+    'copy-private-key': 1,
+    'toggle-private-key': 1,
+    'toggle-passphrase': 1,
+    'toggle-custom': 1,
+    'toggle-field': 1,
+    'copy-field': 1
+  }
+};
 
 // ─── TOTP (row display, local countdown) ──────────────────
 
@@ -1057,7 +1615,9 @@ async function toggleTotpRefresh(entry) {
 // ─── Fill ─────────────────────────────────────────────────
 
 async function fillEntry(entry) {
-  if (!entry) return;
+  // Autofill is login-only (docs/entry-types.md §5): a note / identity / key —
+  // e.g. one returned by a stale daemon — must never be pushed into a page.
+  if (!entry || !isLoginEntry(entry)) return;
   let totp = null;
   // Entry carries hasTotp only; the code must come from getTotp. The content
   // script ignores the field when the page has no TOTP input (expected).
@@ -1423,6 +1983,7 @@ function cacheDom() {
   dom.mainView = byId('mainView');
   dom.panels = { vault: byId('panelVault'), generator: byId('panelGenerator'), health: byId('panelHealth') };
   dom.searchInput = byId('searchInput');
+  dom.typeFilter = byId('typeFilter');
   dom.entryList = byId('entryList');
   dom.vaultCount = byId('vaultCount');
   dom.pageBanner = byId('pageBanner');
@@ -1462,6 +2023,8 @@ function bindEvents() {
   });
   dom.searchInput.addEventListener('input', onSearchInput);
   dom.entryList.addEventListener('click', onEntryListClick);
+  // Filter chips live outside the list, so they keep working across re-renders.
+  if (dom.typeFilter) dom.typeFilter.addEventListener('click', onTypeFilterClick);
   dom.genLength.addEventListener('input', onGeneratorLengthInput);
   [dom.genUpper, dom.genLower, dom.genNumbers, dom.genSymbols].forEach(box => {
     box.addEventListener('change', onGeneratorOptionChange);
@@ -1503,6 +2066,7 @@ function init() {
   applyI18n();
   bindEvents();
   startTimers();
+  syncTypeFilter();
   dom.genLengthValue.textContent = String(toInt(dom.genLength.value, 16));
   syncGeneratorAvailability(readGeneratorOptions());
   activateTab('vault');

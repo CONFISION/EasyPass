@@ -14,7 +14,9 @@ let pendingRequests = new Map();
 //
 // EXPECTED_PROTOCOL_VERSION 必须与桌面端
 // lib/core/constants/app_constants.dart 的 bridgeProtocolVersion 一致。
-const EXPECTED_PROTOCOL_VERSION = 2;
+// 3 = 2.3.0：条目 JSON 增加 type / identity / sshKey / customFields，
+// getCredentials 只返回登录条目（安全笔记 / 身份 / SSH 不参与自动填充）。
+const EXPECTED_PROTOCOL_VERSION = 3;
 
 function gradeDaemonError(text) {
   const message = String(text === undefined || text === null ? '' : text);

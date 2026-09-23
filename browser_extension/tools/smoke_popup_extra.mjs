@@ -191,6 +191,13 @@ async function boot(handlers = {}) {
         value: { writeText: async () => {} },
       });
       window.document.execCommand = () => true;
+      // 成功填充后 popup 会 window.close()。jsdom 里真关窗口会让它之后所有定时器
+      // 变成空操作（不报错、只是不再触发），把同一进程里后续的断言一起带坏；
+      // 这里只记录调用，不真关窗口。
+      window.closeCalls = 0;
+      window.close = () => {
+        window.closeCalls += 1;
+      };
     },
   });
 
@@ -416,6 +423,19 @@ const toastState = (doc) => {
   check('9.9 视图切换使用 hidden 属性',
     doc.getElementById('loadingView').hidden === true &&
       doc.getElementById('mainView').hasAttribute('hidden') === false);
+  // 类型筛选钩子：静态按钮组 + data-type 常量（filter-type 动作）
+  const chips = [...doc.querySelectorAll('#typeFilter [data-action="filter-type"]')];
+  check('9.10 类型筛选钩子 #typeFilter + [data-action="filter-type"][data-type]',
+    has('#typeFilter') && chips.length === 5 &&
+      ['all', 'login', 'secure_note', 'identity', 'ssh_key']
+        .every((v) => has(`#typeFilter [data-type="${v}"]`)),
+    chips.map((c) => c.dataset.type).join(','));
+  // 非登录条目只拿到 copy-* 动作，绝不出现 fill（自动填充只认登录条目）
+  check('9.11 非登录类型没有 fill 钩子（登录条目保留）',
+    has('.entry[data-entry-type="login"] .entry-item[data-action="fill"]') &&
+      !has('.entry[data-entry-type="identity"] [data-action="fill"]'));
+  check('9.12 条目行带 data-entry-type / data-entry-id 供测试定位',
+    has('.entry[data-entry-type="login"][data-entry-id]'));
 }
 
 // ─── 输出 ─────────────────────────────────────────────────────────────────

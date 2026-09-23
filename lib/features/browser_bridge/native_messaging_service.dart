@@ -8,6 +8,9 @@ import '../../core/constants/app_constants.dart';
 import '../../core/crypto/crypto_service.dart';
 import '../../core/crypto/totp_service.dart';
 import '../../data/database/database.dart';
+import '../../data/models/entry_type.dart';
+import '../../data/models/vault_item.dart';
+import '../../data/repositories/vault_repository.dart';
 import '../health/health_service.dart';
 import 'url_matcher.dart';
 import 'vault_session.dart';
@@ -20,6 +23,12 @@ import 'vault_session.dart';
 /// vault stays locked until the user sends an `unlock` action with the master
 /// password; the derived key lives in a [VaultSession] (C 方案) so it can be
 /// shared across connections when the daemon injects one.
+///
+/// 2.3.0 起条目有四种类型（登录 / 安全笔记 / 身份 / SSH 密钥），数据访问统一走
+/// [VaultRepository]：它按"当前会话密钥"现读现解密，返回已经解密的 [VaultItem]，
+/// 本服务不再自己碰 `*_encrypted` 列（列名 / 载荷格式由 `VaultItemMapper` 冻结）。
+/// 自动填充（`getCredentials`）与健康报告只认**登录**条目；`getAllCredentials` /
+/// `searchCredentials` 返回所有类型，供扩展的保险库列表展示与复制。
 class NativeMessagingService {
   final AppDatabase _db;
   final CryptoService _cryptoService;
@@ -29,6 +38,10 @@ class NativeMessagingService {
   /// 未注入时自建一个（单进程 `--native-host` 模式与既有测试行为不变）。
   final VaultSession _session;
   final bool _ownsSession;
+
+  /// 数据入口（解密后的 [VaultItem]）。密钥**每次现读** [_session]，
+  /// 所以解锁 / 锁定 / 空闲过期都不需要重建它。
+  late final VaultRepository _repository;
 
   bool _running = false;
 
@@ -40,10 +53,19 @@ class NativeMessagingService {
   /// 只报"发生了活动"，不传任何内容（不泄漏动作名/凭据）。
   final void Function()? onActivity;
 
+  /// [repository] 只在调用方想自己控制数据入口时传入（daemon 会传一个绑定
+  /// 共享会话的实例）；不传就用 [_session] 自建一个。
   NativeMessagingService(this._db, this._cryptoService, this._totpService,
-      {VaultSession? session, this.onActivity})
+      {VaultSession? session, this.onActivity, VaultRepository? repository})
       : _session = session ?? VaultSession(),
-        _ownsSession = session == null;
+        _ownsSession = session == null {
+    _repository = repository ??
+        VaultRepository(
+          db: _db,
+          cryptoService: _cryptoService,
+          keyReader: () => _session.key,
+        );
+  }
 
   /// 当前会话是否已解锁（惰性过期：空闲超时会在这里就变成 false）。
   bool get isUnlocked => _session.isUnlocked;
@@ -199,36 +221,44 @@ class NativeMessagingService {
 
   /// 按域名匹配（契约 2.4）：不再用 `searchEntries(完整 URL)` 的 LIKE 模糊匹配，
   /// 否则 `https://github.com/login` 会因为 URL 里多了路径而漏掉条目。
+  ///
+  /// **只返回登录条目**（契约 §5）：安全笔记 / 身份 / SSH 密钥不参与自动填充；
+  /// 匹配失败回退"全部条目"时同样只给登录条目，否则扩展的填充面板里会冒出笔记。
   Future<List<Map<String, dynamic>>> _getCredentials(String? url) async {
-    final key = _requireUnlocked();
-    // url 缺失或不可解析 → 回退为全部条目（保持旧行为）。
+    _requireUnlocked();
+    final items = await _repository.getItems(type: EntryType.login);
+    // url 缺失或不可解析 → 回退为全部**登录**条目（保持旧行为）。
     if (url == null || url.isEmpty || UrlMatcher.hostOf(url) == null) {
-      return await _getAllCredentials();
+      _session.touch();
+      return items.map(_entryToJson).toList();
     }
 
-    final entries = await _db.getAllEntries();
-    final matched = UrlMatcher.match(entries, url);
+    final matched = UrlMatcher.match(items, url);
     _session.touch();
-    return matched.map((e) => _entryToJson(e, key)).toList();
+    return matched.map(_entryToJson).toList();
   }
 
+  /// popup 的保险库列表用：**所有**类型（含安全笔记 / 身份 / SSH 密钥）。
   Future<List<Map<String, dynamic>>> _getAllCredentials() async {
-    final key = _requireUnlocked();
-    final entries = await _db.getAllEntries();
+    _requireUnlocked();
+    final items = await _repository.getItems();
     _session.touch();
-    return entries.map((e) => _entryToJson(e, key)).toList();
+    return items.map(_entryToJson).toList();
   }
 
   Future<List<Map<String, dynamic>>> _searchCredentials(String query) async {
-    final key = _requireUnlocked();
+    _requireUnlocked();
     if (query.isEmpty) return await _getAllCredentials();
-    final entries = await _db.searchEntries(query);
+    // searchItems 解密后匹配类型专属字段（证件号 / SSH 指纹 / 自定义字段），
+    // 不只是 name/url/username 三列。
+    final items = await _repository.searchItems(query);
     _session.touch();
-    return entries.map((e) => _entryToJson(e, key)).toList();
+    return items.map(_entryToJson).toList();
   }
 
   Future<Map<String, dynamic>> _getStatus() async {
-    final count = await _db.getEntryCount();
+    // entryCount 的语义是"保险库里一共有多少条目"（所有类型），不是登录条目数。
+    final count = await _repository.countItems();
     // 注意：getStatus 是"看状态"，不算活跃操作，因此**不** touch()，
     // 否则扩展轮询状态就会让空闲计时器永远不过期。
     final remaining = _session.remaining;
@@ -293,13 +323,24 @@ class NativeMessagingService {
     return {'password': chars.join()};
   }
 
+  /// 取动态验证码：**只有登录条目**有意义。
+  ///
+  /// 非登录条目返回错误（沿用既有 `{'error': ...}` 风格），而不是回一个空验证码
+  /// —— 空码会被扩展画成"000000 已过期"这种误导性状态。TOTP 密钥始终留在本
+  /// 进程内，只把算出来的 6 位码下发。
   Future<Map<String, dynamic>> _getTotp(String entryId) async {
-    final key = _requireUnlocked();
-    final entry = await _db.getEntryById(entryId);
-    if (entry == null || (entry.totpSecretEncrypted ?? '').isEmpty) {
+    _requireUnlocked();
+    final item = await _repository.getItem(entryId);
+    if (item == null) {
       throw Exception('No TOTP secret configured for this entry');
     }
-    final secret = _decrypt(entry.totpSecretEncrypted, key);
+    if (!item.isLogin) {
+      throw Exception('Entry is not a login entry (${item.type.wireName})');
+    }
+    final secret = item.loginOrEmpty.totpSecret;
+    if (secret.isEmpty) {
+      throw Exception('No TOTP secret configured for this entry');
+    }
     _session.touch();
     final totp = _totpService.generateTotp(secret);
     final remaining = _totpService.getRemainingSeconds();
@@ -310,25 +351,29 @@ class NativeMessagingService {
     };
   }
 
-  /// 健康报告（契约 2.3）：在**服务端**解密并分析，只回传统计数字与
-  /// 条目 id/name，**绝不下发明文密码**（也不下发 TOTP 密钥）。
+  /// 健康报告（契约 2.3 / §5）：只分析**登录条目**，在服务端解密并统计，
+  /// 只回传统计数字与条目 id/name，**绝不下发明文密码**（也不下发 TOTP 密钥）。
+  ///
+  /// 非登录条目没有"密码强弱 / 缺网址"这些概念：安全笔记本来就没有 URL，
+  /// 混进来会白白变成 `noUrl` 问题并把分数拉低，所以在这里就按类型过滤掉，
+  /// `totalEntries` 也只数被分析过的登录条目。
   Future<Map<String, dynamic>> _getHealthReport() async {
-    final key = _requireUnlocked();
-    final entries = await _db.getAllEntries();
+    _requireUnlocked();
+    final items = await _repository.getItems(type: EntryType.login);
     _session.touch();
 
     // 明文密码只存在于这个局部列表里，analyze 返回后即不可达
     // （报告本身只保留 id/name + 统计，见 health_service.dart）。
     final decrypted = <HealthEntry>[
-      for (final entry in entries)
+      for (final item in items)
         HealthEntry(
-          id: entry.id,
-          name: entry.name,
-          url: entry.url,
-          password: _decryptLenient(entry.passwordEncrypted, key),
-          totpSecret: (entry.totpSecretEncrypted ?? '').isEmpty
+          id: item.id,
+          name: item.name,
+          url: item.loginOrEmpty.url,
+          password: item.loginOrEmpty.password,
+          totpSecret: item.loginOrEmpty.totpSecret.trim().isEmpty
               ? null
-              : _decryptLenient(entry.totpSecretEncrypted, key),
+              : item.loginOrEmpty.totpSecret,
         ),
     ];
 
@@ -370,6 +415,9 @@ class NativeMessagingService {
 
   /// 断言已解锁并返回当前会话密钥（惰性过期在 [VaultSession.key] 里生效）。
   /// 返回值由调用方在整个操作期间持有，避免读到一半被自动锁定。
+  ///
+  /// 数据读取本身走 [_repository]（它的 keyReader 同样现读 [_session]），
+  /// 这里主要承担"锁定时立刻报错"的门禁职责。
   Uint8List _requireUnlocked() {
     final key = _session.key;
     if (key == null) {
@@ -378,34 +426,37 @@ class NativeMessagingService {
     return key;
   }
 
-  /// Decrypt a stored field with the session key. Empty/null stays empty.
-  String _decrypt(String? encrypted, Uint8List key) {
-    if (encrypted == null || encrypted.isEmpty) return '';
-    return _cryptoService.decryptData(encrypted, key);
-  }
-
-  /// 容错解密：单条失败返回空串而不是让整个操作失败（健康报告等批量场景），
-  /// 与 health_provider.dart 的 `_decrypt` 风格一致。不抛异常、不打印明文。
-  String _decryptLenient(String? encrypted, Uint8List key) {
-    try {
-      return _decrypt(encrypted, key);
-    } catch (_) {
-      return '';
-    }
-  }
-
-  Map<String, dynamic> _entryToJson(PasswordEntry entry, Uint8List key) {
+  /// [VaultItem] → **协议 3** 的条目 JSON（契约 §5，键名与形状冻结）。
+  ///
+  /// - `url` / `username` / `password`：登录条目取登录字段；身份条目的
+  ///   `username` 取 `identity.username`；其余类型一律空串（扩展侧不必判 null）；
+  /// - `hasTotp`：只有登录条目可能为 true，且**绝不**下发 TOTP 密钥本身
+  ///   （取验证码一律走 `getTotp`，密钥不出进程）；
+  /// - `identity` / `sshKey`：直接复用 `IdentityData.toJson()` /
+  ///   `SshKeyData.toJson()`（snake_case 键名），非本类型时为 null；
+  /// - `customFields`：始终是数组（空时为 `[]`），元素来自 `CustomField.toJson()`。
+  ///
+  /// 解密失败的单条字段由 `VaultItemMapper` 的宽容模式按空串处理，
+  /// 一条坏数据不会让整个列表请求失败（也不会有任何明文被写回）。
+  Map<String, dynamic> _entryToJson(VaultItem item) {
+    final login = item.loginOrEmpty;
     return {
-      'id': entry.id,
-      'name': entry.name,
-      'url': entry.url,
-      'username': entry.username,
-      'password': _decrypt(entry.passwordEncrypted, key),
-      'notes': _decrypt(entry.notesEncrypted, key),
-      // 安全改进：不再把 TOTP 明文密钥下发给浏览器，只告诉它"有没有配置"。
-      // 取验证码一律走 getTotp（由本进程计算，密钥不出进程）。
-      'hasTotp': (entry.totpSecretEncrypted ?? '').isNotEmpty,
-      'isFavorite': entry.isFavorite,
+      'id': item.id,
+      'type': item.type.wireName,
+      'name': item.name,
+      'url': login.url,
+      'username': item.type == EntryType.identity
+          ? item.identityOrEmpty.username
+          : login.username,
+      'password': login.password,
+      'notes': item.notes,
+      'hasTotp': item.isLogin && login.hasTotp,
+      'isFavorite': item.isFavorite,
+      'identity': item.identity?.toJson(),
+      'sshKey': item.sshKey?.toJson(),
+      'customFields': [
+        for (final field in item.customFields) field.toJson(),
+      ],
     };
   }
 }

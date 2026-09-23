@@ -62,6 +62,15 @@
       "name": {"type": "String"}
     }
   },
+  "folderActions": "Folder actions",
+  "deleteFolderNotEmptyMessage": "Delete \"{name}\"? It still contains {count} entries. They will NOT be deleted — they move to \"No Folder\". This cannot be undone.",
+  "@deleteFolderNotEmptyMessage": {
+    "placeholders": {
+      "name": {"type": "String"},
+      "count": {"type": "int"}
+    }
+  },
+  "deleteFolderKeepEntries": "Delete folder, keep entries",
   "delete": "Delete",
   "searchFailed": "Search failed",
   "noResultsFound": "No results found",
@@ -273,6 +282,136 @@
   "@healthLoadFailed": {
     "placeholders": {
       "error": {"type": "String"}
+    }
+  },
+
+  "entryTypeLabel": "Type",
+  "entryTypeLogin": "Login",
+  "entryTypeSecureNote": "Secure note",
+  "entryTypeIdentity": "Identity",
+  "entryTypeSshKey": "SSH key",
+  "entryTypeAll": "All types",
+  "entryTypeLoginDesc": "Username, password, website and two-factor code",
+  "entryTypeSecureNoteDesc": "Free-form text, stored encrypted",
+  "entryTypeIdentityDesc": "Name, ID numbers, contact details and address",
+  "entryTypeSshKeyDesc": "Public key, private key and fingerprint",
+  "entryTypeFilterTooltip": "Filter by type",
+  "entryTypeSwitchTitle": "Switch entry type?",
+  "entryTypeSwitchMessage": "Fields that belong to \"{from}\" will be discarded. The name, notes and custom fields are kept.",
+  "@entryTypeSwitchMessage": {
+    "placeholders": {
+      "from": {"type": "String"}
+    }
+  },
+  "entryTypeSwitchConfirm": "Switch",
+  "entryTypeEmptyForType": "No {type} entries yet",
+  "@entryTypeEmptyForType": {
+    "placeholders": {
+      "type": {"type": "String"}
+    }
+  },
+
+  "customFieldsSection": "Custom fields",
+  "customFieldAdd": "Add field",
+  "customFieldLabelHint": "Label",
+  "customFieldValueHint": "Value",
+  "customFieldTypeText": "Text",
+  "customFieldTypeHidden": "Hidden",
+  "customFieldTypeBoolean": "Checkbox",
+  "customFieldRemove": "Remove field",
+  "customFieldNoFields": "No custom fields",
+
+  "secureNoteBodyLabel": "Note",
+  "secureNoteBodyHint": "Anything you want to keep encrypted",
+
+  "identityPersonalSection": "Personal",
+  "identityContactSection": "Contact",
+  "identityDocumentSection": "Documents",
+  "identityAddressSection": "Address",
+  "identityTitleLabel": "Title",
+  "identityTitleHint": "Mr / Ms / Dr",
+  "identityFirstNameLabel": "First name",
+  "identityMiddleNameLabel": "Middle name",
+  "identityLastNameLabel": "Last name",
+  "identityCompanyLabel": "Company",
+  "identityEmailLabel": "Email",
+  "identityPhoneLabel": "Phone",
+  "identityIdNumberLabel": "ID number",
+  "identityPassportLabel": "Passport number",
+  "identityLicenseLabel": "License number",
+  "identityAddress1Label": "Address",
+  "identityAddress2Label": "Address line 2",
+  "identityCityLabel": "City",
+  "identityStateLabel": "State / Province",
+  "identityPostalCodeLabel": "Postal code",
+  "identityCountryLabel": "Country / Region",
+  "identityBirthdayLabel": "Birthday",
+  "identityBirthdayHint": "YYYY-MM-DD",
+  "identitySexLabel": "Gender",
+
+  "sshKeySection": "Key material",
+  "sshPublicKeyLabel": "Public key",
+  "sshPublicKeyHint": "ssh-ed25519 AAAA… user@host",
+  "sshPrivateKeyLabel": "Private key",
+  "sshPrivateKeyHint": "-----BEGIN OPENSSH PRIVATE KEY-----",
+  "sshPassphraseLabel": "Key passphrase",
+  "sshFingerprintLabel": "Fingerprint",
+  "sshFingerprintAuto": "Computed from the public key",
+  "sshKeyTypeLabel": "Key type",
+  "sshBitsLabel": "Key size",
+  "sshBitsValue": "{bits} bits",
+  "@sshBitsValue": {
+    "placeholders": {
+      "bits": {"type": "int"}
+    }
+  },
+  "sshCommentLabel": "Comment",
+  "sshPrivateKeyFormatLabel": "Detected format",
+  "sshPublicKeyInvalid": "Could not parse this public key",
+  "sshKeyRequired": "Enter a public key or a private key",
+  "sshPrivateKeyFormatValue": "Detected format: {format}",
+  "@sshPrivateKeyFormatValue": {
+    "placeholders": {
+      "format": {"type": "String"}
+    }
+  },
+  "sshNoPrivateKey": "No private key stored",
+  "sshRevealPrivateKey": "Reveal private key",
+
+  "totpCodeLabel": "One-time code",
+  "totpCopyTooltip": "Copy code",
+  "totpRefreshesIn": "Refreshes in {seconds}s",
+  "@totpRefreshesIn": {
+    "placeholders": {
+      "seconds": {"type": "int"}
+    }
+  },
+  "totpNotSet": "Not configured",
+
+  "searchHint": "Search the vault",
+  "searchPrefixesHint": "Prefixes: type: login · folder: Work · url: example.com",
+
+  "folderIconLabel": "Icon",
+  "folderEditTitle": "Edit folder",
+  "folderRenamed": "Folder updated",
+  "renameFolder": "Rename",
+
+  "healthOnlyLogins": "Health is scored on login entries only",
+  "healthLoginCount": "{count} login entries analysed",
+  "@healthLoginCount": {
+    "placeholders": {
+      "count": {"type": "int"}
+    }
+  },
+
+  "fieldCopied": "Copied to clipboard",
+  "detailsSection": "Details",
+  "themeLight": "Light",
+  "themeDark": "Dark",
+  "themeApplied": "Theme: {value}",
+  "@themeApplied": {
+    "placeholders": {
+      "value": {"type": "String"}
     }
   }
 }

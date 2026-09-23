@@ -5,10 +5,12 @@ import '../repositories/vault_repository.dart';
 import 'export_import_service.dart';
 
 final exportImportServiceProvider = Provider<ExportImportService>((ref) {
-  final db = ref.watch(databaseProvider);
   return ExportImportService(
-    db,
+    ref.watch(databaseProvider),
     () => ref.read(encryptionKeyProvider) ??
         (throw Exception('Vault is locked')),
+    // 导入导出与 UI 共用同一个仓储：加密 / 解密的口径完全一致。
+    repository: ref.watch(vaultRepositoryProvider),
+    cryptoService: ref.watch(cryptoServiceProvider),
   );
 });

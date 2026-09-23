@@ -151,6 +151,17 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get folderActions => 'Folder actions';
+
+  @override
+  String deleteFolderNotEmptyMessage(String name, int count) {
+    return 'Delete \"$name\"? It still contains $count entries. They will NOT be deleted — they move to \"No Folder\". This cannot be undone.';
+  }
+
+  @override
+  String get deleteFolderKeepEntries => 'Delete folder, keep entries';
+
+  @override
   String get delete => 'Delete';
 
   @override
@@ -607,5 +618,277 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String healthLoadFailed(String error) {
     return 'Failed to load health report: $error';
+  }
+
+  @override
+  String get entryTypeLabel => 'Type';
+
+  @override
+  String get entryTypeLogin => 'Login';
+
+  @override
+  String get entryTypeSecureNote => 'Secure note';
+
+  @override
+  String get entryTypeIdentity => 'Identity';
+
+  @override
+  String get entryTypeSshKey => 'SSH key';
+
+  @override
+  String get entryTypeAll => 'All types';
+
+  @override
+  String get entryTypeLoginDesc =>
+      'Username, password, website and two-factor code';
+
+  @override
+  String get entryTypeSecureNoteDesc => 'Free-form text, stored encrypted';
+
+  @override
+  String get entryTypeIdentityDesc =>
+      'Name, ID numbers, contact details and address';
+
+  @override
+  String get entryTypeSshKeyDesc => 'Public key, private key and fingerprint';
+
+  @override
+  String get entryTypeFilterTooltip => 'Filter by type';
+
+  @override
+  String get entryTypeSwitchTitle => 'Switch entry type?';
+
+  @override
+  String entryTypeSwitchMessage(String from) {
+    return 'Fields that belong to \"$from\" will be discarded. The name, notes and custom fields are kept.';
+  }
+
+  @override
+  String get entryTypeSwitchConfirm => 'Switch';
+
+  @override
+  String entryTypeEmptyForType(String type) {
+    return 'No $type entries yet';
+  }
+
+  @override
+  String get customFieldsSection => 'Custom fields';
+
+  @override
+  String get customFieldAdd => 'Add field';
+
+  @override
+  String get customFieldLabelHint => 'Label';
+
+  @override
+  String get customFieldValueHint => 'Value';
+
+  @override
+  String get customFieldTypeText => 'Text';
+
+  @override
+  String get customFieldTypeHidden => 'Hidden';
+
+  @override
+  String get customFieldTypeBoolean => 'Checkbox';
+
+  @override
+  String get customFieldRemove => 'Remove field';
+
+  @override
+  String get customFieldNoFields => 'No custom fields';
+
+  @override
+  String get secureNoteBodyLabel => 'Note';
+
+  @override
+  String get secureNoteBodyHint => 'Anything you want to keep encrypted';
+
+  @override
+  String get identityPersonalSection => 'Personal';
+
+  @override
+  String get identityContactSection => 'Contact';
+
+  @override
+  String get identityDocumentSection => 'Documents';
+
+  @override
+  String get identityAddressSection => 'Address';
+
+  @override
+  String get identityTitleLabel => 'Title';
+
+  @override
+  String get identityTitleHint => 'Mr / Ms / Dr';
+
+  @override
+  String get identityFirstNameLabel => 'First name';
+
+  @override
+  String get identityMiddleNameLabel => 'Middle name';
+
+  @override
+  String get identityLastNameLabel => 'Last name';
+
+  @override
+  String get identityCompanyLabel => 'Company';
+
+  @override
+  String get identityEmailLabel => 'Email';
+
+  @override
+  String get identityPhoneLabel => 'Phone';
+
+  @override
+  String get identityIdNumberLabel => 'ID number';
+
+  @override
+  String get identityPassportLabel => 'Passport number';
+
+  @override
+  String get identityLicenseLabel => 'License number';
+
+  @override
+  String get identityAddress1Label => 'Address';
+
+  @override
+  String get identityAddress2Label => 'Address line 2';
+
+  @override
+  String get identityCityLabel => 'City';
+
+  @override
+  String get identityStateLabel => 'State / Province';
+
+  @override
+  String get identityPostalCodeLabel => 'Postal code';
+
+  @override
+  String get identityCountryLabel => 'Country / Region';
+
+  @override
+  String get identityBirthdayLabel => 'Birthday';
+
+  @override
+  String get identityBirthdayHint => 'YYYY-MM-DD';
+
+  @override
+  String get identitySexLabel => 'Gender';
+
+  @override
+  String get sshKeySection => 'Key material';
+
+  @override
+  String get sshPublicKeyLabel => 'Public key';
+
+  @override
+  String get sshPublicKeyHint => 'ssh-ed25519 AAAA… user@host';
+
+  @override
+  String get sshPrivateKeyLabel => 'Private key';
+
+  @override
+  String get sshPrivateKeyHint => '-----BEGIN OPENSSH PRIVATE KEY-----';
+
+  @override
+  String get sshPassphraseLabel => 'Key passphrase';
+
+  @override
+  String get sshFingerprintLabel => 'Fingerprint';
+
+  @override
+  String get sshFingerprintAuto => 'Computed from the public key';
+
+  @override
+  String get sshKeyTypeLabel => 'Key type';
+
+  @override
+  String get sshBitsLabel => 'Key size';
+
+  @override
+  String sshBitsValue(int bits) {
+    return '$bits bits';
+  }
+
+  @override
+  String get sshCommentLabel => 'Comment';
+
+  @override
+  String get sshPrivateKeyFormatLabel => 'Detected format';
+
+  @override
+  String get sshPublicKeyInvalid => 'Could not parse this public key';
+
+  @override
+  String get sshKeyRequired => 'Enter a public key or a private key';
+
+  @override
+  String sshPrivateKeyFormatValue(String format) {
+    return 'Detected format: $format';
+  }
+
+  @override
+  String get sshNoPrivateKey => 'No private key stored';
+
+  @override
+  String get sshRevealPrivateKey => 'Reveal private key';
+
+  @override
+  String get totpCodeLabel => 'One-time code';
+
+  @override
+  String get totpCopyTooltip => 'Copy code';
+
+  @override
+  String totpRefreshesIn(int seconds) {
+    return 'Refreshes in ${seconds}s';
+  }
+
+  @override
+  String get totpNotSet => 'Not configured';
+
+  @override
+  String get searchHint => 'Search the vault';
+
+  @override
+  String get searchPrefixesHint =>
+      'Prefixes: type: login · folder: Work · url: example.com';
+
+  @override
+  String get folderIconLabel => 'Icon';
+
+  @override
+  String get folderEditTitle => 'Edit folder';
+
+  @override
+  String get folderRenamed => 'Folder updated';
+
+  @override
+  String get renameFolder => 'Rename';
+
+  @override
+  String get healthOnlyLogins => 'Health is scored on login entries only';
+
+  @override
+  String healthLoginCount(int count) {
+    return '$count login entries analysed';
+  }
+
+  @override
+  String get fieldCopied => 'Copied to clipboard';
+
+  @override
+  String get detailsSection => 'Details';
+
+  @override
+  String get themeLight => 'Light';
+
+  @override
+  String get themeDark => 'Dark';
+
+  @override
+  String themeApplied(String value) {
+    return 'Theme: $value';
   }
 }

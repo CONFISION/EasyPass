@@ -68,6 +68,7 @@ function t(key, args) {
 const ENTRIES = [
   {
     id: 'entry-github',
+    type: 'login',
     name: 'GitHub',
     url: 'https://github.com/login',
     username: 'octocat',
@@ -75,9 +76,14 @@ const ENTRIES = [
     notes: '',
     hasTotp: true,
     isFavorite: false,
+    customFields: [
+      { label: 'PIN', value: '4821', type: 'text' },
+      { label: 'Recovery key', value: 'RECOVERY-PLACEHOLDER-9', type: 'hidden' },
+    ],
   },
   {
     id: 'entry-example',
+    type: 'login',
     name: 'Example Site',
     url: 'https://example.com',
     username: 'user@example.com',
@@ -85,6 +91,69 @@ const ENTRIES = [
     notes: '',
     hasTotp: false,
     isFavorite: false,
+  },
+  {
+    id: 'entry-note',
+    type: 'secure_note',
+    name: 'Note Entry',
+    url: '',
+    username: '',
+    password: '',
+    notes: 'Alpha line of the note\nBeta line should stay hidden',
+    hasTotp: false,
+    isFavorite: false,
+  },
+  {
+    id: 'entry-identity',
+    type: 'identity',
+    name: 'Identity Entry',
+    url: '',
+    username: 'alice-account',
+    password: '',
+    notes: '',
+    hasTotp: false,
+    isFavorite: false,
+    identity: {
+      title: 'Ms',
+      first_name: 'Alice',
+      middle_name: '',
+      last_name: 'Nguyen',
+      username: 'alice-account',
+      company: 'Example Corp',
+      email: 'alice@example.com',
+      phone: '+1-555-0100',
+      id_number: 'ID-PLACEHOLDER-42',
+      passport_number: 'P-PLACEHOLDER-7',
+      license_number: '',
+      address1: '1 Placeholder Road',
+      address2: '',
+      city: 'Testville',
+      state: 'TS',
+      postal_code: '00000',
+      country: 'Nowhere',
+      birthday: '1990-01-01',
+      sex: 'F',
+    },
+  },
+  {
+    id: 'entry-ssh',
+    type: 'ssh_key',
+    name: 'SSH Entry',
+    url: '',
+    username: '',
+    password: '',
+    notes: '',
+    hasTotp: false,
+    isFavorite: false,
+    sshKey: {
+      public_key: 'ssh-ed25519 AAAAPLACEHOLDERPUBLICKEY user@host',
+      private_key: 'PRIVATEKEY-PLACEHOLDER-MUST-NOT-AUTOCOPY',
+      passphrase: 'PASSPHRASE-PLACEHOLDER',
+      fingerprint: 'SHA256:PlaceholderFingerprint1234',
+      key_type: 'ssh-ed25519',
+      bits: 256,
+      comment: 'user@host',
+    },
   },
 ];
 
@@ -258,6 +327,14 @@ try {
         },
       });
       window.document.execCommand = () => true;
+      // 成功填充后 popup 会 window.close()（CLOSE_AFTER_FILL_MS）。jsdom 里真的关掉
+      // 窗口会让它之后**所有定时器变成空操作**（不报错、只是不再触发），于是搜索
+      // 防抖、TOTP 秒表全部静默失效 —— 后续断言会莫名其妙地失败。这里只记录调用，
+      // 不真关窗口（真实浏览器里 popup 本来就是用完即关的一次性页面）。
+      window.closeCalls = 0;
+      window.close = () => {
+        window.closeCalls += 1;
+      };
     },
   });
 } catch (e) {
@@ -392,6 +469,270 @@ check(
   }
   check('解锁后回到主视图', doc.getElementById('mainView')?.hidden === false);
   check('解锁后重新渲染条目', text(doc).includes('GitHub'), text(doc).slice(0, 160));
+}
+
+// ─── 条目类型（协议 3）：徽章 / 图标 / 徽标 / 副标题 / 每类复制动作 ─────────
+{
+  const rows = [...doc.querySelectorAll('#entryList .entry[data-index]')];
+  check('每条条目行带 data-entry-type', rows.length === ENTRIES.length,
+    `rows=${rows.length} entries=${ENTRIES.length}`);
+
+  const rowOf = (type) => doc.querySelector(`#entryList .entry[data-entry-type="${type}"]`);
+  const typeRows = { login: rowOf('login'), secure_note: rowOf('secure_note'), identity: rowOf('identity'), ssh_key: rowOf('ssh_key') };
+  check('四类条目都渲染出条目行',
+    Object.values(typeRows).every(Boolean),
+    Object.entries(typeRows).map(([k, v]) => `${k}:${!!v}`).join(' '));
+
+  // 类型徽章：文案走 i18n，data-type 与条目类型一致
+  const badgeChecks = [
+    ['login', t('typeBadgeLogin')],
+    ['secure_note', t('typeBadgeSecureNote')],
+    ['identity', t('typeBadgeIdentity')],
+    ['ssh_key', t('typeBadgeSshKey')],
+  ];
+  check('每行渲染类型徽章（文案 + data-type 一致）',
+    badgeChecks.every(([type, label]) => {
+      const badge = rowOf(type)?.querySelector('.entry-type-badge');
+      return badge && badge.dataset.type === type && badge.textContent.trim() === label;
+    }),
+    badgeChecks.map(([type, label]) => {
+      const b = rowOf(type)?.querySelector('.entry-type-badge');
+      return `${type}=${b ? b.textContent.trim() : 'null'}/${label}`;
+    }).join(' '));
+
+  // 类型图标：登录条目沿用品牌图标，其余三类各用类型图标
+  check('非登录类型有各自的类型图标',
+    rowOf('secure_note')?.querySelector('.entry-icon')?.textContent.trim() === '📝' &&
+      rowOf('identity')?.querySelector('.entry-icon')?.textContent.trim() === '🪪' &&
+      rowOf('ssh_key')?.querySelector('.entry-icon')?.textContent.trim() === '🗝️',
+    ['secure_note', 'identity', 'ssh_key']
+      .map((k) => `${k}=${rowOf(k)?.querySelector('.entry-icon')?.textContent.trim()}`).join(' '));
+  check('登录条目保留品牌图标',
+    (rowOf('login')?.querySelector('.entry-icon')?.textContent.trim() || '').length > 0,
+    rowOf('login')?.querySelector('.entry-icon')?.textContent.trim());
+
+  // 副标题逻辑
+  const subOf = (type) => rowOf(type)?.querySelector('.entry-subtitle')?.textContent.trim() || '';
+  check('login 副标题为用户名', subOf('login') === 'octocat', subOf('login'));
+  check('secure_note 副标题取 notes 第一行',
+    subOf('secure_note') === 'Alpha line of the note', subOf('secure_note'));
+  check('identity 副标题为姓名', subOf('identity') === 'Ms Alice Nguyen', subOf('identity'));
+  check('ssh_key 副标题为指纹',
+    subOf('ssh_key') === 'SHA256:PlaceholderFingerprint1234', subOf('ssh_key'));
+
+  // 自动填充只认登录条目：其余三类不得出现 fill 钩子
+  check('只有登录条目带 data-action="fill"',
+    !!rowOf('login')?.querySelector('[data-action="fill"]') &&
+      ['secure_note', 'identity', 'ssh_key'].every((k) => !rowOf(k)?.querySelector('[data-action="fill"]')),
+    ['secure_note', 'identity', 'ssh_key']
+      .map((k) => `${k}=${!!rowOf(k)?.querySelector('[data-action="fill"]')}`).join(' '));
+  check('登录条目保留 copy-password / copy-username / copy-url',
+    ['copy-password', 'copy-username', 'copy-url']
+      .every((a) => !!rowOf('login')?.querySelector(`[data-action="${a}"]`)));
+
+  // 每类至少一个可用的复制动作（点击后真的写入剪贴板）
+  const copyOn = async (type, action, expected) => {
+    const before = copied.length;
+    const btn = rowOf(type)?.querySelector(`[data-action="${action}"]`);
+    if (!btn) return { ok: false, why: 'no button' };
+    click(btn);
+    await tick(120);
+    return {
+      ok: copied.length > before && copied[copied.length - 1] === expected,
+      why: `copied=${JSON.stringify(copied.slice(before))}`,
+    };
+  };
+  const noteCopy = await copyOn('secure_note', 'copy-note', ENTRIES[2].notes);
+  check('secure_note 可复制笔记正文', noteCopy.ok, noteCopy.why);
+  const nameCopy = await copyOn('identity', 'copy-full-name', 'Ms Alice Nguyen');
+  check('identity 可复制姓名', nameCopy.ok, nameCopy.why);
+  const mailCopy = await copyOn('identity', 'copy-email', 'alice@example.com');
+  check('identity 可复制邮箱', mailCopy.ok, mailCopy.why);
+  const phoneCopy = await copyOn('identity', 'copy-phone', '+1-555-0100');
+  check('identity 可复制电话', phoneCopy.ok, phoneCopy.why);
+  const idCopy = await copyOn('identity', 'copy-id-number', 'ID-PLACEHOLDER-42');
+  check('identity 可复制证件号', idCopy.ok, idCopy.why);
+  const pubCopy = await copyOn('ssh_key', 'copy-public-key', ENTRIES[4].sshKey.public_key);
+  check('ssh_key 可复制公钥', pubCopy.ok, pubCopy.why);
+  const fpCopy = await copyOn('ssh_key', 'copy-fingerprint', ENTRIES[4].sshKey.fingerprint);
+  check('ssh_key 可复制指纹', fpCopy.ok, fpCopy.why);
+
+  // 安全笔记：正文默认不可见，点开后渲染（含多行）
+  const noteRow = rowOf('secure_note');
+  check('secure_note 正文默认不渲染',
+    !(noteRow?.textContent || '').includes('Beta line should stay hidden'),
+    (noteRow?.textContent || '').slice(0, 120));
+  click(noteRow.querySelector('[data-action="toggle-note"]'));
+  await tick(150);
+  const openNoteRows = [...doc.querySelectorAll('.entry-note .note-body')];
+  check('secure_note 点开后渲染完整正文',
+    openNoteRows.length === 1 && openNoteRows[0].textContent === ENTRIES[2].notes,
+    JSON.stringify(openNoteRows.map((n) => n.textContent)));
+
+  // 身份信息：非空字段逐项渲染，字段标签走 i18n
+  const identityRow = rowOf('identity');
+  const identityText = identityRow?.textContent || '';
+  check('identity 渲染姓名与分组标题',
+    identityText.includes(t('identityPersonalSection')) &&
+      identityText.includes(t('identityContactSection')) &&
+      identityText.includes('Alice') && identityText.includes('Nguyen'),
+    identityText.slice(0, 160));
+  check('identity 渲染邮箱 / 电话 / 证件号及其标签',
+    identityText.includes('alice@example.com') && identityText.includes('+1-555-0100') &&
+      identityText.includes('ID-PLACEHOLDER-42') &&
+      identityText.includes(t('identityEmailLabel')) &&
+      identityText.includes(t('identityPhoneLabel')) &&
+      identityText.includes(t('identityIdNumberLabel')),
+    identityText.slice(0, 240));
+
+  // SSH：指纹渲染在行内，私钥必须显式点击才出现，且永不自动进剪贴板
+  const sshRow = rowOf('ssh_key');
+  check('ssh_key 行内渲染指纹',
+    (sshRow?.textContent || '').includes('SHA256:PlaceholderFingerprint1234'),
+    (sshRow?.textContent || '').slice(0, 160));
+  check('ssh_key 私钥默认不进入 DOM（含公开钥渲染块）',
+    !(sshRow?.textContent || '').includes('PRIVATEKEY-PLACEHOLDER-MUST-NOT-AUTOCOPY'),
+    (sshRow?.textContent || '').slice(0, 200));
+  check('ssh_key 私钥从未被自动复制',
+    !copied.some((v) => v === 'PRIVATEKEY-PLACEHOLDER-MUST-NOT-AUTOCOPY'),
+    JSON.stringify(copied));
+  const sshBefore = copied.length;
+  const privBtn = sshRow.querySelector('[data-action="copy-private-key"]');
+  check('ssh_key 复制私钥按钮存在（显式点击才可复制）', !!privBtn);
+  if (privBtn) {
+    click(privBtn);
+    await tick(120);
+  }
+  check('ssh_key 显式点击后复制私钥',
+    copied.length === sshBefore + 1 && copied[copied.length - 1] === 'PRIVATEKEY-PLACEHOLDER-MUST-NOT-AUTOCOPY',
+    JSON.stringify(copied.slice(sshBefore)));
+
+  // 自定义字段：默认收起；隐藏类型在被点开前只渲染掩码，不渲染明文
+  // （每次渲染都会重建条目 DOM，所以断言前必须重新取一次行节点；
+  //   用 data-entry-id 取行 —— 行上的 data-index 是"条目下标"，按钮上的
+  //   data-index 是"自定义字段下标"，两个同名属性不能混用）
+  const rowOfLogin = () => doc.querySelector('#entryList .entry[data-entry-id="entry-github"]');
+  check('条目行带 data-entry-id（稳定钩子）', !!rowOfLogin());
+  check('自定义字段默认收起',
+    !(rowOfLogin()?.textContent || '').includes('4821'),
+    (rowOfLogin()?.textContent || '').slice(0, 200));
+  const customToggle = rowOfLogin()?.querySelector('[data-action="toggle-custom"]');
+  check('自定义字段有可点开的入口（🧩）', !!customToggle);
+  if (customToggle) {
+    click(customToggle);
+    await tick(150);
+  }
+  const customText = rowOfLogin()?.textContent || '';
+  check('自定义字段展开后渲染普通字段值', customText.includes('4821'), customText.slice(0, 240));
+  check('隐藏类型自定义字段在未点开前不渲染明文',
+    !customText.includes('RECOVERY-PLACEHOLDER-9') &&
+      !!rowOfLogin()?.querySelector('.field-masked[data-field-masked]'),
+    customText.slice(0, 240));
+  check('隐藏字段的明文在未显示前不进 DOM（含属性）',
+    !(rowOfLogin()?.outerHTML || '').includes('RECOVERY-PLACEHOLDER-9'),
+    (rowOfLogin()?.outerHTML || '').slice(0, 300));
+  check('隐藏字段的复制按钮不带 data-value 明文（只带索引）',
+    (() => {
+      const maskedField = rowOfLogin()?.querySelector('.field-masked')?.closest('.field');
+      const button = maskedField?.querySelector('[data-action="copy-field"]');
+      return !!button && !button.dataset.value && button.dataset.field !== undefined;
+    })(),
+    (rowOfLogin()?.querySelector('.field-masked')?.closest('.field')?.innerHTML || '').slice(0, 200));
+  const hiddenCopyBtn = rowOfLogin()?.querySelector('.field-masked')
+    ?.closest('.field')?.querySelector('[data-action="copy-field"]');
+  if (hiddenCopyBtn) {
+    const before = copied.length;
+    click(hiddenCopyBtn);
+    await tick(150);
+    check('未显示也能复制隐藏字段（值从 state 读，不经过 DOM）',
+      copied.length > before && copied[copied.length - 1] === 'RECOVERY-PLACEHOLDER-9',
+      String(copied[copied.length - 1]));
+  }
+  const revealBtn = rowOfLogin()?.querySelector('[data-action="toggle-field"]');
+  check('隐藏字段有显式显示按钮', !!revealBtn);
+  if (revealBtn) {
+    click(revealBtn);
+    await tick(150);
+  }
+  check('点击显示后隐藏字段才渲染明文',
+    (() => {
+      const fresh = rowOfLogin()?.querySelector('[data-action="toggle-field"]');
+      return (rowOfLogin()?.textContent || '').includes('RECOVERY-PLACEHOLDER-9') &&
+        !!fresh && fresh.getAttribute('aria-label') === t('hideValue');
+    })(),
+    (rowOfLogin()?.textContent || '').slice(0, 260));
+}
+
+// ─── 类型筛选（客户端过滤已加载列表，且要挺过搜索 / 重渲染）───────────────
+{
+  const chips = [...doc.querySelectorAll('#typeFilter [data-action="filter-type"]')];
+  check('类型筛选有 5 个按钮（全部 / 登录 / 安全笔记 / 身份 / SSH）', chips.length === 5,
+    chips.map((c) => c.dataset.type).join(','));
+  check('筛选按钮带 aria-pressed（默认只有"全部"按下）',
+    chips.every((c) => c.hasAttribute('aria-pressed')) &&
+      chips.filter((c) => c.getAttribute('aria-pressed') === 'true').length === 1 &&
+      doc.querySelector('#typeFilter [data-type="all"]').getAttribute('aria-pressed') === 'true',
+    chips.map((c) => `${c.dataset.type}:${c.getAttribute('aria-pressed')}`).join(' '));
+  check('筛选按钮文案走 i18n',
+    doc.querySelector('#typeFilter [data-type="secure_note"]').textContent.trim() === t('entryTypeSecureNote'),
+    doc.querySelector('#typeFilter [data-type="secure_note"]').textContent.trim());
+
+  const visibleTypes = () =>
+    [...doc.querySelectorAll('#entryList .entry[data-entry-type]')].map((r) => r.dataset.entryType);
+  const chipOf = (type) => doc.querySelector(`#typeFilter [data-type="${type}"]`);
+
+  click(chipOf('identity'));
+  await tick(150);
+  check('点"身份"后列表只剩 identity 行',
+    visibleTypes().length === 1 && visibleTypes()[0] === 'identity',
+    visibleTypes().join(','));
+  check('筛选后按钮进入按下态',
+    chipOf('identity').getAttribute('aria-pressed') === 'true' &&
+      chipOf('all').getAttribute('aria-pressed') === 'false',
+    `identity=${chipOf('identity').getAttribute('aria-pressed')} all=${chipOf('all').getAttribute('aria-pressed')}`);
+  check('筛选后的计数显示 已显示 / 总数',
+    doc.getElementById('vaultCount').textContent.trim() === t('entriesCountFiltered', ['1', String(ENTRIES.length)]),
+    doc.getElementById('vaultCount').textContent.trim());
+
+  click(chipOf('ssh_key'));
+  await tick(150);
+  check('切换筛选后列表更新',
+    visibleTypes().length === 1 && visibleTypes()[0] === 'ssh_key',
+    visibleTypes().join(','));
+  check('同时只有一个按钮按下',
+    chips.filter((c) => c.getAttribute('aria-pressed') === 'true').length === 1);
+
+  // 搜索（服务端）之后筛选仍要生效：筛选走客户端，不因重新渲染丢失
+  click(chipOf('all'));
+  await tick(100);
+  doc.getElementById('searchInput').value = 'Entry';
+  doc.getElementById('searchInput').dispatchEvent(new window.Event('input', { bubbles: true }));
+  await tick(500);
+  check('搜索请求发往服务端（searchCredentials）',
+    calls.some((c) => c.action === 'searchCredentials' && c.query === 'Entry'),
+    calls.map((c) => c.action).join(','));
+  const searched = ENTRIES.filter((e) => e.name.includes('Entry')).length;
+  check('搜索结果渲染所有类型（含笔记 / 身份 / 密钥）',
+    searched > 1 && visibleTypes().length === searched,
+    `visible=${visibleTypes().join(',')} expected=${searched}`);
+
+  // 筛选把已加载条目全部隐藏时要有空状态，而不是一片空白
+  click(chipOf('login'));
+  await tick(150);
+  check('筛选到没有匹配行时有空状态（而不是空白）',
+    visibleTypes().length === 0 &&
+      (doc.getElementById('entryList').textContent || '').includes(t('noEntriesForFilter')),
+    `visible=${visibleTypes().join(',')} text=${(doc.getElementById('entryList').textContent || '').slice(0, 80)}`);
+
+  click(chipOf('identity'));
+  await tick(150);
+  check('搜索后再点筛选依然生效（筛选挺过重渲染）',
+    visibleTypes().length === 1 && visibleTypes()[0] === 'identity',
+    visibleTypes().join(','));
+  check('搜索 + 筛选叠加时筛选按钮状态不丢',
+    chipOf('identity').getAttribute('aria-pressed') === 'true' &&
+      chipOf('all').getAttribute('aria-pressed') === 'false',
+    chips.map((c) => `${c.dataset.type}:${c.getAttribute('aria-pressed')}`).join(' '));
 }
 
 check('无 console.error 噪音', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));

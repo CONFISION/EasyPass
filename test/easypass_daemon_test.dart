@@ -11,6 +11,9 @@ import 'package:easypass/core/constants/app_constants.dart';
 import 'package:easypass/core/crypto/crypto_service.dart';
 import 'package:easypass/core/crypto/totp_service.dart';
 import 'package:easypass/data/database/database.dart';
+import 'package:easypass/data/models/entry_type.dart';
+import 'package:easypass/data/models/vault_item.dart';
+import 'package:easypass/data/repositories/vault_repository.dart';
 import 'package:easypass/features/browser_bridge/easypass_daemon.dart';
 import 'package:easypass/features/browser_bridge/native_messaging_service.dart';
 import 'package:easypass/features/browser_bridge/vault_session.dart';
@@ -252,6 +255,49 @@ void main() {
         {'requestId': 'u1', 'action': 'unlock', 'password': 'wrong'});
     expect(res['error'], isNotNull);
     expect(daemon.session.isUnlocked, isFalse);
+    await socket.close();
+  });
+
+  // ─── 协议 3：多类型条目经共享会话解密 ─────────────────────
+
+  test('非登录条目经 daemon 的共享会话解密后按协议 3 下发', () async {
+    await configureMasterPassword();
+    // 用同一把会话密钥落库一条安全笔记（与 UI 保存走同一条加密路径）。
+    final salt = await crypto.getStoredSalt();
+    final key = crypto.deriveKey(masterPassword, salt!);
+    await VaultRepository(db: db, cryptoService: crypto, keyReader: () => key)
+        .saveItem(const VaultItem(
+      id: 'note-1',
+      type: EntryType.secureNote,
+      name: 'WiFi',
+      notes: 'note body',
+      createdAt: 0,
+      updatedAt: 0,
+    ));
+
+    final (socket, reader) = await connect();
+    final unlock = await ask(socket, reader,
+        {'requestId': 'u1', 'action': 'unlock', 'password': masterPassword});
+    expect(unlock['error'], isNull);
+
+    // daemon 每条连接都新建 service，但仓库绑定同一个共享会话 → 解得开非登录类型
+    final all = await ask(socket, reader,
+        {'requestId': 'c1', 'action': 'getAllCredentials'});
+    expect(all['error'], isNull);
+    final entry = (all['data'] as List).single as Map<String, dynamic>;
+    expect(entry['type'], 'secure_note');
+    expect(entry['name'], 'WiFi');
+    expect(entry['notes'], 'note body');
+    expect(entry['url'], '');
+    expect(entry['username'], '');
+    expect(entry['password'], '');
+    expect(entry['hasTotp'], false);
+
+    // 自动填充回退路径也不能把笔记塞进去（契约 §5）
+    final fill = await ask(socket, reader,
+        {'requestId': 'c2', 'action': 'getCredentials', 'url': ''});
+    expect(fill['error'], isNull);
+    expect(fill['data'] as List, isEmpty);
     await socket.close();
   });
 

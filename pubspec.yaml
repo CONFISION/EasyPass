@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.2.2+9
+version: 2.3.2+12
 
 environment:
   sdk: ^3.12.2
@@ -43,7 +43,7 @@ dependencies:
   # Routing
   go_router: ^14.8.1
   # Database
-  drift: ^2.25.1
+  drift: ^2.35.0
   sqlite3_flutter_libs: ^0.5.30
   path: ^1.9.1
   # Encryption
@@ -68,11 +68,18 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   # Code Generation
-  build_runner: ^2.4.14
-  drift_dev: ^2.25.1
-  riverpod_generator: ^2.6.3
-  riverpod_lint: ^2.6.3
-  custom_lint: ^0.7.5
+  #
+  # 版本下限由 Dart SDK 决定：analyzer 必须能解析当前 SDK 的语言版本，
+  # 否则 drift_dev 会在解析依赖源码时崩溃（analyzer 7.x 遇到 Dart 3.13 的
+  # dot-shorthand 语法会抛 "Missing implementation of
+  # visitDotShorthandPropertyAccess"），database.g.dart 直接生成不出来。
+  # drift_dev >= 2.34.6 要求 analyzer >= 13，因此 build_runner 也要跟上。
+  build_runner: ^2.16.1
+  drift_dev: ^2.35.0
+  # 说明：riverpod_generator / riverpod_lint / custom_lint 已移除。
+  # 本仓库的 provider 全部手写、没有 @riverpod 注解，这三者不产出任何东西；
+  # 且 custom_lint ^0.7 锁死 analyzer ^7，正是上面那次 codegen 崩溃的元凶。
+  # 将来真要用 @riverpod：重新加入这三个依赖，并同时升级 riverpod 全家桶。
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

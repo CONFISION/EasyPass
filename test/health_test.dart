@@ -1,12 +1,15 @@
 import 'dart:typed_data';
 
-import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
+import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:easypass/core/crypto/crypto_service.dart';
 import 'package:easypass/data/database/database.dart';
+import 'package:easypass/data/models/entry_fields.dart';
+import 'package:easypass/data/models/entry_type.dart';
+import 'package:easypass/data/models/vault_item.dart';
 import 'package:easypass/data/repositories/vault_repository.dart';
 import 'package:easypass/features/auth/providers/auth_provider.dart';
 import 'package:easypass/features/health/health_provider.dart';
@@ -349,6 +352,84 @@ void main() {
     });
   });
 
+  // ─── 只有登录条目参与评分（2.3.0）────────────────────────
+
+  group('HealthService.analyze - 只有登录条目参与评分', () {
+    test('安全笔记 / 身份 / SSH 条目被跳过（防御性第二道闸）', () {
+      final report = HealthService.analyze(const [
+        HealthEntry(
+          id: 'n',
+          name: 'Note',
+          password: '',
+          type: EntryType.secureNote,
+        ),
+        HealthEntry(
+          id: 'i',
+          name: 'Identity',
+          password: '',
+          type: EntryType.identity,
+        ),
+        HealthEntry(id: 'k', name: 'Key', password: '', type: EntryType.sshKey),
+      ]);
+
+      expect(report.totalEntries, 0);
+      expect(report.score, 100);
+      expect(report.isHealthy, isTrue);
+      expect(report.level, HealthLevel.good);
+      expect(report.weakPasswords, isEmpty);
+      expect(report.reusedPasswords, isEmpty);
+      expect(report.reusedGroupCount, 0);
+      expect(report.noTotpEntries, isEmpty);
+      expect(report.noUrlEntries, isEmpty);
+    });
+
+    test('totalEntries 只数登录条目', () {
+      final report = HealthService.analyze(const [
+        HealthEntry(id: 'a', name: 'A', password: 'Tr0ub4dor&3X!9'),
+        HealthEntry(
+          id: 'n',
+          name: 'N',
+          password: '',
+          type: EntryType.secureNote,
+        ),
+      ]);
+      expect(report.totalEntries, 1);
+    });
+
+    test('HealthEntry.fromItem：登录取登录字段，非登录字段全空', () {
+      final login = HealthEntry.fromItem(const VaultItem(
+        id: 'a',
+        type: EntryType.login,
+        name: 'A',
+        login: LoginData(
+          url: 'https://a.example.com',
+          username: 'u',
+          password: 'p',
+          totpSecret: 'SEC',
+        ),
+        createdAt: 0,
+        updatedAt: 0,
+      ));
+      expect(login.type, EntryType.login);
+      expect(login.url, 'https://a.example.com');
+      expect(login.password, 'p');
+      expect(login.totpSecret, 'SEC');
+
+      final note = HealthEntry.fromItem(const VaultItem(
+        id: 'n',
+        type: EntryType.secureNote,
+        name: 'N',
+        notes: 'body',
+        createdAt: 0,
+        updatedAt: 0,
+      ));
+      expect(note.type, EntryType.secureNote);
+      expect(note.password, isEmpty);
+      expect(note.url, isEmpty);
+      expect(note.totpSecret, isNull);
+    });
+  });
+
   // ─── provider 装配（解密 + 分析）────────────────────────
 
   group('healthReportProvider', () {
@@ -374,33 +455,69 @@ void main() {
       container.read(encryptionKeyProvider.notifier).state = key;
     });
 
+    VaultItem loginItem({
+      required String id,
+      required String name,
+      required String password,
+      String url = '',
+      String totpSecret = '',
+    }) {
+      return VaultItem(
+        id: id,
+        type: EntryType.login,
+        name: name,
+        login: LoginData(
+          url: url,
+          username: 'user-$id',
+          password: password,
+          totpSecret: totpSecret,
+        ),
+        createdAt: 0,
+        updatedAt: 0,
+      );
+    }
+
+    /// 三种非登录条目：它们没有密码 / 网址 / TOTP，不该被扣分。
+    List<VaultItem> nonLoginItems() => const [
+          VaultItem(
+            id: 'note-1',
+            type: EntryType.secureNote,
+            name: 'Recovery codes',
+            notes: 'a very long secret note body',
+            createdAt: 0,
+            updatedAt: 0,
+          ),
+          VaultItem(
+            id: 'identity-1',
+            type: EntryType.identity,
+            name: 'Passport',
+            identity: IdentityData(firstName: 'Ada', idNumber: 'ID-123'),
+            createdAt: 0,
+            updatedAt: 0,
+          ),
+          VaultItem(
+            id: 'ssh-1',
+            type: EntryType.sshKey,
+            name: 'Deploy key',
+            sshKey: SshKeyData(publicKey: 'ssh-ed25519 AAAA marker@host'),
+            createdAt: 0,
+            updatedAt: 0,
+          ),
+        ];
+
     test('解密装配：弱密码/重复密码/无TOTP/无URL 全部识别', () async {
       final repo = container.read(vaultRepositoryProvider);
-      final crypto = CryptoService();
-      final now = DateTime.now().millisecondsSinceEpoch;
 
       // a: 常见弱密码 + 无 url + 无 totp
-      await repo.saveEntry(PasswordEntriesCompanion.insert(
-        id: 'a',
-        name: 'SiteA',
-        passwordEncrypted: crypto.encryptData('123456', key),
-        url: const Value(''),
-        totpSecretEncrypted: const Value(''),
-        createdAt: now,
-        updatedAt: now,
-      ));
+      await repo.saveItem(loginItem(id: 'a', name: 'SiteA', password: '123456'));
       // b/c: 共用强密码 + 有 url + 有 totp
       for (final id in ['b', 'c']) {
-        await repo.saveEntry(PasswordEntriesCompanion.insert(
+        await repo.saveItem(loginItem(
           id: id,
           name: 'Site$id',
-          passwordEncrypted: crypto.encryptData('Tr0ub4dor&3X!9', key),
-          url: Value('https://$id.example.com'),
-          totpSecretEncrypted: Value(
-            crypto.encryptData('JBSWY3DPEHPK3PXP', key),
-          ),
-          createdAt: now,
-          updatedAt: now,
+          password: 'Tr0ub4dor&3X!9',
+          url: 'https://$id.example.com',
+          totpSecret: 'JBSWY3DPEHPK3PXP',
         ));
       }
 
@@ -429,26 +546,88 @@ void main() {
     });
 
     test('加密字段解密失败时不泄漏明文并继续分析', () async {
-      final repo = container.read(vaultRepositoryProvider);
-      final now = DateTime.now().millisecondsSinceEpoch;
+      final db = container.read(databaseProvider);
+      final crypto = CryptoService();
       // 用错误密钥加密的密码无法解密，按空串处理，不抛异常
-      final wrongKey = CryptoService().deriveKey(
+      final wrongKey = crypto.deriveKey(
         'wrongmaster',
-        CryptoService().generateSalt(),
+        crypto.generateSalt(),
       );
-      await repo.saveEntry(PasswordEntriesCompanion.insert(
+      final wrongRepo = VaultRepository(
+        db: db,
+        cryptoService: crypto,
+        keyReader: () => wrongKey,
+      );
+      await wrongRepo.saveItem(loginItem(
         id: 'a',
         name: 'SiteA',
-        passwordEncrypted: CryptoService().encryptData('123456', wrongKey),
-        createdAt: now,
-        updatedAt: now,
+        password: '123456',
+        // totp 也解不开 → 按"没有 TOTP"处理；url 是明文列（不受密钥影响），
+        // 这里刻意留空以免混淆被测行为。
+        totpSecret: 'JBSWY3DPEHPK3PXP',
       ));
 
       final report = await container.read(healthReportProvider.future);
       expect(report.totalEntries, 1);
+      // 解不开 → 空密码（弱：长度不足）+ 无 TOTP + 无 URL
       expect(report.weakPasswordCount, 1);
+      expect(report.weakPasswords.single.reason, WeakPasswordReason.tooShort);
       expect(report.noTotpCount, 1);
       expect(report.noUrlCount, 1);
+    });
+
+    test('只有安全笔记 / 身份 / SSH 的保险库：100 分且各问题列表为空', () async {
+      final repo = container.read(vaultRepositoryProvider);
+      for (final item in nonLoginItems()) {
+        await repo.saveItem(item);
+      }
+      // 确认库里真的有 3 条（而不是空库恰好 100 分）
+      expect(await repo.countItems(), 3);
+
+      final report = await container.read(healthReportProvider.future);
+
+      expect(report.totalEntries, 0);
+      expect(report.score, 100);
+      expect(report.isHealthy, isTrue);
+      expect(report.level, HealthLevel.good);
+      expect(report.weakPasswords, isEmpty);
+      expect(report.reusedPasswords, isEmpty);
+      expect(report.reusedGroupCount, 0);
+      expect(report.noTotpEntries, isEmpty);
+      expect(report.noUrlEntries, isEmpty);
+    });
+
+    test('混合库只报告登录条目，非登录条目不出现在任何问题列表里', () async {
+      final repo = container.read(vaultRepositoryProvider);
+      // 唯一的登录条目：常见弱密码 + 无 URL + 无 TOTP
+      await repo.saveItem(
+        loginItem(id: 'login-1', name: 'GitHub', password: '123456'),
+      );
+      for (final item in nonLoginItems()) {
+        await repo.saveItem(item);
+      }
+      expect(await repo.countItems(), 4);
+
+      final report = await container.read(healthReportProvider.future);
+
+      expect(report.totalEntries, 1);
+      expect(report.weakPasswordCount, 1);
+      expect(report.weakPasswords.single.entryId, 'login-1');
+      expect(report.noTotpCount, 1);
+      expect(report.noTotpEntries.single.entryId, 'login-1');
+      expect(report.noUrlCount, 1);
+      expect(report.noUrlEntries.single.entryId, 'login-1');
+      expect(report.reusedPasswords, isEmpty);
+      // 100 - 10（弱密码）- 2（无 TOTP）- 2（无 URL）
+      expect(report.score, 86);
+    });
+
+    test('未解锁时抛错（不静默返回满分报告）', () async {
+      container.read(encryptionKeyProvider.notifier).state = null;
+      await expectLater(
+        container.read(healthReportProvider.future),
+        throwsA(isA<StateError>()),
+      );
     });
   });
 }

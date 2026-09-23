@@ -727,6 +727,29 @@
     return { entries: [], error: '' };
   }
 
+  /**
+   * 自动填充只认登录条目（契约 §5）。daemon 侧的 getCredentials 已经只返回登录条目，
+   * 这里再挡一道：陈旧的 daemon（协议 2 及更早）或异常回退路径可能把安全笔记 /
+   * 身份信息 / SSH 密钥塞回来，那些条目的 username/password 是空串，但绝不能
+   * 出现在填充面板里，更不该被"填"进页面。
+   *
+   * type 缺失时按登录处理（与桌面端 EntryType.fromWire 的容错一致，也不会让旧
+   * daemon 的既有行为变差）；type 明确不是 login 的一律剔除。
+   */
+  function isFillableEntry(entry) {
+    if (!entry || typeof entry !== 'object') return false;
+    const raw = entry.type;
+    if (raw === undefined || raw === null) return true; // 旧 daemon：无 type = 登录
+    if (typeof raw !== 'string') return false; // 非字符串的 type 一律不信任
+    const normalized = raw.trim().toLowerCase().replace(/[\s-]+/g, '_');
+    return normalized === '' || normalized === 'login';
+  }
+
+  function fillableOnly(entries) {
+    if (!Array.isArray(entries)) return [];
+    return entries.filter(isFillableEntry);
+  }
+
   function fetchTotp(entryId) {
     if (!entryId) return Promise.resolve('');
     return sendToBackground('getTotp', { entryId: entryId }).then(function (res) {
@@ -754,11 +777,16 @@
   }
 
   function openEntryList(anchor, entries) {
+    const fillable = fillableOnly(entries);
+    if (!fillable.length) {
+      setPanelMessage(anchor, chrome.i18n.getMessage('contentNoMatch'), '');
+      return;
+    }
     openPanel(anchor, function (panel) {
       panel.appendChild(panelRow(TITLE_CLASS, chrome.i18n.getMessage('contentMultiple')));
       panel.appendChild(panelRow(HINT_CLASS, chrome.i18n.getMessage('contentFillHint')));
-      for (let i = 0; i < entries.length; i++) {
-        const entry = entries[i] || {};
+      for (let i = 0; i < fillable.length; i++) {
+        const entry = fillable[i] || {};
         const item = document.createElement('div');
         item.className = ITEM_CLASS;
         item.setAttribute(ENTRY_ATTR, entry.id === undefined || entry.id === null ? '' : String(entry.id));
@@ -796,6 +824,11 @@
   }
 
   function fillEntry(entry, anchor, token) {
+    // 最后一道门槛：非登录条目绝不下发到页面（契约 §5）。
+    if (!isFillableEntry(entry)) {
+      setPanelMessage(anchor, chrome.i18n.getMessage('contentNoMatch'), '');
+      return;
+    }
     const credentials = {
       username: entry && entry.username ? entry.username : '',
       password: entry && entry.password ? entry.password : '',
@@ -850,15 +883,17 @@
           setPanelMessage(input, chrome.i18n.getMessage('cannotConnect'), matched.error);
           return;
         }
-        if (!matched.entries.length) {
+        // 自动填充只认登录条目：陈旧 daemon 可能把笔记 / 密钥一起返回。
+        const candidates = fillableOnly(matched.entries);
+        if (!candidates.length) {
           setPanelMessage(input, chrome.i18n.getMessage('contentNoMatch'), '');
           return;
         }
-        if (matched.entries.length === 1) {
-          fillEntry(matched.entries[0], input, token);
+        if (candidates.length === 1) {
+          fillEntry(candidates[0], input, token);
           return;
         }
-        openEntryList(input, matched.entries);
+        openEntryList(input, candidates);
       })
       .catch(function () {
         if (token === UI.flowToken) setPanelMessage(input, chrome.i18n.getMessage('fillFailed'), '');

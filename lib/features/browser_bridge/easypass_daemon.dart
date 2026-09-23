@@ -7,6 +7,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/crypto/crypto_service.dart';
 import '../../core/crypto/totp_service.dart';
 import '../../data/database/database.dart';
+import '../../data/repositories/vault_repository.dart';
 import 'native_messaging_service.dart';
 import 'vault_session.dart';
 
@@ -106,6 +107,14 @@ class EasypassDaemon {
 
   /// 跨连接共享的解锁会话（C 方案）。构造时创建，测试可注入。
   final VaultSession session;
+
+  /// 桥接服务用的仓库：密钥**现读**共享会话，所以解锁 / 锁定 / 空闲过期都不
+  /// 需要重建它。懒初始化（构造完 [session] 之后才可能被读到）。
+  late final VaultRepository _repository = VaultRepository(
+    db: _db,
+    cryptoService: _cryptoService,
+    keyReader: () => session.key,
+  );
 
   /// 是否允许空闲自退。**只有 `--service` 模式（[runDaemon]）传 true**：
   /// UI 模式下 daemon 与 UI 同进程，退出等于把用户踢出应用，绝对不允许。
@@ -450,12 +459,14 @@ class EasypassDaemon {
       _touch();
 
       // A fresh service instance per bridge connection, but the **same**
-      // [session]: the unlock state deliberately survives a disconnect
-      // (C 方案) so the extension does not have to re-prompt the master
-      // password every time the MV3 service worker restarts.
+      // [session] and the **same** [_repository]: the unlock state deliberately
+      // survives a disconnect (C 方案) so the extension does not have to
+      // re-prompt the master password every time the MV3 service worker
+      // restarts. 仓库绑定共享会话 → 多类型条目（笔记 / 身份 / SSH）在每条
+      // 连接上都能用同一个会话密钥解密。
       // onActivity 让每个请求都刷新空闲计时（只报事件，不带内容）。
       final host = NativeMessagingService(_db, _cryptoService, _totpService,
-          session: session, onActivity: _touch);
+          session: session, onActivity: _touch, repository: _repository);
       await host.serve(reader, socket);
     } catch (_) {
       // Peer errors end the connection; the daemon keeps serving.

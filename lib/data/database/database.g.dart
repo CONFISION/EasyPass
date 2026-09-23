@@ -383,6 +383,16 @@ class PasswordEntries extends Table
     requiredDuringInsert: false,
     $customConstraints: '',
   );
+  static const VerificationMeta _typeMeta = const VerificationMeta('type');
+  late final GeneratedColumn<String> type = GeneratedColumn<String>(
+    'type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    $customConstraints: 'NOT NULL DEFAULT \'login\'',
+    defaultValue: const CustomExpression('\'login\''),
+  );
   static const VerificationMeta _nameMeta = const VerificationMeta('name');
   late final GeneratedColumn<String> name = GeneratedColumn<String>(
     'name',
@@ -450,6 +460,18 @@ class PasswordEntries extends Table
         $customConstraints: 'DEFAULT \'\'',
         defaultValue: const CustomExpression('\'\''),
       );
+  static const VerificationMeta _dataEncryptedMeta = const VerificationMeta(
+    'dataEncrypted',
+  );
+  late final GeneratedColumn<String> dataEncrypted = GeneratedColumn<String>(
+    'data_encrypted',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    $customConstraints: 'NOT NULL DEFAULT \'\'',
+    defaultValue: const CustomExpression('\'\''),
+  );
   static const VerificationMeta _isFavoriteMeta = const VerificationMeta(
     'isFavorite',
   );
@@ -488,12 +510,14 @@ class PasswordEntries extends Table
   List<GeneratedColumn> get $columns => [
     id,
     folderId,
+    type,
     name,
     url,
     username,
     passwordEncrypted,
     notesEncrypted,
     totpSecretEncrypted,
+    dataEncrypted,
     isFavorite,
     createdAt,
     updatedAt,
@@ -519,6 +543,12 @@ class PasswordEntries extends Table
       context.handle(
         _folderIdMeta,
         folderId.isAcceptableOrUnknown(data['folder_id']!, _folderIdMeta),
+      );
+    }
+    if (data.containsKey('type')) {
+      context.handle(
+        _typeMeta,
+        type.isAcceptableOrUnknown(data['type']!, _typeMeta),
       );
     }
     if (data.containsKey('name')) {
@@ -570,6 +600,15 @@ class PasswordEntries extends Table
         ),
       );
     }
+    if (data.containsKey('data_encrypted')) {
+      context.handle(
+        _dataEncryptedMeta,
+        dataEncrypted.isAcceptableOrUnknown(
+          data['data_encrypted']!,
+          _dataEncryptedMeta,
+        ),
+      );
+    }
     if (data.containsKey('is_favorite')) {
       context.handle(
         _isFavoriteMeta,
@@ -609,6 +648,10 @@ class PasswordEntries extends Table
         DriftSqlType.string,
         data['${effectivePrefix}folder_id'],
       ),
+      type: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}type'],
+      )!,
       name: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}name'],
@@ -633,6 +676,10 @@ class PasswordEntries extends Table
         DriftSqlType.string,
         data['${effectivePrefix}totp_secret_encrypted'],
       ),
+      dataEncrypted: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}data_encrypted'],
+      )!,
       isFavorite: attachedDatabase.typeMapping.read(
         DriftSqlType.bool,
         data['${effectivePrefix}is_favorite'],
@@ -664,24 +711,28 @@ class PasswordEntries extends Table
 class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
   final String id;
   final String? folderId;
+  final String type;
   final String name;
   final String url;
   final String username;
   final String passwordEncrypted;
   final String? notesEncrypted;
   final String? totpSecretEncrypted;
+  final String dataEncrypted;
   final bool isFavorite;
   final int createdAt;
   final int updatedAt;
   const PasswordEntry({
     required this.id,
     this.folderId,
+    required this.type,
     required this.name,
     required this.url,
     required this.username,
     required this.passwordEncrypted,
     this.notesEncrypted,
     this.totpSecretEncrypted,
+    required this.dataEncrypted,
     required this.isFavorite,
     required this.createdAt,
     required this.updatedAt,
@@ -693,6 +744,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
     if (!nullToAbsent || folderId != null) {
       map['folder_id'] = Variable<String>(folderId);
     }
+    map['type'] = Variable<String>(type);
     map['name'] = Variable<String>(name);
     map['url'] = Variable<String>(url);
     map['username'] = Variable<String>(username);
@@ -703,6 +755,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
     if (!nullToAbsent || totpSecretEncrypted != null) {
       map['totp_secret_encrypted'] = Variable<String>(totpSecretEncrypted);
     }
+    map['data_encrypted'] = Variable<String>(dataEncrypted);
     map['is_favorite'] = Variable<bool>(isFavorite);
     map['created_at'] = Variable<int>(createdAt);
     map['updated_at'] = Variable<int>(updatedAt);
@@ -715,6 +768,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
       folderId: folderId == null && nullToAbsent
           ? const Value.absent()
           : Value(folderId),
+      type: Value(type),
       name: Value(name),
       url: Value(url),
       username: Value(username),
@@ -725,6 +779,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
       totpSecretEncrypted: totpSecretEncrypted == null && nullToAbsent
           ? const Value.absent()
           : Value(totpSecretEncrypted),
+      dataEncrypted: Value(dataEncrypted),
       isFavorite: Value(isFavorite),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
@@ -739,6 +794,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
     return PasswordEntry(
       id: serializer.fromJson<String>(json['id']),
       folderId: serializer.fromJson<String?>(json['folder_id']),
+      type: serializer.fromJson<String>(json['type']),
       name: serializer.fromJson<String>(json['name']),
       url: serializer.fromJson<String>(json['url']),
       username: serializer.fromJson<String>(json['username']),
@@ -749,6 +805,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
       totpSecretEncrypted: serializer.fromJson<String?>(
         json['totp_secret_encrypted'],
       ),
+      dataEncrypted: serializer.fromJson<String>(json['data_encrypted']),
       isFavorite: serializer.fromJson<bool>(json['is_favorite']),
       createdAt: serializer.fromJson<int>(json['created_at']),
       updatedAt: serializer.fromJson<int>(json['updated_at']),
@@ -760,12 +817,14 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
     return <String, dynamic>{
       'id': serializer.toJson<String>(id),
       'folder_id': serializer.toJson<String?>(folderId),
+      'type': serializer.toJson<String>(type),
       'name': serializer.toJson<String>(name),
       'url': serializer.toJson<String>(url),
       'username': serializer.toJson<String>(username),
       'password_encrypted': serializer.toJson<String>(passwordEncrypted),
       'notes_encrypted': serializer.toJson<String?>(notesEncrypted),
       'totp_secret_encrypted': serializer.toJson<String?>(totpSecretEncrypted),
+      'data_encrypted': serializer.toJson<String>(dataEncrypted),
       'is_favorite': serializer.toJson<bool>(isFavorite),
       'created_at': serializer.toJson<int>(createdAt),
       'updated_at': serializer.toJson<int>(updatedAt),
@@ -775,18 +834,21 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
   PasswordEntry copyWith({
     String? id,
     Value<String?> folderId = const Value.absent(),
+    String? type,
     String? name,
     String? url,
     String? username,
     String? passwordEncrypted,
     Value<String?> notesEncrypted = const Value.absent(),
     Value<String?> totpSecretEncrypted = const Value.absent(),
+    String? dataEncrypted,
     bool? isFavorite,
     int? createdAt,
     int? updatedAt,
   }) => PasswordEntry(
     id: id ?? this.id,
     folderId: folderId.present ? folderId.value : this.folderId,
+    type: type ?? this.type,
     name: name ?? this.name,
     url: url ?? this.url,
     username: username ?? this.username,
@@ -797,6 +859,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
     totpSecretEncrypted: totpSecretEncrypted.present
         ? totpSecretEncrypted.value
         : this.totpSecretEncrypted,
+    dataEncrypted: dataEncrypted ?? this.dataEncrypted,
     isFavorite: isFavorite ?? this.isFavorite,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -805,6 +868,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
     return PasswordEntry(
       id: data.id.present ? data.id.value : this.id,
       folderId: data.folderId.present ? data.folderId.value : this.folderId,
+      type: data.type.present ? data.type.value : this.type,
       name: data.name.present ? data.name.value : this.name,
       url: data.url.present ? data.url.value : this.url,
       username: data.username.present ? data.username.value : this.username,
@@ -817,6 +881,9 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
       totpSecretEncrypted: data.totpSecretEncrypted.present
           ? data.totpSecretEncrypted.value
           : this.totpSecretEncrypted,
+      dataEncrypted: data.dataEncrypted.present
+          ? data.dataEncrypted.value
+          : this.dataEncrypted,
       isFavorite: data.isFavorite.present
           ? data.isFavorite.value
           : this.isFavorite,
@@ -830,12 +897,14 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
     return (StringBuffer('PasswordEntry(')
           ..write('id: $id, ')
           ..write('folderId: $folderId, ')
+          ..write('type: $type, ')
           ..write('name: $name, ')
           ..write('url: $url, ')
           ..write('username: $username, ')
           ..write('passwordEncrypted: $passwordEncrypted, ')
           ..write('notesEncrypted: $notesEncrypted, ')
           ..write('totpSecretEncrypted: $totpSecretEncrypted, ')
+          ..write('dataEncrypted: $dataEncrypted, ')
           ..write('isFavorite: $isFavorite, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -847,12 +916,14 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
   int get hashCode => Object.hash(
     id,
     folderId,
+    type,
     name,
     url,
     username,
     passwordEncrypted,
     notesEncrypted,
     totpSecretEncrypted,
+    dataEncrypted,
     isFavorite,
     createdAt,
     updatedAt,
@@ -863,12 +934,14 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
       (other is PasswordEntry &&
           other.id == this.id &&
           other.folderId == this.folderId &&
+          other.type == this.type &&
           other.name == this.name &&
           other.url == this.url &&
           other.username == this.username &&
           other.passwordEncrypted == this.passwordEncrypted &&
           other.notesEncrypted == this.notesEncrypted &&
           other.totpSecretEncrypted == this.totpSecretEncrypted &&
+          other.dataEncrypted == this.dataEncrypted &&
           other.isFavorite == this.isFavorite &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -877,12 +950,14 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
 class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
   final Value<String> id;
   final Value<String?> folderId;
+  final Value<String> type;
   final Value<String> name;
   final Value<String> url;
   final Value<String> username;
   final Value<String> passwordEncrypted;
   final Value<String?> notesEncrypted;
   final Value<String?> totpSecretEncrypted;
+  final Value<String> dataEncrypted;
   final Value<bool> isFavorite;
   final Value<int> createdAt;
   final Value<int> updatedAt;
@@ -890,12 +965,14 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
   const PasswordEntriesCompanion({
     this.id = const Value.absent(),
     this.folderId = const Value.absent(),
+    this.type = const Value.absent(),
     this.name = const Value.absent(),
     this.url = const Value.absent(),
     this.username = const Value.absent(),
     this.passwordEncrypted = const Value.absent(),
     this.notesEncrypted = const Value.absent(),
     this.totpSecretEncrypted = const Value.absent(),
+    this.dataEncrypted = const Value.absent(),
     this.isFavorite = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -904,12 +981,14 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
   PasswordEntriesCompanion.insert({
     required String id,
     this.folderId = const Value.absent(),
+    this.type = const Value.absent(),
     required String name,
     this.url = const Value.absent(),
     this.username = const Value.absent(),
     required String passwordEncrypted,
     this.notesEncrypted = const Value.absent(),
     this.totpSecretEncrypted = const Value.absent(),
+    this.dataEncrypted = const Value.absent(),
     this.isFavorite = const Value.absent(),
     required int createdAt,
     required int updatedAt,
@@ -922,12 +1001,14 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
   static Insertable<PasswordEntry> custom({
     Expression<String>? id,
     Expression<String>? folderId,
+    Expression<String>? type,
     Expression<String>? name,
     Expression<String>? url,
     Expression<String>? username,
     Expression<String>? passwordEncrypted,
     Expression<String>? notesEncrypted,
     Expression<String>? totpSecretEncrypted,
+    Expression<String>? dataEncrypted,
     Expression<bool>? isFavorite,
     Expression<int>? createdAt,
     Expression<int>? updatedAt,
@@ -936,6 +1017,7 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (folderId != null) 'folder_id': folderId,
+      if (type != null) 'type': type,
       if (name != null) 'name': name,
       if (url != null) 'url': url,
       if (username != null) 'username': username,
@@ -943,6 +1025,7 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
       if (notesEncrypted != null) 'notes_encrypted': notesEncrypted,
       if (totpSecretEncrypted != null)
         'totp_secret_encrypted': totpSecretEncrypted,
+      if (dataEncrypted != null) 'data_encrypted': dataEncrypted,
       if (isFavorite != null) 'is_favorite': isFavorite,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -953,12 +1036,14 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
   PasswordEntriesCompanion copyWith({
     Value<String>? id,
     Value<String?>? folderId,
+    Value<String>? type,
     Value<String>? name,
     Value<String>? url,
     Value<String>? username,
     Value<String>? passwordEncrypted,
     Value<String?>? notesEncrypted,
     Value<String?>? totpSecretEncrypted,
+    Value<String>? dataEncrypted,
     Value<bool>? isFavorite,
     Value<int>? createdAt,
     Value<int>? updatedAt,
@@ -967,12 +1052,14 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
     return PasswordEntriesCompanion(
       id: id ?? this.id,
       folderId: folderId ?? this.folderId,
+      type: type ?? this.type,
       name: name ?? this.name,
       url: url ?? this.url,
       username: username ?? this.username,
       passwordEncrypted: passwordEncrypted ?? this.passwordEncrypted,
       notesEncrypted: notesEncrypted ?? this.notesEncrypted,
       totpSecretEncrypted: totpSecretEncrypted ?? this.totpSecretEncrypted,
+      dataEncrypted: dataEncrypted ?? this.dataEncrypted,
       isFavorite: isFavorite ?? this.isFavorite,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -988,6 +1075,9 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
     }
     if (folderId.present) {
       map['folder_id'] = Variable<String>(folderId.value);
+    }
+    if (type.present) {
+      map['type'] = Variable<String>(type.value);
     }
     if (name.present) {
       map['name'] = Variable<String>(name.value);
@@ -1009,6 +1099,9 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
         totpSecretEncrypted.value,
       );
     }
+    if (dataEncrypted.present) {
+      map['data_encrypted'] = Variable<String>(dataEncrypted.value);
+    }
     if (isFavorite.present) {
       map['is_favorite'] = Variable<bool>(isFavorite.value);
     }
@@ -1029,12 +1122,14 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
     return (StringBuffer('PasswordEntriesCompanion(')
           ..write('id: $id, ')
           ..write('folderId: $folderId, ')
+          ..write('type: $type, ')
           ..write('name: $name, ')
           ..write('url: $url, ')
           ..write('username: $username, ')
           ..write('passwordEncrypted: $passwordEncrypted, ')
           ..write('notesEncrypted: $notesEncrypted, ')
           ..write('totpSecretEncrypted: $totpSecretEncrypted, ')
+          ..write('dataEncrypted: $dataEncrypted, ')
           ..write('isFavorite: $isFavorite, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
@@ -1061,6 +1156,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'idx_password_entries_favorite',
     'CREATE INDEX idx_password_entries_favorite ON password_entries (is_favorite)',
   );
+  late final Index idxPasswordEntriesType = Index(
+    'idx_password_entries_type',
+    'CREATE INDEX idx_password_entries_type ON password_entries (type)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1071,6 +1170,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     idxPasswordEntriesFolder,
     idxPasswordEntriesName,
     idxPasswordEntriesFavorite,
+    idxPasswordEntriesType,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -1254,7 +1354,12 @@ class $FoldersTableManager
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<Folders, Folder>(table),
+                  BaseReferences<_$AppDatabase, Folders, Folder>(db, table, e),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),
@@ -1279,12 +1384,14 @@ typedef $PasswordEntriesCreateCompanionBuilder =
     PasswordEntriesCompanion Function({
       required String id,
       Value<String?> folderId,
+      Value<String> type,
       required String name,
       Value<String> url,
       Value<String> username,
       required String passwordEncrypted,
       Value<String?> notesEncrypted,
       Value<String?> totpSecretEncrypted,
+      Value<String> dataEncrypted,
       Value<bool> isFavorite,
       required int createdAt,
       required int updatedAt,
@@ -1294,12 +1401,14 @@ typedef $PasswordEntriesUpdateCompanionBuilder =
     PasswordEntriesCompanion Function({
       Value<String> id,
       Value<String?> folderId,
+      Value<String> type,
       Value<String> name,
       Value<String> url,
       Value<String> username,
       Value<String> passwordEncrypted,
       Value<String?> notesEncrypted,
       Value<String?> totpSecretEncrypted,
+      Value<String> dataEncrypted,
       Value<bool> isFavorite,
       Value<int> createdAt,
       Value<int> updatedAt,
@@ -1322,6 +1431,11 @@ class $PasswordEntriesFilterComposer
 
   ColumnFilters<String> get folderId => $composableBuilder(
     column: $table.folderId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get type => $composableBuilder(
+    column: $table.type,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1352,6 +1466,11 @@ class $PasswordEntriesFilterComposer
 
   ColumnFilters<String> get totpSecretEncrypted => $composableBuilder(
     column: $table.totpSecretEncrypted,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get dataEncrypted => $composableBuilder(
+    column: $table.dataEncrypted,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -1390,6 +1509,11 @@ class $PasswordEntriesOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get name => $composableBuilder(
     column: $table.name,
     builder: (column) => ColumnOrderings(column),
@@ -1417,6 +1541,11 @@ class $PasswordEntriesOrderingComposer
 
   ColumnOrderings<String> get totpSecretEncrypted => $composableBuilder(
     column: $table.totpSecretEncrypted,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get dataEncrypted => $composableBuilder(
+    column: $table.dataEncrypted,
     builder: (column) => ColumnOrderings(column),
   );
 
@@ -1451,6 +1580,9 @@ class $PasswordEntriesAnnotationComposer
   GeneratedColumn<String> get folderId =>
       $composableBuilder(column: $table.folderId, builder: (column) => column);
 
+  GeneratedColumn<String> get type =>
+      $composableBuilder(column: $table.type, builder: (column) => column);
+
   GeneratedColumn<String> get name =>
       $composableBuilder(column: $table.name, builder: (column) => column);
 
@@ -1472,6 +1604,11 @@ class $PasswordEntriesAnnotationComposer
 
   GeneratedColumn<String> get totpSecretEncrypted => $composableBuilder(
     column: $table.totpSecretEncrypted,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get dataEncrypted => $composableBuilder(
+    column: $table.dataEncrypted,
     builder: (column) => column,
   );
 
@@ -1520,12 +1657,14 @@ class $PasswordEntriesTableManager
               ({
                 Value<String> id = const Value.absent(),
                 Value<String?> folderId = const Value.absent(),
+                Value<String> type = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<String> url = const Value.absent(),
                 Value<String> username = const Value.absent(),
                 Value<String> passwordEncrypted = const Value.absent(),
                 Value<String?> notesEncrypted = const Value.absent(),
                 Value<String?> totpSecretEncrypted = const Value.absent(),
+                Value<String> dataEncrypted = const Value.absent(),
                 Value<bool> isFavorite = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
@@ -1533,12 +1672,14 @@ class $PasswordEntriesTableManager
               }) => PasswordEntriesCompanion(
                 id: id,
                 folderId: folderId,
+                type: type,
                 name: name,
                 url: url,
                 username: username,
                 passwordEncrypted: passwordEncrypted,
                 notesEncrypted: notesEncrypted,
                 totpSecretEncrypted: totpSecretEncrypted,
+                dataEncrypted: dataEncrypted,
                 isFavorite: isFavorite,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -1548,12 +1689,14 @@ class $PasswordEntriesTableManager
               ({
                 required String id,
                 Value<String?> folderId = const Value.absent(),
+                Value<String> type = const Value.absent(),
                 required String name,
                 Value<String> url = const Value.absent(),
                 Value<String> username = const Value.absent(),
                 required String passwordEncrypted,
                 Value<String?> notesEncrypted = const Value.absent(),
                 Value<String?> totpSecretEncrypted = const Value.absent(),
+                Value<String> dataEncrypted = const Value.absent(),
                 Value<bool> isFavorite = const Value.absent(),
                 required int createdAt,
                 required int updatedAt,
@@ -1561,19 +1704,30 @@ class $PasswordEntriesTableManager
               }) => PasswordEntriesCompanion.insert(
                 id: id,
                 folderId: folderId,
+                type: type,
                 name: name,
                 url: url,
                 username: username,
                 passwordEncrypted: passwordEncrypted,
                 notesEncrypted: notesEncrypted,
                 totpSecretEncrypted: totpSecretEncrypted,
+                dataEncrypted: dataEncrypted,
                 isFavorite: isFavorite,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
-              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .map(
+                (e) => (
+                  e.readTable<PasswordEntries, PasswordEntry>(table),
+                  BaseReferences<_$AppDatabase, PasswordEntries, PasswordEntry>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
               .toList(),
           prefetchHooksCallback: null,
         ),

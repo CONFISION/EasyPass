@@ -9,6 +9,7 @@ import 'features/auth/providers/auth_provider.dart';
 import 'features/generator/screens/generator_screen.dart';
 import 'features/health/screens/health_screen.dart';
 import 'features/settings/providers/font_settings_provider.dart';
+import 'features/settings/providers/theme_provider.dart';
 import 'features/settings/screens/settings_screen.dart';
 import 'features/vault/screens/add_edit_entry_screen.dart';
 import 'features/vault/screens/entry_detail_screen.dart';
@@ -102,6 +103,7 @@ class EasyPassApp extends ConsumerWidget {
     final router = ref.watch(_routerProvider);
     final locale = ref.watch(localeProvider);
     final fontFamily = _resolveFontFamily(ref.watch(fontFamilyProvider));
+    final themeMode = ref.watch(themeModeProvider);
 
     return MaterialApp.router(
       title: 'EasyPass',
@@ -122,7 +124,7 @@ class EasyPassApp extends ConsumerWidget {
         useMaterial3: true,
         fontFamily: fontFamily,
       ),
-      themeMode: ThemeMode.system,
+      themeMode: themeMode,
       locale: locale,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,

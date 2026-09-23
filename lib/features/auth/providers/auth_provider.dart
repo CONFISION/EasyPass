@@ -1,14 +1,17 @@
 import 'dart:async';
 
-import 'package:drift/drift.dart' hide Column;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/crypto/crypto_service.dart';
-import '../../../data/database/database.dart';
 import '../../../data/repositories/vault_repository.dart';
+import '../../../data/state/session_key.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../browser_bridge/browser_session_registry.dart';
+
+// `encryptionKeyProvider` 的**定义**搬到了 data 层（VaultRepository 需要它，
+// 而 data 不能反向 import features）。这里 re-export，保持既有 import 不变。
+export '../../../data/state/session_key.dart' show encryptionKeyProvider;
 
 /// Error codes stored in [AuthState.errorMessage]. UI layers map these to
 /// localized strings via `AppLocalizations`.
@@ -56,7 +59,8 @@ class AuthState {
 
 /// Holds the derived AES encryption key for the current session.
 /// Cleared on lock.
-final encryptionKeyProvider = StateProvider<Uint8List?>((ref) => null);
+///
+/// 定义见 `lib/data/state/session_key.dart`（本文件 import + re-export）。
 
 class AuthNotifier extends StateNotifier<AuthState> {
   final CryptoService _cryptoService;
@@ -214,45 +218,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final newHash = _cryptoService.hashMasterPassword(newPassword, newSalt);
 
       final repo = _ref.read(vaultRepositoryProvider);
-      final entries = await repo.getAllEntries();
-      final now = DateTime.now().millisecondsSinceEpoch;
 
-      for (final entry in entries) {
-        final notes = (entry.notesEncrypted ?? '').isEmpty
-            ? null
-            : _cryptoService.decryptData(entry.notesEncrypted!, oldKey);
-        final totp = (entry.totpSecretEncrypted ?? '').isEmpty
-            ? null
-            : _cryptoService.decryptData(entry.totpSecretEncrypted!, oldKey);
-
-        await repo.updateEntry(
-          entry.id,
-          PasswordEntriesCompanion(
-            id: Value(entry.id),
-            name: Value(entry.name),
-            url: Value(entry.url),
-            username: Value(entry.username),
-            passwordEncrypted: Value(
-              _cryptoService.encryptData(
-                _cryptoService.decryptData(entry.passwordEncrypted, oldKey),
-                newKey,
-              ),
-            ),
-            notesEncrypted: Value(
-              notes == null ? '' : _cryptoService.encryptData(notes, newKey),
-            ),
-            totpSecretEncrypted: Value(
-              totp == null ? '' : _cryptoService.encryptData(totp, newKey),
-            ),
-            isFavorite: Value(entry.isFavorite),
-            folderId: entry.folderId != null
-                ? Value(entry.folderId!)
-                : const Value.absent(),
-            createdAt: Value(entry.createdAt),
-            updatedAt: Value(now),
-          ),
-        );
-      }
+      // 全库重新加密交给 repository：它走 VaultItemMapper，**新加的密文列
+      // 自动包含在内**。旧实现在这里手写字段清单（password/notes/totp），
+      // 2.3.0 新增 data_encrypted 后那样写必然漏列 —— 换完主密码就会有一列
+      // 只能用旧密钥解开。任何一行解不开都会抛异常并向上冒泡为"修改失败"。
+      await repo.reencryptAll(oldKey: oldKey, newKey: newKey);
 
       await _cryptoService.storeKeyMaterial(newSalt, newHash);
       _ref.read(encryptionKeyProvider.notifier).state = newKey;

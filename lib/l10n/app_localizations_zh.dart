@@ -147,6 +147,17 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get folderActions => '文件夹操作';
+
+  @override
+  String deleteFolderNotEmptyMessage(String name, int count) {
+    return '删除“$name”？里面还有 $count 个条目。**这些条目不会被删除**，它们会被移到“无文件夹”。此操作无法撤销。';
+  }
+
+  @override
+  String get deleteFolderKeepEntries => '删除文件夹（保留条目）';
+
+  @override
   String get delete => '删除';
 
   @override
@@ -596,5 +607,275 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String healthLoadFailed(String error) {
     return '加载健康报告失败：$error';
+  }
+
+  @override
+  String get entryTypeLabel => '类型';
+
+  @override
+  String get entryTypeLogin => '登录';
+
+  @override
+  String get entryTypeSecureNote => '安全笔记';
+
+  @override
+  String get entryTypeIdentity => '身份信息';
+
+  @override
+  String get entryTypeSshKey => 'SSH 密钥';
+
+  @override
+  String get entryTypeAll => '全部类型';
+
+  @override
+  String get entryTypeLoginDesc => '用户名、密码、网址与两步验证';
+
+  @override
+  String get entryTypeSecureNoteDesc => '自由文本，加密保存';
+
+  @override
+  String get entryTypeIdentityDesc => '姓名、证件号、联系方式与地址';
+
+  @override
+  String get entryTypeSshKeyDesc => '公钥、私钥与指纹';
+
+  @override
+  String get entryTypeFilterTooltip => '按类型筛选';
+
+  @override
+  String get entryTypeSwitchTitle => '切换条目类型？';
+
+  @override
+  String entryTypeSwitchMessage(String from) {
+    return '「$from」类型的字段会被丢弃，名称、备注与自定义字段会保留。';
+  }
+
+  @override
+  String get entryTypeSwitchConfirm => '切换';
+
+  @override
+  String entryTypeEmptyForType(String type) {
+    return '还没有$type条目';
+  }
+
+  @override
+  String get customFieldsSection => '自定义字段';
+
+  @override
+  String get customFieldAdd => '添加字段';
+
+  @override
+  String get customFieldLabelHint => '字段名';
+
+  @override
+  String get customFieldValueHint => '字段值';
+
+  @override
+  String get customFieldTypeText => '文本';
+
+  @override
+  String get customFieldTypeHidden => '隐藏';
+
+  @override
+  String get customFieldTypeBoolean => '勾选';
+
+  @override
+  String get customFieldRemove => '删除字段';
+
+  @override
+  String get customFieldNoFields => '没有自定义字段';
+
+  @override
+  String get secureNoteBodyLabel => '笔记内容';
+
+  @override
+  String get secureNoteBodyHint => '任何需要加密保存的内容';
+
+  @override
+  String get identityPersonalSection => '个人信息';
+
+  @override
+  String get identityContactSection => '联系方式';
+
+  @override
+  String get identityDocumentSection => '证件';
+
+  @override
+  String get identityAddressSection => '地址';
+
+  @override
+  String get identityTitleLabel => '称谓';
+
+  @override
+  String get identityTitleHint => '先生 / 女士 / 博士';
+
+  @override
+  String get identityFirstNameLabel => '名';
+
+  @override
+  String get identityMiddleNameLabel => '中间名';
+
+  @override
+  String get identityLastNameLabel => '姓';
+
+  @override
+  String get identityCompanyLabel => '公司';
+
+  @override
+  String get identityEmailLabel => '邮箱';
+
+  @override
+  String get identityPhoneLabel => '电话';
+
+  @override
+  String get identityIdNumberLabel => '证件号';
+
+  @override
+  String get identityPassportLabel => '护照号';
+
+  @override
+  String get identityLicenseLabel => '驾照号';
+
+  @override
+  String get identityAddress1Label => '地址';
+
+  @override
+  String get identityAddress2Label => '地址（第二行）';
+
+  @override
+  String get identityCityLabel => '城市';
+
+  @override
+  String get identityStateLabel => '省 / 州';
+
+  @override
+  String get identityPostalCodeLabel => '邮政编码';
+
+  @override
+  String get identityCountryLabel => '国家 / 地区';
+
+  @override
+  String get identityBirthdayLabel => '生日';
+
+  @override
+  String get identityBirthdayHint => 'YYYY-MM-DD';
+
+  @override
+  String get identitySexLabel => '性别';
+
+  @override
+  String get sshKeySection => '密钥内容';
+
+  @override
+  String get sshPublicKeyLabel => '公钥';
+
+  @override
+  String get sshPublicKeyHint => 'ssh-ed25519 AAAA… 用户@主机';
+
+  @override
+  String get sshPrivateKeyLabel => '私钥';
+
+  @override
+  String get sshPrivateKeyHint => '-----BEGIN OPENSSH PRIVATE KEY-----';
+
+  @override
+  String get sshPassphraseLabel => '私钥口令';
+
+  @override
+  String get sshFingerprintLabel => '指纹';
+
+  @override
+  String get sshFingerprintAuto => '由公钥自动计算';
+
+  @override
+  String get sshKeyTypeLabel => '密钥类型';
+
+  @override
+  String get sshBitsLabel => '密钥长度';
+
+  @override
+  String sshBitsValue(int bits) {
+    return '$bits 位';
+  }
+
+  @override
+  String get sshCommentLabel => '注释';
+
+  @override
+  String get sshPrivateKeyFormatLabel => '识别到的格式';
+
+  @override
+  String get sshPublicKeyInvalid => '无法解析这个公钥';
+
+  @override
+  String get sshKeyRequired => '请填写公钥或私钥（至少一项）';
+
+  @override
+  String sshPrivateKeyFormatValue(String format) {
+    return '识别到的格式：$format';
+  }
+
+  @override
+  String get sshNoPrivateKey => '未保存私钥';
+
+  @override
+  String get sshRevealPrivateKey => '显示私钥';
+
+  @override
+  String get totpCodeLabel => '动态验证码';
+
+  @override
+  String get totpCopyTooltip => '复制验证码';
+
+  @override
+  String totpRefreshesIn(int seconds) {
+    return '$seconds 秒后刷新';
+  }
+
+  @override
+  String get totpNotSet => '未配置';
+
+  @override
+  String get searchHint => '搜索保险库';
+
+  @override
+  String get searchPrefixesHint =>
+      '支持前缀：type: login · folder: 工作 · url: example.com';
+
+  @override
+  String get folderIconLabel => '图标';
+
+  @override
+  String get folderEditTitle => '编辑文件夹';
+
+  @override
+  String get folderRenamed => '文件夹已更新';
+
+  @override
+  String get renameFolder => '重命名';
+
+  @override
+  String get healthOnlyLogins => '健康分只统计登录条目';
+
+  @override
+  String healthLoginCount(int count) {
+    return '已分析 $count 条登录条目';
+  }
+
+  @override
+  String get fieldCopied => '已复制到剪贴板';
+
+  @override
+  String get detailsSection => '详细信息';
+
+  @override
+  String get themeLight => '浅色';
+
+  @override
+  String get themeDark => '深色';
+
+  @override
+  String themeApplied(String value) {
+    return '主题：$value';
   }
 }

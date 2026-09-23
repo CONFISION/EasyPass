@@ -365,5 +365,273 @@
   "contentFillHint": {
     "message": "点击使用 EasyPass 填充",
     "description": "网页密码框内图标的气泡提示"
+  },
+  "entryTypeAll": {
+    "message": "全部",
+    "description": "类型筛选按钮：不筛选"
+  },
+  "entryTypeLogin": {
+    "message": "登录",
+    "description": "条目类型：登录"
+  },
+  "entryTypeSecureNote": {
+    "message": "安全笔记",
+    "description": "条目类型：安全笔记"
+  },
+  "entryTypeIdentity": {
+    "message": "身份信息",
+    "description": "条目类型：身份信息"
+  },
+  "entryTypeSshKey": {
+    "message": "SSH 密钥",
+    "description": "条目类型：SSH 密钥"
+  },
+  "entryTypeFilterTooltip": {
+    "message": "按类型筛选",
+    "description": "类型筛选的悬停提示 / 无障碍标签"
+  },
+  "typeBadgeLogin": {
+    "message": "登录",
+    "description": "条目行类型徽章：登录"
+  },
+  "typeBadgeSecureNote": {
+    "message": "笔记",
+    "description": "条目行类型徽章：安全笔记"
+  },
+  "typeBadgeIdentity": {
+    "message": "身份",
+    "description": "条目行类型徽章：身份信息"
+  },
+  "typeBadgeSshKey": {
+    "message": "SSH",
+    "description": "条目行类型徽章：SSH 密钥"
+  },
+  "entriesCountFiltered": {
+    "message": "$shown$ / $total$ 个条目",
+    "description": "筛选后的条目数量，$shown$ 为当前显示、$total$ 为已加载总数",
+    "placeholders": {
+      "shown": {
+        "content": "$1"
+      },
+      "total": {
+        "content": "$2"
+      }
+    }
+  },
+  "noEntriesForFilter": {
+    "message": "没有该类型的条目",
+    "description": "类型筛选把已加载条目全部隐藏时的空状态"
+  },
+  "showNote": {
+    "message": "显示笔记",
+    "description": "展开安全笔记正文按钮的悬停提示"
+  },
+  "hideNote": {
+    "message": "隐藏笔记",
+    "description": "收起安全笔记正文按钮的悬停提示"
+  },
+  "copyNote": {
+    "message": "复制笔记正文",
+    "description": "复制笔记正文按钮的悬停提示"
+  },
+  "copiedNote": {
+    "message": "已复制笔记正文",
+    "description": "复制安全笔记正文成功提示"
+  },
+  "copyFullName": {
+    "message": "复制姓名",
+    "description": "复制身份信息姓名按钮的悬停提示"
+  },
+  "copyEmail": {
+    "message": "复制邮箱",
+    "description": "复制身份信息邮箱按钮的悬停提示"
+  },
+  "copyPhone": {
+    "message": "复制电话",
+    "description": "复制身份信息电话按钮的悬停提示"
+  },
+  "copyIdNumber": {
+    "message": "复制证件号",
+    "description": "复制身份信息证件号按钮的悬停提示"
+  },
+  "copiedFullName": {
+    "message": "已复制姓名",
+    "description": "复制姓名成功提示"
+  },
+  "copiedEmail": {
+    "message": "已复制邮箱",
+    "description": "复制邮箱成功提示"
+  },
+  "copiedPhone": {
+    "message": "已复制电话",
+    "description": "复制电话成功提示"
+  },
+  "copiedIdNumber": {
+    "message": "已复制证件号",
+    "description": "复制证件号成功提示"
+  },
+  "copyPublicKey": {
+    "message": "复制公钥",
+    "description": "复制 SSH 公钥按钮的悬停提示"
+  },
+  "copyFingerprint": {
+    "message": "复制指纹",
+    "description": "复制 SSH 指纹按钮的悬停提示"
+  },
+  "copyPrivateKey": {
+    "message": "复制私钥",
+    "description": "复制 SSH 私钥按钮的悬停提示（仅显式点击）"
+  },
+  "copiedPublicKey": {
+    "message": "已复制公钥",
+    "description": "复制 SSH 公钥成功提示"
+  },
+  "copiedFingerprint": {
+    "message": "已复制指纹",
+    "description": "复制 SSH 指纹成功提示"
+  },
+  "copiedPrivateKey": {
+    "message": "已复制私钥",
+    "description": "复制 SSH 私钥成功提示"
+  },
+  "showPrivateKey": {
+    "message": "显示私钥",
+    "description": "展开 SSH 私钥按钮的悬停提示"
+  },
+  "hidePrivateKey": {
+    "message": "隐藏私钥",
+    "description": "收起 SSH 私钥按钮的悬停提示"
+  },
+  "sshPublicKeyLabel": {
+    "message": "公钥",
+    "description": "SSH 公钥字段标签"
+  },
+  "sshPrivateKeyLabel": {
+    "message": "私钥",
+    "description": "SSH 私钥字段标签"
+  },
+  "sshPassphraseLabel": {
+    "message": "私钥口令",
+    "description": "SSH 私钥口令字段标签"
+  },
+  "copyField": {
+    "message": "复制该字段值",
+    "description": "复制身份信息 / 自定义字段值按钮的悬停提示"
+  },
+  "copiedField": {
+    "message": "已复制字段值",
+    "description": "复制字段值成功提示"
+  },
+  "revealValue": {
+    "message": "显示该值",
+    "description": "显示隐藏自定义字段值按钮的悬停提示"
+  },
+  "hideValue": {
+    "message": "隐藏该值",
+    "description": "隐藏已显示值按钮的悬停提示"
+  },
+  "customFieldsLabel": {
+    "message": "自定义字段",
+    "description": "自定义字段区域标签"
+  },
+  "customFieldFallback": {
+    "message": "自定义字段",
+    "description": "未命名字段的占位标签"
+  },
+  "customFieldTypeBoolean": {
+    "message": "已勾选",
+    "description": "勾选类型自定义字段的显示值"
+  },
+  "identityPersonalSection": {
+    "message": "个人信息",
+    "description": "身份信息分组：个人信息"
+  },
+  "identityContactSection": {
+    "message": "联系方式",
+    "description": "身份信息分组：联系方式"
+  },
+  "identityDocumentSection": {
+    "message": "证件",
+    "description": "身份信息分组：证件"
+  },
+  "identityAddressSection": {
+    "message": "地址",
+    "description": "身份信息分组：地址"
+  },
+  "identityTitleLabel": {
+    "message": "称谓",
+    "description": "身份信息字段标签"
+  },
+  "identityFirstNameLabel": {
+    "message": "名",
+    "description": "身份信息字段标签"
+  },
+  "identityMiddleNameLabel": {
+    "message": "中间名",
+    "description": "身份信息字段标签"
+  },
+  "identityLastNameLabel": {
+    "message": "姓",
+    "description": "身份信息字段标签"
+  },
+  "identityUsernameLabel": {
+    "message": "用户名",
+    "description": "身份信息字段标签"
+  },
+  "identityCompanyLabel": {
+    "message": "公司",
+    "description": "身份信息字段标签"
+  },
+  "identityBirthdayLabel": {
+    "message": "生日",
+    "description": "身份信息字段标签"
+  },
+  "identitySexLabel": {
+    "message": "性别",
+    "description": "身份信息字段标签"
+  },
+  "identityEmailLabel": {
+    "message": "邮箱",
+    "description": "身份信息字段标签"
+  },
+  "identityPhoneLabel": {
+    "message": "电话",
+    "description": "身份信息字段标签"
+  },
+  "identityIdNumberLabel": {
+    "message": "证件号",
+    "description": "身份信息字段标签"
+  },
+  "identityPassportLabel": {
+    "message": "护照号",
+    "description": "身份信息字段标签"
+  },
+  "identityLicenseLabel": {
+    "message": "驾照号",
+    "description": "身份信息字段标签"
+  },
+  "identityAddress1Label": {
+    "message": "地址",
+    "description": "身份信息字段标签"
+  },
+  "identityAddress2Label": {
+    "message": "地址（第二行）",
+    "description": "身份信息字段标签"
+  },
+  "identityCityLabel": {
+    "message": "城市",
+    "description": "身份信息字段标签"
+  },
+  "identityStateLabel": {
+    "message": "省 / 州",
+    "description": "身份信息字段标签"
+  },
+  "identityPostalCodeLabel": {
+    "message": "邮政编码",
+    "description": "身份信息字段标签"
+  },
+  "identityCountryLabel": {
+    "message": "国家 / 地区",
+    "description": "身份信息字段标签"
   }
 }

@@ -520,6 +520,39 @@ code,
   white-space: nowrap;
 }
 
+/* ─── Vault: type filter chips ───────────────────────────────────────────── */
+
+.type-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-1);
+  margin-top: var(--s-2);
+}
+
+.type-chip {
+  padding: 4px var(--s-3);
+  font-size: var(--t-11);
+  font-weight: 600;
+  color: var(--c-text-3);
+  background: var(--c-card);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-pill);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
+    color var(--dur) var(--ease);
+}
+
+.type-chip:hover {
+  color: var(--c-text-2);
+  background: var(--c-card-2);
+  border-color: var(--c-line-2);
+}
+
+.type-chip.active {
+  color: var(--c-text);
+  background: var(--c-accent-soft);
+  border-color: var(--c-accent-line);
+}
+
 /* ─── Vault: entry list ──────────────────────────────────────────────────── */
 
 .entry-list {
@@ -560,6 +593,17 @@ code,
   background: rgba(205, 214, 244, 0.07);
 }
 
+/* Only login rows are clickable (= fill). Notes / identities / keys carry no
+ * fill action, so they must not advertise one. */
+.entry-item:not([data-action='fill']) {
+  cursor: default;
+}
+
+.entry-item:not([data-action='fill']):hover,
+.entry-item:not([data-action='fill']):active {
+  background: transparent;
+}
+
 .entry-icon {
   display: grid;
   flex: none;
@@ -586,7 +630,53 @@ code,
   white-space: nowrap;
 }
 
-.entry-username {
+.entry-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+/* Type badge: the second half of "per-type icon + badge", and the only place
+ * the type is spelled out for screen readers. */
+.entry-type-badge {
+  flex: none;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--c-text-3);
+  letter-spacing: 0.02em;
+  background: var(--c-inset);
+  border: 1px solid var(--c-line);
+  border-radius: var(--r-pill);
+  white-space: nowrap;
+}
+
+.entry-type-badge[data-type='login'] {
+  color: var(--c-accent);
+  background: var(--c-accent-soft);
+  border-color: var(--c-accent-line);
+}
+
+.entry-type-badge[data-type='secure_note'] {
+  color: var(--c-yellow);
+  background: var(--c-yellow-soft);
+  border-color: rgba(249, 226, 175, 0.32);
+}
+
+.entry-type-badge[data-type='identity'] {
+  color: var(--c-green);
+  background: var(--c-green-soft);
+  border-color: rgba(166, 227, 161, 0.32);
+}
+
+.entry-type-badge[data-type='ssh_key'] {
+  color: var(--c-text-2);
+  background: rgba(205, 214, 244, 0.08);
+  border-color: var(--c-line-2);
+}
+
+.entry-subtitle {
   overflow: hidden;
   font-size: var(--t-12);
   color: var(--c-text-2);
@@ -666,6 +756,111 @@ code,
   color: var(--c-text);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Multi-line secrets (SSH public / private key) wrap instead of clipping. */
+.secret-block {
+  display: block;
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Secure-note body: pre-wrap so the note keeps its own line breaks. */
+.entry-note {
+  align-items: flex-start;
+}
+
+.note-body {
+  flex: 1;
+  max-height: 160px;
+  overflow-y: auto;
+  font-family: var(--font);
+  font-size: var(--t-12);
+  color: var(--c-text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Grouped field lists (identity blocks, custom fields). */
+.entry-fields,
+.entry-custom,
+.entry-private,
+.entry-public {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--s-1);
+}
+
+.entry-private,
+.entry-public {
+  position: relative;
+}
+
+.entry-private > .icon-btn,
+.entry-public > .icon-btn {
+  position: absolute;
+  top: var(--s-2);
+  right: var(--s-2);
+}
+
+.field-group + .field-group,
+.field + .field-group {
+  margin-top: var(--s-2);
+}
+
+.field-group-title {
+  padding-bottom: 2px;
+  font-size: var(--t-11);
+  font-weight: 700;
+  color: var(--c-text-3);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 3px 0;
+}
+
+.field-label {
+  flex: none;
+  width: 96px;
+  font-size: var(--t-11);
+  color: var(--c-text-3);
+}
+
+.field-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--t-12);
+  color: var(--c-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+.field-masked {
+  color: var(--c-muted);
+  letter-spacing: 0.12em;
+}
+
+.field-empty {
+  color: var(--c-muted);
+}
+
+.field .secret {
+  flex: 1;
+}
+
+.field .icon-btn {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
 }
 
 .extra-label {

@@ -121,9 +121,11 @@ class GeneratorScreen extends ConsumerWidget {
               ),
               Slider(
                 value: state.length.toDouble(),
+                // 与 GeneratorNotifier.setLength 的 clamp(4, 128) 对齐：
+                // 上限必须是 128，否则 65..128 这段永远滑不到。
                 min: 4,
-                max: 64,
-                divisions: 60,
+                max: 128,
+                divisions: 124,
                 label: '${state.length}',
                 onChanged: (value) => notifier.setLength(value.toInt()),
               ),

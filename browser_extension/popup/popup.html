@@ -82,6 +82,21 @@
             <input type="text" id="searchInput" data-i18n-placeholder="searchPlaceholder"
                    autocomplete="off" spellcheck="false" />
           </div>
+          <!-- Client-side type filter over the currently loaded list. Search stays
+               server-side (searchCredentials); the filter never widens it. -->
+          <div id="typeFilter" class="type-filter" role="group"
+               data-i18n-aria="entryTypeFilterTooltip" data-i18n-title="entryTypeFilterTooltip">
+            <button type="button" class="type-chip" data-action="filter-type" data-type="all"
+                    aria-pressed="true" data-i18n="entryTypeAll"></button>
+            <button type="button" class="type-chip" data-action="filter-type" data-type="login"
+                    aria-pressed="false" data-i18n="entryTypeLogin"></button>
+            <button type="button" class="type-chip" data-action="filter-type" data-type="secure_note"
+                    aria-pressed="false" data-i18n="entryTypeSecureNote"></button>
+            <button type="button" class="type-chip" data-action="filter-type" data-type="identity"
+                    aria-pressed="false" data-i18n="entryTypeIdentity"></button>
+            <button type="button" class="type-chip" data-action="filter-type" data-type="ssh_key"
+                    aria-pressed="false" data-i18n="entryTypeSshKey"></button>
+          </div>
           <div class="list-meta">
             <span id="vaultCount" class="meta-text"></span>
             <span id="pageBanner" class="meta-banner" hidden></span>

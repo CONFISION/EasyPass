@@ -110,10 +110,23 @@ class HealthScreen extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
+                // 被分析的登录条目数（非登录条目不计入评分）。
                 Text(
-                  '${report.totalEntries} ${l10n.healthTotalEntries}',
+                  l10n.healthLoginCount(report.totalEntries),
+                  textAlign: TextAlign.center,
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 8),
+                // 评分口径说明：只有登录条目参与（安全笔记 / 身份 / SSH 不计分）。
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(
+                    l10n.healthOnlyLogins,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
                 ),
               ],
             ),

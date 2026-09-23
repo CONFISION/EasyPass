@@ -7,16 +7,25 @@ CREATE TABLE folders (
   updated_at INTEGER NOT NULL
 );
 
--- Password entries (the main vault items)
+-- Vault entries (the main vault items).
+--
+-- 2.3.0 起一个条目有四种类型（login / secure_note / identity / ssh_key）：
+--   * type             —— 明文类型标签，用于列表分组、自动填充过滤（只有 login 参与）
+--   * data_encrypted   —— 类型专属字段（身份 / SSH）+ 自定义字段的加密 JSON；
+--                         登录字段仍走 url / username / password_encrypted /
+--                         totp_secret_encrypted 这几列，保证旧数据零迁移。
+-- 详见 lib/data/models/vault_item.dart 与 docs/entry-types.md。
 CREATE TABLE password_entries (
   id TEXT PRIMARY KEY NOT NULL,
   folder_id TEXT,
+  type TEXT NOT NULL DEFAULT 'login',
   name TEXT NOT NULL,
   url TEXT NOT NULL DEFAULT '',
   username TEXT NOT NULL DEFAULT '',
   password_encrypted TEXT NOT NULL,
   notes_encrypted TEXT DEFAULT '',
   totp_secret_encrypted TEXT DEFAULT '',
+  data_encrypted TEXT NOT NULL DEFAULT '',
   is_favorite BOOLEAN NOT NULL DEFAULT FALSE,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -27,3 +36,4 @@ CREATE TABLE password_entries (
 CREATE INDEX idx_password_entries_folder ON password_entries(folder_id);
 CREATE INDEX idx_password_entries_name ON password_entries(name);
 CREATE INDEX idx_password_entries_favorite ON password_entries(is_favorite);
+CREATE INDEX idx_password_entries_type ON password_entries(type);

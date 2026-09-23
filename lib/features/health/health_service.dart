@@ -4,12 +4,24 @@
 /// 输出 [HealthReport] 只保留条目 id/name 与统计数字，**绝不保留明文密码**。
 /// 重复密码检测只记录"有多少条目共用"，不输出密码本身。
 /// 明文密码仅存在于 [analyze] 的临时局部变量中，函数返回后即不可达。
+///
+/// 2.3.0 起**只有登录条目**参与评分（契约 §5）：安全笔记 / 身份 / SSH 密钥
+/// 没有"密码 / 网址 / TOTP"的概念，不该因为"不适用"被扣分。
 library;
 
+import '../../data/models/entry_type.dart';
+import '../../data/models/vault_item.dart';
+
 /// 解密后的条目（供健康分析使用，不持久化、不打印）。
+///
+/// [type] 用来把非登录条目挡在评分之外；[HealthService.analyze] 会跳过它们。
 class HealthEntry {
   final String id;
   final String name;
+
+  /// 条目类型；默认登录（老调用方不传 type 时行为不变）。
+  final EntryType type;
+
   final String password;
   final String url;
 
@@ -20,9 +32,25 @@ class HealthEntry {
     required this.id,
     required this.name,
     required this.password,
+    this.type = EntryType.login,
     this.url = '',
     this.totpSecret,
   });
+
+  /// 从保险库条目（[VaultItem]）装配：非登录条目的登录字段是空的，
+  /// 且会被 [HealthService.analyze] 直接跳过。
+  factory HealthEntry.fromItem(VaultItem item) {
+    final login = item.loginOrEmpty;
+    final totp = login.totpSecret.trim();
+    return HealthEntry(
+      id: item.id,
+      name: item.name,
+      type: item.type,
+      password: login.password,
+      url: login.url,
+      totpSecret: totp.isEmpty ? null : login.totpSecret,
+    );
+  }
 }
 
 /// 弱密码的具体原因（机器可读，UI 层负责本地化展示）。
@@ -90,9 +118,13 @@ class NoUrlIssue {
 /// - 无 URL：每个条目 -2，最多扣 20
 /// 分数下限为 0。全部健康 = 100。
 ///
+/// **只有登录条目参与评分**（2.3.0）：非登录条目在 [HealthService.analyze]
+/// 里被跳过，[totalEntries] 因此等于"被分析的登录条目数"（契约 §5）。
+///
 /// 健康等级：score >= 80 → [HealthLevel.good]；score >= 50 →
 /// [HealthLevel.fair]；否则 [HealthLevel.poor]。
 class HealthReport {
+  /// 被分析的**登录**条目数（不是库里条目总数）。
   final int totalEntries;
 
   final List<WeakPasswordIssue> weakPasswords;
@@ -179,6 +211,14 @@ class HealthService {
   };
 
   static HealthReport analyze(List<HealthEntry> entries) {
+    // 只有登录条目参与评分（契约 §5）：安全笔记 / 身份 / SSH 密钥没有
+    // 密码 / 网址 / TOTP 的概念，不能让它们按"缺失"被扣分。
+    // provider 已经按 type 取过数据，这里是防御性的第二道闸。
+    final logins = [
+      for (final entry in entries)
+        if (entry.type == EntryType.login) entry,
+    ];
+
     final weakPasswords = <WeakPasswordIssue>[];
     final noTotpEntries = <NoTotpIssue>[];
     final noUrlEntries = <NoUrlIssue>[];
@@ -187,7 +227,7 @@ class HealthService {
     // 分析结束后即被回收，不会进入 HealthReport。
     final passwordGroups = <String, List<HealthEntry>>{};
 
-    for (final entry in entries) {
+    for (final entry in logins) {
       final reason = _weakPasswordReason(entry.password);
       if (reason != null) {
         weakPasswords.add(WeakPasswordIssue(
@@ -233,7 +273,8 @@ class HealthService {
     );
 
     return HealthReport(
-      totalEntries: entries.length,
+      // totalEntries = 被分析的登录条目数（契约 §5，桥接 getHealthReport 同义）。
+      totalEntries: logins.length,
       weakPasswords: weakPasswords,
       reusedPasswords: reusedPasswords,
       reusedGroupCount: reusedGroupCount,
