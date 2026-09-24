@@ -57,6 +57,16 @@ dependencies:
   share_plus: ^10.1.4
   file_picker: ^8.1.7
 
+# Linux build hook config: make the `sqlite3` Dart package use the system
+# libsqlite3 (via dlopen) instead of downloading a prebuilt .so from
+# github.com/simolus3/sqlite3.dart/releases — that domain is blocked in this
+# environment (see /etc/hosts -> 127.0.0.1 returns 504). Only affects Linux
+# native asset linking; other platforms and the runtime API are unchanged.
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
