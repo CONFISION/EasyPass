@@ -22,7 +22,8 @@ class SettingsScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
     final autoLockMinutes = ref.watch(authProvider).autoLockMinutes;
-    final fontSetting = ref.watch(fontFamilyProvider);
+    final fontState = ref.watch(fontFamilyProvider);
+    final fontSetting = fontState.valueOrNull;
     final themeMode = ref.watch(themeModeProvider);
 
     return Scaffold(
@@ -90,7 +91,12 @@ class SettingsScreen extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.font_download_outlined),
                   title: Text(l10n.font),
-                  subtitle: Text(_fontSubtitle(l10n, fontSetting)),
+                  subtitle: fontState.hasError
+                      ? Text(
+                          l10n.fontSettingsFailed,
+                          style: TextStyle(color: theme.colorScheme.error),
+                        )
+                      : Text(_fontSubtitle(l10n, fontSetting)),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _pickFont(context, ref),
                 ),
@@ -104,12 +110,20 @@ class SettingsScreen extends ConsumerWidget {
                   onTap: () => _pickLanguage(context, ref),
                 ),
                 const Divider(),
-                _buildSectionHeader(context, l10n.dangerZoneSection,
-                    color: theme.colorScheme.error),
+                _buildSectionHeader(
+                  context,
+                  l10n.dangerZoneSection,
+                  color: theme.colorScheme.error,
+                ),
                 ListTile(
-                  leading: Icon(Icons.delete_forever, color: theme.colorScheme.error),
-                  title: Text(l10n.deleteAllData,
-                      style: TextStyle(color: theme.colorScheme.error)),
+                  leading: Icon(
+                    Icons.delete_forever,
+                    color: theme.colorScheme.error,
+                  ),
+                  title: Text(
+                    l10n.deleteAllData,
+                    style: TextStyle(color: theme.colorScheme.error),
+                  ),
                   subtitle: Text(l10n.deleteAllDataSubtitle),
                   onTap: () => _confirmDeleteAll(context, ref),
                 ),
@@ -133,8 +147,11 @@ class SettingsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildSectionHeader(BuildContext context, String title,
-      {Color? color}) {
+  Widget _buildSectionHeader(
+    BuildContext context,
+    String title, {
+    Color? color,
+  }) {
     final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
@@ -176,16 +193,18 @@ class SettingsScreen extends ConsumerWidget {
           final isSelected = mode == current;
           return ListTile(
             title: Text(_themeSubtitle(l10n, mode)),
-            trailing:
-                isSelected ? const Icon(Icons.check, color: Colors.green) : null,
+            trailing: isSelected
+                ? const Icon(Icons.check, color: Colors.green)
+                : null,
             onTap: () async {
               Navigator.pop(ctx);
               await ref.read(themeModeProvider.notifier).setThemeMode(mode);
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content:
-                        Text(l10n.themeApplied(_themeSubtitle(l10n, mode))),
+                    content: Text(
+                      l10n.themeApplied(_themeSubtitle(l10n, mode)),
+                    ),
                   ),
                 );
               }
@@ -205,7 +224,7 @@ class SettingsScreen extends ConsumerWidget {
 
   void _pickFont(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context);
-    final current = ref.read(fontFamilyProvider);
+    final current = ref.read(fontFamilyProvider).valueOrNull;
 
     showDialog(
       context: context,
@@ -218,21 +237,31 @@ class SettingsScreen extends ConsumerWidget {
             builder: (context, ref, _) {
               final fontsAsync = ref.watch(availableFontsProvider);
               return fontsAsync.when(
-                loading: () =>
-                    const Center(child: CircularProgressIndicator()),
+                loading: () => const Center(child: CircularProgressIndicator()),
                 error: (_, _) => Center(child: Text(l10n.searchFailed)),
                 data: (fonts) => _FontPickerList(
                   fonts: fonts,
                   current: current,
                   onSelect: (value) async {
                     Navigator.pop(ctx);
-                    await ref
-                        .read(fontFamilyProvider.notifier)
-                        .setFontFamily(value);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(l10n.fontApplied)),
-                      );
+                    try {
+                      await ref
+                          .read(fontFamilyProvider.notifier)
+                          .setFontFamily(value);
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(l10n.fontApplied)),
+                        );
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(l10n.fontSettingsFailed),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
                     }
                   },
                 ),
@@ -242,8 +271,9 @@ class SettingsScreen extends ConsumerWidget {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(l10n.cancel)),
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(l10n.cancel),
+          ),
         ],
       ),
     );
@@ -253,7 +283,9 @@ class SettingsScreen extends ConsumerWidget {
     final l10n = AppLocalizations.of(context);
     final locale = ref.watch(localeProvider);
     if (locale == null) return l10n.followSystem;
-    return locale.languageCode == 'zh' ? l10n.languageChinese : l10n.languageEnglish;
+    return locale.languageCode == 'zh'
+        ? l10n.languageChinese
+        : l10n.languageEnglish;
   }
 
   void _pickLanguage(BuildContext context, WidgetRef ref) {
@@ -320,8 +352,10 @@ class SettingsScreen extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(l10n.encryptedBackup),
-                      Text(l10n.encryptedBackupDesc,
-                          style: const TextStyle(fontSize: 12)),
+                      Text(
+                        l10n.encryptedBackupDesc,
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ],
                   ),
                 ),
@@ -339,8 +373,10 @@ class SettingsScreen extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(l10n.plainJson),
-                      Text(l10n.plainJsonDesc,
-                          style: const TextStyle(fontSize: 12)),
+                      Text(
+                        l10n.plainJsonDesc,
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ],
                   ),
                 ),
@@ -360,15 +396,17 @@ class SettingsScreen extends ConsumerWidget {
           : await service.exportEncrypted();
 
       final now = DateTime.now();
-      final date = '${now.year}'
+      final date =
+          '${now.year}'
           '${now.month.toString().padLeft(2, '0')}'
           '${now.day.toString().padLeft(2, '0')}';
       final filename =
           '${isPlain ? 'easypass_plain' : 'easypass_backup'}_$date.json';
 
       final path = await FilePicker.platform.saveFile(
-        dialogTitle:
-            isPlain ? l10n.savePlainExportDialog : l10n.saveEncryptedBackupDialog,
+        dialogTitle: isPlain
+            ? l10n.savePlainExportDialog
+            : l10n.saveEncryptedBackupDialog,
         fileName: filename,
         type: FileType.custom,
         allowedExtensions: ['json'],
@@ -378,15 +416,17 @@ class SettingsScreen extends ConsumerWidget {
 
       await service.writeToFile(content, path);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.vaultExportedTo(path))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(l10n.vaultExportedTo(path))));
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.exportFailed(e.toString())),
-              backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(l10n.exportFailed(e.toString())),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -403,11 +443,13 @@ class SettingsScreen extends ConsumerWidget {
         content: Text(l10n.importDialogMessage),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(l10n.cancel)),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l10n.cancel),
+          ),
           FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(l10n.import)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l10n.import),
+          ),
         ],
       ),
     );
@@ -433,16 +475,22 @@ class SettingsScreen extends ConsumerWidget {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(l10n.importedCounts(
-                counts['entries'] ?? 0, counts['folders'] ?? 0)),
+            content: Text(
+              l10n.importedCounts(
+                counts['entries'] ?? 0,
+                counts['folders'] ?? 0,
+              ),
+            ),
           ),
         );
       }
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(l10n.importFailed(e.toString())),
-              backgroundColor: Colors.red),
+          SnackBar(
+            content: Text(l10n.importFailed(e.toString())),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
@@ -501,8 +549,9 @@ class SettingsScreen extends ConsumerWidget {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(l10n.cancel)),
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(l10n.cancel),
+          ),
           FilledButton(
             onPressed: () async {
               final success = await ref
@@ -524,7 +573,8 @@ class SettingsScreen extends ConsumerWidget {
                       success
                           ? appL10n.masterPasswordChanged
                           : appL10n.failedWithError(
-                              authErrorMessage(appL10n, error)),
+                              authErrorMessage(appL10n, error),
+                            ),
                     ),
                     backgroundColor: success ? null : Colors.red,
                   ),
@@ -555,17 +605,33 @@ class SettingsScreen extends ConsumerWidget {
           final isSelected = minutes == current;
           return ListTile(
             title: Text(l10n.autoLockMinutesValue(minutes)),
-            trailing:
-                isSelected ? const Icon(Icons.check, color: Colors.green) : null,
+            trailing: isSelected
+                ? const Icon(Icons.check, color: Colors.green)
+                : null,
             onTap: () async {
               Navigator.pop(ctx);
-              await ref.read(authProvider.notifier).setAutoLockMinutes(minutes);
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                      content: Text(l10n.autoLockSet(
-                          l10n.autoLockMinutesValue(minutes)))),
-                );
+              try {
+                await ref
+                    .read(authProvider.notifier)
+                    .setAutoLockMinutes(minutes);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        l10n.autoLockSet(l10n.autoLockMinutesValue(minutes)),
+                      ),
+                    ),
+                  );
+                }
+              } catch (_) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(l10n.errorFailedToSaveSettings),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
               }
             },
           );
@@ -585,8 +651,9 @@ class SettingsScreen extends ConsumerWidget {
         content: Text(l10n.deleteAllDataMessage),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(l10n.cancel)),
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(l10n.cancel),
+          ),
           FilledButton(
             onPressed: () async {
               final db = ref.read(databaseProvider);
@@ -601,13 +668,14 @@ class SettingsScreen extends ConsumerWidget {
               ref.invalidate(vaultRepositoryProvider);
               if (ctx.mounted) Navigator.pop(ctx);
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(l10n.allDataDeleted)),
-                );
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(SnackBar(content: Text(l10n.allDataDeleted)));
               }
             },
             style: FilledButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.error),
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
             child: Text(l10n.deleteAll),
           ),
         ],
@@ -644,13 +712,13 @@ class _FontPickerListState extends State<_FontPickerList> {
     final bundled = q.isEmpty
         ? widget.fonts.bundled
         : widget.fonts.bundled
-            .where((f) => f.toLowerCase().contains(q))
-            .toList();
+              .where((f) => f.toLowerCase().contains(q))
+              .toList();
     final system = q.isEmpty
         ? widget.fonts.system
         : widget.fonts.system
-            .where((f) => f.toLowerCase().contains(q))
-            .toList();
+              .where((f) => f.toLowerCase().contains(q))
+              .toList();
 
     final hasResults = bundled.isNotEmpty || system.isNotEmpty;
 
@@ -699,8 +767,10 @@ class _FontPickerListState extends State<_FontPickerList> {
                     if (q.isEmpty) ...[
                       tile(l10n.fontDefault, null),
                       tile(l10n.fontSystem, AppConstants.systemFontOption),
-                      tile(l10n.fontMonospace,
-                          AppConstants.monospaceFontOption),
+                      tile(
+                        l10n.fontMonospace,
+                        AppConstants.monospaceFontOption,
+                      ),
                     ],
                     if (bundled.isNotEmpty) ...[
                       groupHeader(l10n.fontAssetSection),

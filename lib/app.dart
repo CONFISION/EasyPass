@@ -49,18 +49,12 @@ final _routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      GoRoute(
-        path: '/lock',
-        builder: (context, state) => const LockScreen(),
-      ),
+      GoRoute(path: '/lock', builder: (context, state) => const LockScreen()),
       GoRoute(
         path: '/set-master-password',
         builder: (context, state) => const SetMasterPasswordScreen(),
       ),
-      GoRoute(
-        path: '/vault',
-        builder: (context, state) => const VaultScreen(),
-      ),
+      GoRoute(path: '/vault', builder: (context, state) => const VaultScreen()),
       GoRoute(
         path: '/vault/add',
         builder: (context, state) => const AddEditEntryScreen(),
@@ -102,7 +96,8 @@ class EasyPassApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(_routerProvider);
     final locale = ref.watch(localeProvider);
-    final fontFamily = _resolveFontFamily(ref.watch(fontFamilyProvider));
+    final fontSetting = ref.watch(fontFamilyProvider);
+    final fontFamily = _resolveFontFamily(fontSetting.valueOrNull);
     final themeMode = ref.watch(themeModeProvider);
 
     return MaterialApp.router(
