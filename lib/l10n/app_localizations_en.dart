@@ -73,6 +73,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String get errorUnlockFailed => 'Error unlocking vault';
 
   @override
+  String get errorStorageUnavailable =>
+      'Unable to access secure storage; vault state is unavailable';
+
+  @override
+  String get errorFailedToSaveSettings => 'Failed to save setting';
+
+  @override
+  String get fontSettingsFailed => 'Unable to load or save the font setting';
+
+  @override
+  String get storageUnavailableTitle => 'Secure storage unavailable';
+
+  @override
+  String get storageUnavailableBody =>
+      'EasyPass cannot reach the system secret store (Linux Secret Service / GNOME Keyring / KDE Wallet). The master password cannot be created or verified until this is fixed.\n\nCheck that a Secret Service provider is installed and unlocked, then retry.';
+
+  @override
+  String get exit => 'Exit';
+
+  @override
   String get favoritesTitle => 'Favorites';
 
   @override

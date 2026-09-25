@@ -25,9 +25,18 @@ abstract final class AuthErrorCodes {
   static const currentPasswordIncorrect = 'currentPasswordIncorrect';
   static const vaultLocked = 'vaultLocked';
   static const failedToChange = 'failedToChange';
+  static const storageUnavailable = 'storageUnavailable';
+  static const failedToSaveSettings = 'failedToSaveSettings';
 }
 
 enum AuthStatus { loading, locked, unlocked, firstRun }
+
+/// Sentinel for [AuthState.copyWith]: distinguishes "field not provided"
+/// (keep the existing value) from "field provided as `null`" (clear it).
+/// Without it the previous `copyWith` would overwrite `errorMessage` with
+/// `null` whenever the caller only updated `status`, hiding the
+/// "secure storage unavailable" banner the moment the user tapped Unlock.
+const Object _unset = Object();
 
 class AuthState {
   final AuthStatus status;
@@ -46,12 +55,14 @@ class AuthState {
 
   AuthState copyWith({
     AuthStatus? status,
-    String? errorMessage,
+    Object? errorMessage = _unset,
     int? autoLockMinutes,
   }) {
     return AuthState(
       status: status ?? this.status,
-      errorMessage: errorMessage,
+      errorMessage: identical(errorMessage, _unset)
+          ? this.errorMessage
+          : errorMessage as String?,
       autoLockMinutes: autoLockMinutes ?? this.autoLockMinutes,
     );
   }
@@ -73,16 +84,40 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<void> _checkInitialState() async {
-    _autoLockMinutes = await _cryptoService.getAutoLockMinutes();
-    final isFirstRun = await _cryptoService.isFirstRun();
-    state = state.copyWith(
-      status: isFirstRun ? AuthStatus.firstRun : AuthStatus.locked,
-      autoLockMinutes: _autoLockMinutes,
-    );
+    try {
+      _autoLockMinutes = await _cryptoService.getAutoLockMinutes();
+      final isFirstRun = await _cryptoService.isFirstRun();
+      state = state.copyWith(
+        status: isFirstRun ? AuthStatus.firstRun : AuthStatus.locked,
+        autoLockMinutes: _autoLockMinutes,
+        errorMessage: null,
+      );
+    } catch (_) {
+      // A storage failure is not evidence that this is a fresh install.
+      // Keep the app out of the first-run route and report the failure on
+      // the lock screen instead of silently falling back to a false setup
+      // state (or leaving routing in `loading` forever).
+      state = state.copyWith(
+        status: AuthStatus.locked,
+        autoLockMinutes: _autoLockMinutes,
+        errorMessage: AuthErrorCodes.storageUnavailable,
+      );
+    }
+  }
+
+  /// Re-runs the secure-storage probe the boot sequence uses to decide
+  /// between first-run / locked / unlocked. The lock screen wires this to
+  /// its "Retry" button so the user can recover from a transient keyring
+  /// failure without restarting the app.
+  Future<void> retryInitialState() async {
+    await _checkInitialState();
   }
 
   /// Set the master password for the first time
-  Future<bool> setMasterPassword(String password, String confirmPassword) async {
+  Future<bool> setMasterPassword(
+    String password,
+    String confirmPassword,
+  ) async {
     if (password != confirmPassword) {
       state = state.copyWith(
         status: AuthStatus.firstRun,
@@ -108,10 +143,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       // Store the derived key for the session
       _ref.read(encryptionKeyProvider.notifier).state = derivedKey;
 
-      state = state.copyWith(
-        status: AuthStatus.unlocked,
-        errorMessage: null,
-      );
+      state = state.copyWith(status: AuthStatus.unlocked, errorMessage: null);
       _startAutoLockTimer();
       return true;
     } catch (_) {
@@ -125,6 +157,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   /// Unlock the vault with the master password
   Future<bool> unlock(String password) async {
+    // Only switch to loading if storage is actually usable: if the boot
+    // probe already published `storageUnavailable`, tapping Unlock would
+    // otherwise erase the banner without ever talking to the password,
+    // leaving the user staring at a half-form. Preserve the existing
+    // errorMessage in that case so the banner survives the gesture.
+    if (state.errorMessage == AuthErrorCodes.storageUnavailable) {
+      return false;
+    }
     state = state.copyWith(status: AuthStatus.loading);
 
     try {
@@ -139,17 +179,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
         return false;
       }
 
-      final computedHash = _cryptoService.hashMasterPassword(password, storedSalt);
+      final computedHash = _cryptoService.hashMasterPassword(
+        password,
+        storedSalt,
+      );
 
       if (computedHash == storedHash) {
         // Derive and store session key
         final derivedKey = _cryptoService.deriveKey(password, storedSalt);
         _ref.read(encryptionKeyProvider.notifier).state = derivedKey;
 
-        state = state.copyWith(
-          status: AuthStatus.unlocked,
-          errorMessage: null,
-        );
+        state = state.copyWith(status: AuthStatus.unlocked, errorMessage: null);
         _startAutoLockTimer();
         return true;
       } else {
@@ -181,9 +221,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     if (newPassword.length < 8) {
-      state = state.copyWith(
-        errorMessage: AuthErrorCodes.passwordTooShort,
-      );
+      state = state.copyWith(errorMessage: AuthErrorCodes.passwordTooShort);
       return false;
     }
 
@@ -192,9 +230,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final storedHash = await _cryptoService.getStoredPasswordHash();
 
       if (storedSalt == null || storedHash == null) {
-        state = state.copyWith(
-          errorMessage: AuthErrorCodes.noMasterPassword,
-        );
+        state = state.copyWith(errorMessage: AuthErrorCodes.noMasterPassword);
         return false;
       }
 
@@ -232,18 +268,29 @@ class AuthNotifier extends StateNotifier<AuthState> {
       _startAutoLockTimer();
       return true;
     } catch (_) {
-      state = state.copyWith(
-        errorMessage: AuthErrorCodes.failedToChange,
-      );
+      state = state.copyWith(errorMessage: AuthErrorCodes.failedToChange);
       return false;
     }
   }
 
   /// Update the auto-lock timeout and persist it.
   Future<void> setAutoLockMinutes(int minutes) async {
-    _autoLockMinutes = minutes.clamp(1, 60).toInt();
-    await _cryptoService.setAutoLockMinutes(_autoLockMinutes);
-    state = state.copyWith(autoLockMinutes: _autoLockMinutes);
+    final normalizedMinutes = minutes.clamp(1, 60).toInt();
+    try {
+      await _cryptoService.setAutoLockMinutes(normalizedMinutes);
+    } catch (error, stackTrace) {
+      // Do not publish a setting that was not persisted.  Report it in the
+      // auth state and propagate the original error so the caller can show
+      // an actionable message rather than claiming that the change worked.
+      state = state.copyWith(errorMessage: AuthErrorCodes.failedToSaveSettings);
+      Error.throwWithStackTrace(error, stackTrace);
+    }
+
+    _autoLockMinutes = normalizedMinutes;
+    state = state.copyWith(
+      autoLockMinutes: _autoLockMinutes,
+      errorMessage: null,
+    );
     if (state.status == AuthStatus.unlocked) {
       _startAutoLockTimer();
     }
@@ -263,10 +310,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
   /// Start auto-lock timer
   void _startAutoLockTimer() {
     _autoLockTimer?.cancel();
-    _autoLockTimer = Timer(
-      Duration(minutes: _autoLockMinutes),
-      lock,
-    );
+    _autoLockTimer = Timer(Duration(minutes: _autoLockMinutes), lock);
   }
 
   /// Reset the timer on user activity
@@ -309,6 +353,10 @@ String authErrorMessage(AppLocalizations l10n, String? code) {
       return l10n.errorVaultLocked;
     case AuthErrorCodes.failedToChange:
       return l10n.errorFailedToChange;
+    case AuthErrorCodes.storageUnavailable:
+      return l10n.errorStorageUnavailable;
+    case AuthErrorCodes.failedToSaveSettings:
+      return l10n.errorFailedToSaveSettings;
     default:
       return code ?? '';
   }

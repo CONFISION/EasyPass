@@ -69,6 +69,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String get errorUnlockFailed => '解锁保险库时出错';
 
   @override
+  String get errorStorageUnavailable => '无法访问安全存储，保险库状态不可用';
+
+  @override
+  String get errorFailedToSaveSettings => '保存设置失败';
+
+  @override
+  String get fontSettingsFailed => '无法加载或保存字体设置';
+
+  @override
+  String get storageUnavailableTitle => '安全存储不可用';
+
+  @override
+  String get storageUnavailableBody =>
+      'EasyPass 无法访问系统密钥服务（Linux Secret Service / GNOME Keyring / KDE Wallet）。在恢复之前，既无法创建主密码，也无法解锁已存在的保险库。\n\n请确认系统已安装并解锁了一个密钥服务，然后重试。';
+
+  @override
+  String get exit => '退出';
+
+  @override
   String get favoritesTitle => '收藏';
 
   @override

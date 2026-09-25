@@ -22,6 +22,13 @@
   "errorFailedToChange": "修改主密码失败",
   "errorCurrentPasswordIncorrect": "当前主密码错误",
   "errorUnlockFailed": "解锁保险库时出错",
+  "errorStorageUnavailable": "无法访问安全存储，保险库状态不可用",
+  "errorFailedToSaveSettings": "保存设置失败",
+  "fontSettingsFailed": "无法加载或保存字体设置",
+
+  "storageUnavailableTitle": "安全存储不可用",
+  "storageUnavailableBody": "EasyPass 无法访问系统密钥服务（Linux Secret Service / GNOME Keyring / KDE Wallet）。在恢复之前，既无法创建主密码，也无法解锁已存在的保险库。\n\n请确认系统已安装并解锁了一个密钥服务，然后重试。",
+  "exit": "退出",
 
   "favoritesTitle": "收藏",
   "folderTitle": "文件夹",

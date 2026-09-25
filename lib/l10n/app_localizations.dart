@@ -218,6 +218,42 @@ abstract class AppLocalizations {
   /// **'Error unlocking vault'**
   String get errorUnlockFailed;
 
+  /// No description provided for @errorStorageUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Unable to access secure storage; vault state is unavailable'**
+  String get errorStorageUnavailable;
+
+  /// No description provided for @errorFailedToSaveSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to save setting'**
+  String get errorFailedToSaveSettings;
+
+  /// No description provided for @fontSettingsFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Unable to load or save the font setting'**
+  String get fontSettingsFailed;
+
+  /// No description provided for @storageUnavailableTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Secure storage unavailable'**
+  String get storageUnavailableTitle;
+
+  /// No description provided for @storageUnavailableBody.
+  ///
+  /// In en, this message translates to:
+  /// **'EasyPass cannot reach the system secret store (Linux Secret Service / GNOME Keyring / KDE Wallet). The master password cannot be created or verified until this is fixed.\n\nCheck that a Secret Service provider is installed and unlocked, then retry.'**
+  String get storageUnavailableBody;
+
+  /// No description provided for @exit.
+  ///
+  /// In en, this message translates to:
+  /// **'Exit'**
+  String get exit;
+
   /// No description provided for @favoritesTitle.
   ///
   /// In en, this message translates to:
