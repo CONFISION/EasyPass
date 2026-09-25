@@ -1,6 +1,6 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.13)
-project(runner LANGUAGES CXX)
+project(runner LANGUAGES C CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
@@ -111,6 +111,94 @@ foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
     COMPONENT Runtime)
 endforeach(bundled_library)
 
+# package:sqlite3 is configured with `source: system`, so its Linux runtime
+# asset asks the loader for `libsqlite3.so`.  Do not install the Flutter
+# plugin under that second name: the plugin is loaded as a Flutter plugin,
+# while the Dart worker loads this library through the system-library path.
+# Two copies of the same ELF object therefore have two SQLite identities.
+#
+# Fail fast if the plugin disappears: the bundle below only makes sense as
+# long as the plugin (a) still exists, (b) still pulls the sqlite.org source
+# tree we re-compile from, and (c) still exposes the `${sqlite3_SOURCE_DIR}`
+# that the legacy install path depends on. A silent skip here would ship an
+# AppImage that fails on the first `dlopen("libsqlite3.so")` and only
+# crashes at runtime, which is exactly the regression audit §3.1 warned about.
+if(TARGET sqlite3_flutter_libs_plugin)
+  # Keep the plugin's embedded SQLite private.  Otherwise its exported
+  # sqlite3_* symbols can interpose the separately loaded system library.
+  # The plugin registration symbol is C++ and keeps the package's existing
+  # visibility settings.
+  set_target_properties(sqlite3_flutter_libs_plugin PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH "$ORIGIN"
+  )
+
+  # sqlite3_flutter_libs uses FetchContent with the upstream sqlite.org
+  # archive.  Reuse that exact source tree, but compile it a second time into
+  # a distinct shared object.  It is intentionally not a copy, rename, or
+  # symlink of the plugin binary: each ELF must own its SQLite mutex/global
+  # state because the plugin and Dart worker load them independently.
+  include(FetchContent)
+  FetchContent_GetProperties(sqlite3)
+  if(NOT sqlite3_SOURCE_DIR OR NOT EXISTS "${sqlite3_SOURCE_DIR}/sqlite3.c")
+    message(FATAL_ERROR
+      "sqlite3_flutter_libs did not provide its sqlite.org source tree")
+  endif()
+
+  add_library(easypass_sqlite3 SHARED "${sqlite3_SOURCE_DIR}/sqlite3.c")
+  add_dependencies(easypass_sqlite3 sqlite3_flutter_libs_plugin)
+  set_target_properties(easypass_sqlite3 PROPERTIES
+    OUTPUT_NAME sqlite3
+    C_VISIBILITY_PRESET default
+    BUILD_WITH_INSTALL_RPATH TRUE
+    INSTALL_RPATH "$ORIGIN"
+  )
+  target_compile_features(easypass_sqlite3 PRIVATE c_std_11)
+  target_compile_options(easypass_sqlite3 PRIVATE
+    "$<$<NOT:$<CONFIG:Debug>>:-O3>")
+  target_compile_definitions(easypass_sqlite3 PRIVATE
+    SQLITE_ENABLE_DBSTAT_VTAB
+    SQLITE_ENABLE_FTS5
+    SQLITE_ENABLE_RTREE
+    SQLITE_ENABLE_MATH_FUNCTIONS
+    SQLITE_DQS=0
+    SQLITE_DEFAULT_MEMSTATUS=0
+    SQLITE_TEMP_STORE=2
+    SQLITE_MAX_EXPR_DEPTH=0
+    SQLITE_STRICT_SUBTYPE=1
+    SQLITE_OMIT_AUTHORIZATION
+    SQLITE_OMIT_DECLTYPE
+    SQLITE_OMIT_DEPRECATED
+    SQLITE_OMIT_PROGRESS_CALLBACK
+    SQLITE_OMIT_SHARED_CACHE
+    SQLITE_OMIT_TCL_VARIABLE
+    SQLITE_OMIT_TRACE
+    SQLITE_USE_ALLOCA
+    SQLITE_ENABLE_SESSION
+    SQLITE_ENABLE_PREUPDATE_HOOK
+    SQLITE_UNTESTABLE
+    SQLITE_HAVE_ISNAN
+    SQLITE_HAVE_LOCALTIME_R
+    SQLITE_HAVE_MALLOC_USABLE_SIZE
+    SQLITE_HAVE_STRCHRNUL
+  )
+  install(TARGETS easypass_sqlite3
+    LIBRARY DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+else()
+  # See the rationale in the comment block immediately above the
+  # `if(TARGET sqlite3_flutter_libs_plugin)`.  A silent skip here would
+  # ship an AppImage whose first database query fails on a missing
+  # `libsqlite3.so`, so we refuse to configure instead.
+  message(FATAL_ERROR
+    "linux/CMakeLists.txt: sqlite3_flutter_libs_plugin target not found. "
+    "The bundled libsqlite3.so can no longer be produced. Either pin "
+    "sqlite3_flutter_libs or update this CMake to match the new plugin "
+    "layout (the sqlite3_flutter_libs_plugin target is the only source we "
+    "trust for the sqlite.org source tree used by `easypass_sqlite3`).")
+endif()
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
@@ -125,6 +213,14 @@ install(CODE "
   " COMPONENT Runtime)
 install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
+
+# Keep the runtime font loader's assets/fonts path identical to Windows. The
+# default UI font is loaded by family name from this directory before runApp.
+set(FONTS_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../assets/fonts")
+if(EXISTS "${FONTS_SRC}")
+  install(DIRECTORY "${FONTS_SRC}/"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/assets/fonts" COMPONENT Runtime)
+endif()
 
 # Install the AOT library on non-Debug builds only.
 if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
