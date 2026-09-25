@@ -5,6 +5,17 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class FakeSecureStorage extends FlutterSecureStorage {
   final Map<String, String> store = {};
 
+  /// When non-null, every [read] call throws this exception. Used by the
+  /// P1.2 "secure storage unavailable" recovery tests to simulate a Linux
+  /// machine with a locked Secret Service — the [AuthNotifier] boot probe
+  /// should publish `storageUnavailable`, the user should see Retry/Exit
+  /// instead of a half-broken unlock form, and a successful retry should
+  /// clear the banner.
+  Object? readFailure;
+
+  /// When non-null, every [write] call throws this exception.
+  Object? writeFailure;
+
   @override
   Future<String?> read({
     required String key,
@@ -15,6 +26,10 @@ class FakeSecureStorage extends FlutterSecureStorage {
     MacOsOptions? mOptions,
     WindowsOptions? wOptions,
   }) async {
+    final failure = readFailure;
+    if (failure != null) {
+      throw failure;
+    }
     return store[key];
   }
 
@@ -29,6 +44,10 @@ class FakeSecureStorage extends FlutterSecureStorage {
     MacOsOptions? mOptions,
     WindowsOptions? wOptions,
   }) async {
+    final failure = writeFailure;
+    if (failure != null) {
+      throw failure;
+    }
     if (value == null) {
       store.remove(key);
     } else {

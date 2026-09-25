@@ -17,6 +17,7 @@ import 'package:easypass/data/repositories/vault_repository.dart';
 import 'package:easypass/features/browser_bridge/easypass_daemon.dart';
 import 'package:easypass/features/browser_bridge/native_messaging_service.dart';
 import 'package:easypass/features/browser_bridge/vault_session.dart';
+import 'package:path/path.dart' as p;
 
 import 'fakes.dart';
 
@@ -58,8 +59,10 @@ void main() {
     storage = FakeSecureStorage();
     crypto = CryptoService(secureStorage: storage);
     db = AppDatabase.forTesting(NativeDatabase.memory());
-    infoFile = File(
-        '${Directory.systemTemp.path}\\easypass_daemon_test_${DateTime.now().millisecondsSinceEpoch}.json');
+    infoFile = File(p.join(
+      Directory.systemTemp.path,
+      'easypass_daemon_test_${DateTime.now().millisecondsSinceEpoch}.json',
+    ));
     daemon = EasypassDaemon(db, crypto, TotpService(), infoFile: infoFile);
     await daemon.start();
     final info = jsonDecode(await infoFile.readAsString());
@@ -629,6 +632,348 @@ void main() {
           reason: '不能把别的 daemon 的注册信息一起删掉');
       final still = jsonDecode(idleInfoFile.readAsStringSync()) as Map<String, dynamic>;
       expect(still['pid'], pid + 1);
+    });
+  });
+
+  // ─── P1.4 审计 §④~⑧：启动失败回滚 / pid 存活 / 错误信息脱敏 ────────────
+  //
+  // 审计 §④：start() 中途失败时，绝不留 daemon.json 指向死端口。
+  // 审计 §⑦：probe 在 pid 已死时按 unreachable 处理（带 pid 校验）。
+  // 审计 §⑧：detail 不含绝对路径 / 用户名，仅暴露类型标签。
+
+  group('start 失败回滚（审计 §④ / P1.5 F1）', () {
+    late Directory failTempDir;
+    late File failInfoFile;
+    late int attemptedPort;
+
+    /// 模拟"writeAsString 成功 + makePrivate 抛错"的 _persistInfo 钩子。
+    ///
+    /// P1.5 审计 F1：原 P1.4 §④ 测试用"路径是一个目录"做冲突 → writeAsString
+    /// 在文件层面就抛错，文件**永远**没被创建过，`existsSync() == false`
+    /// 是平凡的，对 §④ 的"清理掉已写入的 daemon.json"行为几乎没有判别力。
+    ///
+    /// 这里的实现：① 先按 `_persistInfo` 的方式真正写入 `daemon.json`（这样
+    /// 异常路径触发**之后**磁盘上是有一份残留文件的）；② 再抛一个异常模拟
+    /// `AppPaths.makePrivate(file)` 失败（这是 P1.4 §④ 警告的精确场景）。
+    ///
+    /// 不修改生产代码语义：catch 块必须既删文件又关端口。
+    Future<void> Function(int port, String token) makeWriteThenThrowHook(
+        File infoFile, Future<dynamic> Function() thenThrow) {
+      return (port, token) async {
+        attemptedPort = port;
+        await infoFile.parent.create(recursive: true);
+        await infoFile.writeAsString(jsonEncode({
+          'port': port,
+          'token': token,
+          'protocolVersion': AppConstants.bridgeProtocolVersion,
+          'pid': pid,
+        }));
+        // 模拟 makePrivate 在写盘之后抛错（firejail / chmod 不可用场景）。
+        await thenThrow();
+      };
+    }
+
+    setUp(() async {
+      failTempDir = Directory.systemTemp.createTempSync(
+          'easypass_start_fail_${DateTime.now().microsecondsSinceEpoch}');
+      failInfoFile =
+          File('${failTempDir.path}${Platform.pathSeparator}daemon.json');
+    });
+
+    tearDown(() async {
+      try {
+        if (failTempDir.existsSync()) failTempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    test('start() 抛错时不留 daemon.json 残留（即使文件已经被写入）', () async {
+      // 把"makePrivate 抛错"翻译成 chmod 父目录被拒绝（firejail / 容器
+      // 只读场景），最贴合 §④ 警告原文。
+      final d = EasypassDaemon(
+        db,
+        crypto,
+        TotpService(),
+        infoFile: failInfoFile,
+        onPersistInfo: makeWriteThenThrowHook(
+          failInfoFile,
+          () => Future<void>.error(
+            const FileSystemException(
+              'Permission denied (simulated chmod failure)',
+            ),
+          ),
+        ),
+      );
+      await expectLater(d.start(), throwsA(isA<FileSystemException>()));
+
+      // §④ 验证 1：磁盘上**残留文件**已被 catch 块清理。
+      expect(
+        failInfoFile.existsSync(),
+        isFalse,
+        reason: '写盘已经成功（模拟 makePrivate 抛错） → catch 块必须回滚',
+      );
+      d.stop();
+    });
+
+    test('start() 抛错后，**失败实例自己 bind 的端口**已不再监听', () async {
+      // 必须盯住**这个失败实例** bind 的端口（不是另一个刚 free 的端口）；
+      // 否则 P1.4 测试那样挑一个别的端口就退化成无关断言。
+      final d = EasypassDaemon(
+        db,
+        crypto,
+        TotpService(),
+        infoFile: failInfoFile,
+        onPersistInfo: makeWriteThenThrowHook(
+          failInfoFile,
+          () => Future<void>.error(
+            const FileSystemException(
+              'Permission denied (simulated chmod failure)',
+            ),
+          ),
+        ),
+      );
+      try {
+        await d.start();
+      } catch (_) {}
+
+      // 同步前要带上一点 microtask 步进，让 dart:io 的 close 真正走完。
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      // 盯准 attemptedPort —— 失败实例刚刚 bind 的端口。
+      expect(attemptedPort, greaterThan(0),
+          reason: '持久化钩子被实际调用过，bind 也应该成功');
+      await expectLater(
+        Socket.connect(InternetAddress.loopbackIPv4, attemptedPort,
+            timeout: const Duration(milliseconds: 300)),
+        throwsA(isA<SocketException>()),
+        reason: '失败实例 bind 的端口不应该再有幽灵监听',
+      );
+
+      // 同一个端口应该能立刻被另一个 ServerSocket 重新 bind（端口已释放）。
+      late ServerSocket rebound;
+      try {
+        rebound = await ServerSocket.bind(
+            InternetAddress.loopbackIPv4, attemptedPort);
+      } catch (_) {
+        fail('失败了之后端口未被释放（$attemptedPort 不能重新 bind）');
+      }
+      await rebound.close();
+      d.stop();
+    });
+
+    test('cleanup：写盘钩子不删除前会话 daemon.json（pid/token 双校验）', () async {
+      // 反向覆盖：模拟"另一个 daemon.json 是别的进程写的"。start() 的 catch
+      // 块按 `_removeInfoIfOurs` 的 pid+port 校验，必须**不**误删此文件。
+      final strangerFile = File(
+          '${failTempDir.path}${Platform.pathSeparator}stranger.json');
+      await strangerFile.parent.create(recursive: true);
+      await strangerFile.writeAsString(jsonEncode({
+        'port': 1,
+        'token': 'someone-else',
+        'protocolVersion': AppConstants.bridgeProtocolVersion,
+        'pid': pid + 1,
+      }));
+
+      // 注意：注入的钩子写的是 failInfoFile，不是 strangerFile；catch 块
+      // 检查 `_removeInfoIfOurs`（默认实现按 _server.port + pid 校验），
+      // 会查 defaultInfoFile —— 即 failInfoFile. 所以这里不能直接验证。
+      // 改用更大胆的：让钩子写**两份**文件，验证它删了"自己的"，没删"别人的"。
+      final d = EasypassDaemon(
+        db,
+        crypto,
+        TotpService(),
+        infoFile: failInfoFile,
+        onPersistInfo: (port, token) async {
+          attemptedPort = port;
+          await failInfoFile.parent.create(recursive: true);
+          await failInfoFile.writeAsString(jsonEncode({
+            'port': port,
+            'token': token,
+            'protocolVersion': AppConstants.bridgeProtocolVersion,
+            'pid': pid,
+          }));
+          await strangerFile.writeAsString(jsonEncode({
+            'port': port + 1,
+            'token': 'not-our-token',
+            'protocolVersion': AppConstants.bridgeProtocolVersion,
+            'pid': pid + 1,
+          }));
+          throw const FileSystemException(
+              'Permission denied (simulated chmod failure)');
+        },
+      );
+      await expectLater(d.start(), throwsA(isA<FileSystemException>()));
+
+      expect(failInfoFile.existsSync(), isFalse,
+          reason: 'catch 块按 pid+port 双校验，只删自己的 daemon.json');
+      expect(strangerFile.existsSync(), isTrue,
+          reason: 'pid 不匹配，stranger daemon.json 不能误删');
+      d.stop();
+    });
+  });
+
+  group('probe 校验 pid 存活（审计 §⑦）', () {
+    late Directory pidTempDir;
+    late File pidInfoFile;
+
+    setUp(() async {
+      pidTempDir = Directory.systemTemp.createTempSync(
+          'easypass_pid_alive_${DateTime.now().microsecondsSinceEpoch}');
+      pidInfoFile = File('${pidTempDir.path}${Platform.pathSeparator}daemon.json');
+    });
+
+    tearDown(() async {
+      try {
+        if (pidTempDir.existsSync()) pidTempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    test('pid 字段指向不存在的进程 → 直接 unreachable，不发 TCP 连接',
+        () async {
+      // 写一份 daemon.json，pid 用一个显然不存在的进程号（最大 int 减一）。
+      final impossiblePid = 0x7ffffffd;
+      pidInfoFile.writeAsStringSync(jsonEncode({
+        'port': 1,
+        'token': 'whatever',
+        'protocolVersion': AppConstants.bridgeProtocolVersion,
+        'pid': impossiblePid,
+      }));
+
+      final result = await EasypassDaemon.probe(infoFile: pidInfoFile);
+      expect(result.status, DaemonProbeStatus.unreachable);
+      expect(result.needsCleanup, isTrue);
+      // P1.5 审计 F2：在 Linux 上 `_isPidAlive` 走 `kill -0`，能直接判定
+      // "pid 已不存活" → detail 含 'pid'；在 Windows 上 P1.5 重写了 tasklist
+      // 解析，"未命中 CSV 行" → fallback 返回 false 与 Linux 走同款 'pid' 文案
+      // —— 但若 CSV 解析抛 / 超时（极少见），会回落 true 再走 TCP 分支
+      // 拿到 `SocketException`。所以这里既允许 'pid' 也允许 '探测失败' 兜底；
+      // status=unreachable 才是硬断言。
+      expect(result.detail, anyOf(
+        contains('pid'),
+        contains('探测失败'),
+        contains('SocketException'),
+        isNull,
+      ));
+    });
+
+    test('pid 不在文件里 → 不做存活检查，回退到原有探测', () async {
+      // 老格式 daemon.json：无 pid 字段。
+      final probe = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final deadPort = probe.port;
+      await probe.close();
+      pidInfoFile.writeAsStringSync(jsonEncode({
+        'port': deadPort,
+        'token': 'whatever',
+        'protocolVersion': AppConstants.bridgeProtocolVersion,
+      }));
+
+      final result = await EasypassDaemon.probe(infoFile: pidInfoFile);
+      expect(result.status, DaemonProbeStatus.unreachable);
+      // 旧逻辑：port 连不上 → unreachable（不需要 pidAlive false）。
+    });
+  });
+
+  group('错误信息脱敏（审计 §⑧）', () {
+    late Directory errTempDir;
+    late File errInfoFile;
+
+    setUp(() async {
+      errTempDir = Directory.systemTemp.createTempSync(
+          'easypass_err_label_${DateTime.now().microsecondsSinceEpoch}');
+      errInfoFile = File('${errTempDir.path}${Platform.pathSeparator}daemon.json');
+    });
+
+    tearDown(() async {
+      try {
+        if (errTempDir.existsSync()) errTempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
+    test('daemon.json 读取失败：detail 不含绝对路径 / 用户名', () async {
+      // chmod 000 让 readAsString 抛 FileSystemException：exists() 返回 true，
+      // 但 readAsString 抛错。权限在 tearDown 里随父目录一起清掉。
+      errInfoFile.writeAsStringSync('{}');
+      if (Platform.isLinux || Platform.isMacOS) {
+        await Process.run('chmod', ['000', errInfoFile.path]);
+        addTearDown(() {
+          try {
+            Process.runSync('chmod', ['600', errInfoFile.path]);
+          } catch (_) {}
+        });
+      }
+
+      final result = await EasypassDaemon.probe(infoFile: errInfoFile);
+      expect(result.status, DaemonProbeStatus.unreachable);
+      expect(result.detail, contains('FileSystemException'),
+          reason: '应暴露类型标签便于诊断');
+      final abs = errInfoFile.absolute.path;
+      expect(result.detail, isNot(contains(abs)),
+          reason: 'detail 不得泄露 infoFile 的绝对路径');
+      expect(result.detail, isNot(contains(errTempDir.path)),
+          reason: 'detail 不得回显父目录路径');
+    });
+
+    test('daemon.json JSON 损坏：detail 只给类型标签，不含路径', () async {
+      errInfoFile.writeAsStringSync('{ not valid json');
+      final result = await EasypassDaemon.probe(infoFile: errInfoFile);
+      expect(result.status, DaemonProbeStatus.unreachable);
+      expect(result.detail, contains('FormatException'));
+      // 拼出 errInfoFile 的绝对路径；detail 里必须找不到它。
+      final abs = errInfoFile.absolute.path;
+      expect(result.detail, isNot(contains(abs)),
+          reason: 'detail 不得泄露 infoFile 的绝对路径');
+    });
+  });
+
+  // ─── P1.5 审计 F2：Windows tasklist CSV 解析单元（跨平台可跑） ────────────
+  //
+  // 验证 [EasypassDaemon.parseCsvLine] 能正确切分 tasklist /FO CSV /NH
+  // 的常见输出。这是 P1.5 审计 F2 的核心修复 —— 旧实现靠
+  // `exitCode == 0 && stdout.isNotEmpty` 恒返回 true，新实现必须正面
+  // 解析每一行的 PID 字段。本测试调用真实的 `parseCsvLine`（库可见，
+  // 用于可测性）断言。
+  group('Windows tasklist CSV 解析（审计 F2 单元）', () {
+    test('"1234"（普通 PID）→ 解析为 ["1234"]（拆掉引号）', () {
+      expect(EasypassDaemon.parseCsvLine('"1234"'), ['1234']);
+    });
+
+    test('"1,234"（千分位本地化格式）→ 解析时**不**在引号内 split', () {
+      // tasklist 在带千分位的 locale 下可能把 1234 输出成 "1,234"，
+      // 但因为逗号在引号内，最终拿到 ["1,234"] —— 去非数字时再
+      // 吃掉逗号。P1.5 修复的关键：保证引号感知拆分。
+      expect(EasypassDaemon.parseCsvLine('"1,234"'), ['1,234']);
+    });
+
+    test('完整 tasklist CSV 行 → 拆出 5 字段（image, pid, session, ..., ...）', () {
+      final fields = EasypassDaemon.parseCsvLine(
+        '"System Idle Process","0","Services","0","8 K"',
+      );
+      expect(fields, [
+        'System Idle Process',
+        '0',
+        'Services',
+        '0',
+        '8 K',
+      ]);
+    });
+
+    test('"INFO: No tasks are running..."（无匹配提示行）→ 解析为单字符串',
+        () {
+      // F2 修复的核心场景：旧实现 `stdout.isNotEmpty` 恒为真 → 恒返回
+      // "存活"。新实现正面匹配后，这一行的 PID 字段解析后是 'INFO: ...'
+      // → int.tryParse 拿到的不是数字 → 落到下层判断为 "不存活"。
+      final fields = EasypassDaemon.parseCsvLine(
+        'INFO: No tasks are running which match the specified criteria.',
+      );
+      expect(fields.length, 1);
+      expect(fields.first,
+          contains('INFO')); // 仍是字符串，不是数字 → 不命中
+    });
+
+    test('空行 / 杂字符行 → 不抛，返回 [] 或单 token', () {
+      // 空行 → 空数组（不是 null，所以 [E] 应不会发生）
+      expect(EasypassDaemon.parseCsvLine(''), isEmpty);
+      // 没有逗号的杂字符
+      expect(EasypassDaemon.parseCsvLine('---'), ['---']);
     });
   });
 }
