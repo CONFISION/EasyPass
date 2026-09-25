@@ -9,6 +9,7 @@ import 'core/constants/app_constants.dart';
 import 'core/crypto/crypto_service.dart';
 import 'core/crypto/totp_service.dart';
 import 'data/database/database.dart';
+import 'data/repositories/vault_repository.dart';
 import 'data/services/font_discovery_service.dart';
 import 'features/browser_bridge/browser_session_registry.dart';
 import 'features/browser_bridge/easypass_daemon.dart';
@@ -25,7 +26,8 @@ Future<void> main() async {
   // EASYPASS_NATIVE_HOST environment variable because
   // Platform.executableArguments is not reliably populated on Flutter
   // Windows; keep both checks for safety.
-  final isNativeHost = Platform.environment['EASYPASS_NATIVE_HOST'] == '1' ||
+  final isNativeHost =
+      Platform.environment['EASYPASS_NATIVE_HOST'] == '1' ||
       Platform.executableArguments.contains('--native-host');
   if (isNativeHost) {
     await runNativeHost();
@@ -35,7 +37,8 @@ Future<void> main() async {
   // Background daemon mode (`easypass.exe --service`, launched on demand by
   // the native host bridge). Serves the protocol over TCP localhost so the
   // extension works regardless of browser bitness and without the UI open.
-  final isDaemon = Platform.environment['EASYPASS_SERVICE'] == '1' ||
+  final isDaemon =
+      Platform.environment['EASYPASS_SERVICE'] == '1' ||
       Platform.executableArguments.contains('--service');
   if (isDaemon) {
     await runDaemon();
@@ -51,10 +54,15 @@ Future<void> main() async {
   // 探测：能应答且版本一致才复用；陈旧则尽力结束旧进程 + 清掉 daemon.json，
   // 由本进程接管；残留文件（端口已死）直接清掉。
   final probe = await EasypassDaemon.probe();
+  AppDatabase? uiDatabase;
   if (!probe.isUsable) {
     await EasypassDaemon.retire(probe);
+    // The in-process daemon and the Riverpod UI must share one database
+    // object.  Constructing a second AppDatabase here creates a second drift
+    // executor (and was the source of the "created multiple times" warning).
+    uiDatabase = AppDatabase();
     try {
-      await startInProcessDaemon();
+      await startInProcessDaemon(database: uiDatabase);
     } catch (_) {
       // Daemon failure must never block the UI from starting.
     }
@@ -71,15 +79,18 @@ Future<void> main() async {
   await FontDiscoveryService.loadBundledFonts();
 
   runApp(
-    const ProviderScope(
-      child: EasyPassApp(),
+    ProviderScope(
+      overrides: [
+        if (uiDatabase != null) databaseProvider.overrideWithValue(uiDatabase),
+      ],
+      child: const EasyPassApp(),
     ),
   );
 }
 
 /// Runs the native messaging host loop. Shares the same database file and
-/// secure storage as the UI (same executable directory), so the browser
-/// extension can query credentials while the desktop app is closed.
+/// secure storage as the UI (resolved by the application path helper), so the
+/// browser extension can query credentials while the desktop app is closed.
 Future<void> runNativeHost() async {
   final db = AppDatabase();
   final cryptoService = CryptoService();
@@ -148,8 +159,14 @@ Future<EasypassDaemon> startInProcessDaemon({
   final session = VaultSession(idleTimeout: await _sessionIdleTimeout(crypto));
   BrowserSessionRegistry.register(session);
 
-  final daemon = EasypassDaemon(db, crypto, TotpService(),
-      session: session, exitWhenIdle: exitWhenIdle, onIdleExit: onIdleExit);
+  final daemon = EasypassDaemon(
+    db,
+    crypto,
+    TotpService(),
+    session: session,
+    exitWhenIdle: exitWhenIdle,
+    onIdleExit: onIdleExit,
+  );
   await daemon.start();
   return daemon;
 }
