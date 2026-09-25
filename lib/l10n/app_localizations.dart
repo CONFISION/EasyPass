@@ -1777,6 +1777,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Theme: {value}'**
   String themeApplied(String value);
+
+  /// No description provided for @browserBridgePromptTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable browser integration'**
+  String get browserBridgePromptTitle;
+
+  /// No description provided for @browserBridgePromptBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The browser extension talks to EasyPass through a small host registered on your system. Run this command once (no root needed), then reload the extension:'**
+  String get browserBridgePromptBody;
+
+  /// No description provided for @browserBridgePromptCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy command'**
+  String get browserBridgePromptCopy;
+
+  /// No description provided for @browserBridgePromptCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Command copied'**
+  String get browserBridgePromptCopied;
+
+  /// No description provided for @browserBridgePromptOk.
+  ///
+  /// In en, this message translates to:
+  /// **'Got it'**
+  String get browserBridgePromptOk;
 }
 
 class _AppLocalizationsDelegate

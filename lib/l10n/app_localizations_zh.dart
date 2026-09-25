@@ -897,4 +897,20 @@ class AppLocalizationsZh extends AppLocalizations {
   String themeApplied(String value) {
     return '主题：$value';
   }
+
+  @override
+  String get browserBridgePromptTitle => '启用浏览器集成';
+
+  @override
+  String get browserBridgePromptBody =>
+      '浏览器扩展需要通过系统里登记的一个小程序与 EasyPass 通信。请运行下面这条命令一次（不需要 root），然后在浏览器里重新加载扩展：';
+
+  @override
+  String get browserBridgePromptCopy => '复制命令';
+
+  @override
+  String get browserBridgePromptCopied => '命令已复制';
+
+  @override
+  String get browserBridgePromptOk => '知道了';
 }

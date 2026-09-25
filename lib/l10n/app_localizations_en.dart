@@ -911,4 +911,20 @@ class AppLocalizationsEn extends AppLocalizations {
   String themeApplied(String value) {
     return 'Theme: $value';
   }
+
+  @override
+  String get browserBridgePromptTitle => 'Enable browser integration';
+
+  @override
+  String get browserBridgePromptBody =>
+      'The browser extension talks to EasyPass through a small host registered on your system. Run this command once (no root needed), then reload the extension:';
+
+  @override
+  String get browserBridgePromptCopy => 'Copy command';
+
+  @override
+  String get browserBridgePromptCopied => 'Command copied';
+
+  @override
+  String get browserBridgePromptOk => 'Got it';
 }

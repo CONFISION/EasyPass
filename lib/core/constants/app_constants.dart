@@ -9,6 +9,9 @@ class AppConstants {
   static const String fontFamilyStorageKey = 'easypass_font_family';
   static const String themeModeStorageKey = 'easypass_theme_mode';
 
+  /// 首次启动的"浏览器集成"提示是否已展示过。
+  static const String browserHostPromptKey = 'easypass_browser_host_prompted';
+
   // Font options
   static const String defaultFontFamily = 'Maple Mono NF CN';
   static const String systemFontOption = 'system';

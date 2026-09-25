@@ -2,7 +2,6 @@
   "@@locale": "zh",
   "appTitle": "EasyPass",
   "none": "无",
-
   "masterPasswordLabel": "主密码",
   "masterPasswordHint": "至少 8 个字符",
   "confirmMasterPasswordLabel": "确认主密码",
@@ -12,7 +11,6 @@
   "setPasswordSubtitle": "设置主密码以开始使用。\n此密码将加密您的所有数据。",
   "setMasterPassword": "设置主密码",
   "securityNote": "重要提示：主密码无法找回，请妥善保管！",
-
   "errorPasswordsDoNotMatch": "两次输入的密码不一致",
   "errorPasswordTooShort": "主密码至少需要 8 个字符",
   "errorNoMasterPassword": "未配置主密码",
@@ -25,11 +23,9 @@
   "errorStorageUnavailable": "无法访问安全存储，保险库状态不可用",
   "errorFailedToSaveSettings": "保存设置失败",
   "fontSettingsFailed": "无法加载或保存字体设置",
-
   "storageUnavailableTitle": "安全存储不可用",
   "storageUnavailableBody": "EasyPass 无法访问系统密钥服务（Linux Secret Service / GNOME Keyring / KDE Wallet）。在恢复之前，既无法创建主密码，也无法解锁已存在的保险库。\n\n请确认系统已安装并解锁了一个密钥服务，然后重试。",
   "exit": "退出",
-
   "favoritesTitle": "收藏",
   "folderTitle": "文件夹",
   "searchTooltip": "搜索",
@@ -40,7 +36,9 @@
   "failedToLoadVault": "加载保险库失败：{error}",
   "@failedToLoadVault": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "retry": "重试",
@@ -60,28 +58,35 @@
   "deleteFolderMessage": "删除“{name}”？其中的条目将移至“无文件夹”。此操作无法撤销。",
   "@deleteFolderMessage": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "folderDeleted": "文件夹“{name}”已删除",
   "@folderDeleted": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "folderActions": "文件夹操作",
   "deleteFolderNotEmptyMessage": "删除“{name}”？里面还有 {count} 个条目。**这些条目不会被删除**，它们会被移到“无文件夹”。此操作无法撤销。",
   "@deleteFolderNotEmptyMessage": {
     "placeholders": {
-      "name": {"type": "String"},
-      "count": {"type": "int"}
+      "name": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
     }
   },
   "deleteFolderKeepEntries": "删除文件夹（保留条目）",
   "delete": "删除",
   "searchFailed": "搜索失败",
   "noResultsFound": "未找到结果",
-
   "editEntryTitle": "编辑条目",
   "addEntryTitle": "添加条目",
   "nameLabel": "名称 *",
@@ -107,13 +112,14 @@
   "failedToSaveEntry": "保存失败：{error}",
   "@failedToSaveEntry": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "deleteEntryTitle": "删除条目",
   "deleteEntryMessage": "确定要删除吗？此操作无法撤销。",
   "deleteEntryDetailMessage": "确定要删除此条目吗？此操作无法撤销。",
-
   "entryDetailsTitle": "条目详情",
   "failedToLoadEntry": "加载条目失败",
   "entryNotFound": "未找到条目",
@@ -129,18 +135,21 @@
   "copyFieldTooltip": "复制{label}",
   "@copyFieldTooltip": {
     "placeholders": {
-      "label": {"type": "String"}
+      "label": {
+        "type": "String"
+      }
     }
   },
   "verifyMasterPasswordTitle": "验证主密码",
   "verify": "验证",
   "noMasterPasswordConfigured": "未配置主密码",
-
   "selectOptionsBelow": "请在下方选择选项",
   "charactersCount": "{count} 个字符",
   "@charactersCount": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
   "copy": "复制",
@@ -150,7 +159,9 @@
   "lengthLabel": "长度：{length}",
   "@lengthLabel": {
     "placeholders": {
-      "length": {"type": "int"}
+      "length": {
+        "type": "int"
+      }
     }
   },
   "uppercase": "大写字母（A-Z）",
@@ -161,7 +172,6 @@
   "numbersSubtitle": "包含数字",
   "symbols": "符号（!@#$...）",
   "symbolsSubtitle": "包含特殊字符",
-
   "settingsTitle": "设置",
   "securitySection": "安全",
   "changeMasterPassword": "修改主密码",
@@ -170,7 +180,9 @@
   "autoLockMinutesValue": "{minutes} 分钟",
   "@autoLockMinutesValue": {
     "placeholders": {
-      "minutes": {"type": "int"}
+      "minutes": {
+        "type": "int"
+      }
     }
   },
   "biometricUnlock": "生物识别解锁",
@@ -215,13 +227,17 @@
   "vaultExportedTo": "保险库已导出至 {path}",
   "@vaultExportedTo": {
     "placeholders": {
-      "path": {"type": "String"}
+      "path": {
+        "type": "String"
+      }
     }
   },
   "exportFailed": "导出失败：{error}",
   "@exportFailed": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "importDialogTitle": "导入保险库",
@@ -230,14 +246,20 @@
   "importedCounts": "已导入 {entries} 个条目和 {folders} 个文件夹",
   "@importedCounts": {
     "placeholders": {
-      "entries": {"type": "int"},
-      "folders": {"type": "int"}
+      "entries": {
+        "type": "int"
+      },
+      "folders": {
+        "type": "int"
+      }
     }
   },
   "importFailed": "导入失败：{error}",
   "@importFailed": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "currentMasterPasswordLabel": "当前主密码",
@@ -248,20 +270,23 @@
   "failedWithError": "失败：{error}",
   "@failedWithError": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "autoLockSet": "自动锁定已设为 {value}",
   "@autoLockSet": {
     "placeholders": {
-      "value": {"type": "String"}
+      "value": {
+        "type": "String"
+      }
     }
   },
   "deleteAllDataTitle": "删除所有数据？",
   "deleteAllDataMessage": "这将永久删除所有已保存的密码和数据。此操作无法撤销。",
   "deleteAll": "全部删除",
   "allDataDeleted": "所有数据已删除",
-
   "healthReport": "密码健康报告",
   "healthScore": "健康评分",
   "healthGood": "良好",
@@ -280,7 +305,9 @@
   "healthReusedShared": "被 {count} 个条目共用",
   "@healthReusedShared": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
   "healthNoTotpReason": "未启用两步验证",
@@ -288,10 +315,11 @@
   "healthLoadFailed": "加载健康报告失败：{error}",
   "@healthLoadFailed": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
-
   "entryTypeLabel": "类型",
   "entryTypeLogin": "登录",
   "entryTypeSecureNote": "安全笔记",
@@ -307,17 +335,20 @@
   "entryTypeSwitchMessage": "「{from}」类型的字段会被丢弃，名称、备注与自定义字段会保留。",
   "@entryTypeSwitchMessage": {
     "placeholders": {
-      "from": {"type": "String"}
+      "from": {
+        "type": "String"
+      }
     }
   },
   "entryTypeSwitchConfirm": "切换",
   "entryTypeEmptyForType": "还没有{type}条目",
   "@entryTypeEmptyForType": {
     "placeholders": {
-      "type": {"type": "String"}
+      "type": {
+        "type": "String"
+      }
     }
   },
-
   "customFieldsSection": "自定义字段",
   "customFieldAdd": "添加字段",
   "customFieldLabelHint": "字段名",
@@ -327,10 +358,8 @@
   "customFieldTypeBoolean": "勾选",
   "customFieldRemove": "删除字段",
   "customFieldNoFields": "没有自定义字段",
-
   "secureNoteBodyLabel": "笔记内容",
   "secureNoteBodyHint": "任何需要加密保存的内容",
-
   "identityPersonalSection": "个人信息",
   "identityContactSection": "联系方式",
   "identityDocumentSection": "证件",
@@ -355,7 +384,6 @@
   "identityBirthdayLabel": "生日",
   "identityBirthdayHint": "YYYY-MM-DD",
   "identitySexLabel": "性别",
-
   "sshKeySection": "密钥内容",
   "sshPublicKeyLabel": "公钥",
   "sshPublicKeyHint": "ssh-ed25519 AAAA… 用户@主机",
@@ -369,7 +397,9 @@
   "sshBitsValue": "{bits} 位",
   "@sshBitsValue": {
     "placeholders": {
-      "bits": {"type": "int"}
+      "bits": {
+        "type": "int"
+      }
     }
   },
   "sshCommentLabel": "注释",
@@ -379,38 +409,39 @@
   "sshPrivateKeyFormatValue": "识别到的格式：{format}",
   "@sshPrivateKeyFormatValue": {
     "placeholders": {
-      "format": {"type": "String"}
+      "format": {
+        "type": "String"
+      }
     }
   },
   "sshNoPrivateKey": "未保存私钥",
   "sshRevealPrivateKey": "显示私钥",
-
   "totpCodeLabel": "动态验证码",
   "totpCopyTooltip": "复制验证码",
   "totpRefreshesIn": "{seconds} 秒后刷新",
   "@totpRefreshesIn": {
     "placeholders": {
-      "seconds": {"type": "int"}
+      "seconds": {
+        "type": "int"
+      }
     }
   },
   "totpNotSet": "未配置",
-
   "searchHint": "搜索保险库",
   "searchPrefixesHint": "支持前缀：type: login · folder: 工作 · url: example.com",
-
   "folderIconLabel": "图标",
   "folderEditTitle": "编辑文件夹",
   "folderRenamed": "文件夹已更新",
   "renameFolder": "重命名",
-
   "healthOnlyLogins": "健康分只统计登录条目",
   "healthLoginCount": "已分析 {count} 条登录条目",
   "@healthLoginCount": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
-
   "fieldCopied": "已复制到剪贴板",
   "detailsSection": "详细信息",
   "themeLight": "浅色",
@@ -418,7 +449,14 @@
   "themeApplied": "主题：{value}",
   "@themeApplied": {
     "placeholders": {
-      "value": {"type": "String"}
+      "value": {
+        "type": "String"
+      }
     }
-  }
+  },
+  "browserBridgePromptTitle": "启用浏览器集成",
+  "browserBridgePromptBody": "浏览器扩展需要通过系统里登记的一个小程序与 EasyPass 通信。请运行下面这条命令一次（不需要 root），然后在浏览器里重新加载扩展：",
+  "browserBridgePromptCopy": "复制命令",
+  "browserBridgePromptCopied": "命令已复制",
+  "browserBridgePromptOk": "知道了"
 }

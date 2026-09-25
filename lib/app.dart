@@ -11,6 +11,7 @@ import 'features/health/screens/health_screen.dart';
 import 'features/settings/providers/font_settings_provider.dart';
 import 'features/settings/providers/theme_provider.dart';
 import 'features/settings/screens/settings_screen.dart';
+import 'features/browser_bridge/browser_host_prompt.dart';
 import 'features/vault/screens/add_edit_entry_screen.dart';
 import 'features/vault/screens/entry_detail_screen.dart';
 import 'features/vault/screens/vault_screen.dart';
@@ -124,6 +125,9 @@ class EasyPassApp extends ConsumerWidget {
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       routerConfig: router,
+      // 首次启动的浏览器集成提示（方案 B：不做设置页 UI，只提示一次）。
+      builder: (context, child) =>
+          BrowserHostPromptHost(child: child ?? const SizedBox.shrink()),
     );
   }
 
