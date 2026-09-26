@@ -116,6 +116,87 @@ flutter gen-l10n                                           # 改过 lib/l10n/*.a
 > 代码生成会以 `Missing implementation of visitDotShorthandPropertyAccess` 崩溃且**不产出任何文件**，
 > 这三个依赖要一起升（原因写在 `pubspec.yaml` 的注释里）。
 
+## Linux（桌面端，AppImage）
+
+Linux 桌面构建以**单文件 AppImage**发布（另附解包即用的 `.tar.gz`）。它是
+Windows 功能集的移植版（见下方发布说明）；Windows 安装包与 `windows/` 源码
+未被它改动。
+
+### 三步安装
+
+```bash
+chmod +x EasyPass-2.3.2-linux-x86_64.AppImage    # 1. 加执行位
+./EasyPass-2.3.2-linux-x86_64.AppImage           # 2. 先运行一次（创建保险库）
+./EasyPass-2.3.2-linux-x86_64.AppImage --install # 3. 加入应用菜单
+```
+
+> **Ubuntu / 没有 FUSE 2 时的兜底。** 若 AppImage 因缺 `libfuse2` 起不来：要么
+> 自行安装（`sudo apt install libfuse2` —— EasyPass 自己绝不会 `sudo`、也
+> 不会替你装包），要么用无需 FUSE 的自解包式运行：
+>
+> ```bash
+> ./EasyPass-2.3.2-linux-x86_64.AppImage --appimage-extract-and-run
+> ./EasyPass-2.3.2-linux-x86_64.AppImage --appimage-extract-and-run --install
+> ```
+>
+> `.tar.gz` 就是为同一目的准备的：解包后直接跑
+> `EasyPass-2.3.2-linux-x86_64/AppRun`。
+
+### 数据目录（XDG）
+
+| 内容 | Linux 路径 |
+|---|---|
+| 保险库数据库 | `$XDG_DATA_HOME/easypass/easypass.db`（缺省 `~/.local/share/easypass/easypass.db`） |
+| 守护进程登记文件 | `$XDG_DATA_HOME/easypass/daemon.json` |
+| 浏览器原生宿主 wrapper | `$XDG_DATA_HOME/easypass/easypass-native-host.sh` |
+| 桌面入口（`--install` 写入） | `$XDG_DATA_HOME/applications/easypass.desktop` |
+| 图标（`--install` 写入） | `$XDG_DATA_HOME/icons/hicolor/1024x1024/apps/easypass.png` |
+| 开机自启入口（设置页开关） | `$XDG_CONFIG_HOME/autostart/easypass.desktop`（缺省 `~/.config/autostart/`） |
+
+`$XDG_DATA_HOME` 未设置或为空即 `~/.local/share`（XDG Base Directory 规范）。
+数据目录权限为 `0700`、数据库为 `0600` —— 见发布说明第 3 条声明。
+
+**旧布局迁移（复制不删）。** 早期构建把 `easypass.db` 放在*可执行文件旁边*。
+Linux 首次启动会把它**复制**到 `$XDG_DATA_HOME/easypass/easypass.db`，
+原文件**保留不动**（只复制，绝不移动/删除），随时可以回退到旧构建。
+
+### 桌面集成
+
+```bash
+./EasyPass-2.3.2-linux-x86_64.AppImage --install         # 写入桌面入口 + 图标（幂等）
+./EasyPass-2.3.2-linux-x86_64.AppImage --desktop-status  # 退出码：0 = 已安装 / 1 = 入口指向失效 / 2 = 未安装
+./EasyPass-2.3.2-linux-x86_64.AppImage --uninstall       # 只删自己写的文件，再清空目录
+```
+
+`--install` 会把 AppImage 的真实路径（`$APPIMAGE`）写进 `Exec=`，所以之后
+**移动了 AppImage 需要重新 `--install`**。
+
+### Linux 上的浏览器扩展
+
+1. 先跑一次宿主安装：`./EasyPass-2.3.2-linux-x86_64.AppImage --install-browser-host`
+   （会写 Chrome / Chromium / Brave / Edge 与 Firefox 的 native messaging 
+   manifest；`--browser-host-status` 可逐个查看状态），然后加载扩展。
+2. **Chrome / Chromium / Brave / Edge** —— 打开 `chrome://extensions`（或对应浏览器
+   的扩展页），开启**开发者模式**，选择**加载已解压的扩展程序** → `browser_extension/`。
+3. **Firefox** —— 打开 `about:debugging#/runtime/this-firefox`，**临时载入附加组件…**
+   → `browser_extension/manifest.json`；再到 `about:addons` → EasyPass →
+   **权限**确认已拿到 native messaging 权限。**Firefox 尚未端到端实测** ——
+   见下方已知限制。
+
+### 开机自启
+
+设置页开关**「登录时启动 EasyPass」**是唯一的开关：它写入/删除
+`$XDG_CONFIG_HOME/autostart/easypass.desktop`，不用其它机制。
+
+### Linux 已知差异与限制
+
+- **GNOME 未装 AppIndicator 扩展**时无法承载托盘图标，EasyPass 降级为
+  *关窗即退出应用*，并在设置页给出说明。Ubuntu 默认带该扩展；KDE Plasma 原生支持托盘。
+- **Firefox 侧未端到端实测**：manifest 与原生宿主 wrapper 已就位，但对仍期待
+  MV3 事件页（而非 `background.service_worker`）的 Firefox 版本，可能还需一份
+  变体 manifest。
+- **未代码签名**；AppImage 需要 FUSE 2，除非用 `--appimage-extract-and-run` 或 `.tar.gz`。
+
 ## 浏览器扩展
 
 安装包会自动注册 native host；在浏览器打开 `chrome://extensions`（或 `edge://extensions`），
@@ -163,9 +244,33 @@ node browser_extension/tools/smoke_popup_extra.mjs # 58 项断言：失败路径
 
 **更远（未排期）。** 附件、通行密钥（passkeys）、生物识别解锁、SQLCipher 整库加密、卡片类型、Steam Guard TOTP、泄露检测（需显式开启）、命令行客户端、以 Android 为优先的移动端、macOS / Linux、Firefox 扩展。
 
+## 发布说明 / Release notes
+
+### 2.3.2 —— 新增 Linux 桌面支持
+
+本次分支把桌面端带到 Linux：托盘 / 单实例 / 开机自启对齐、XDG 数据目录、
+Linux 原生消息宿主、AppImage + `.tar.gz` 产物，以及桌面入口 CLI
+（`--install` / `--uninstall` / `--desktop-status`，与 `--install-browser-host`
+同套路）。`pubspec.yaml` 版本**有意保持 2.3.2** —— Windows 版本与本构建共用同一版本号。
+
+随移植一并声明三件事：
+
+1. **跨平台错误文案差异（有意）**。新增 CLI 按运行平台说话：Windows 上打印
+   *“On Windows, use the EasyPass installer (Inno Setup) …”* 并退出 `0`；Linux 上
+   打印真实结果（写入的路径、各浏览器宿主状态）。Linux 专属失败场景（缺 `HOME`、
+   `$XDG_DATA_HOME` 不可写）给出自己的文案，而不是 Windows 注册表错误。**Windows
+   任何代码路径的行为均未改变。**
+2. **数据目录迁移：只复制、不删除**。保险库从*可执行文件同级*迁到
+   `$XDG_DATA_HOME/easypass/`（缺省 `~/.local/share/easypass/`）。首次启动会把同级
+   的 `easypass.db` **复制**到新位置，原文件保留作回退。
+3. **Linux 专属权限**。数据目录 `chmod 0700`、保险库数据库 `0600`、原生宿主
+   wrapper `0700`、浏览器宿主 manifest 文件 `0644`（所在目录 `0700`）。这些 POSIX
+   位只是 Linux 加固；Windows 保持既有 `%LOCALAPPDATA%` ACL 语义，不受本轮影响。
+
 ## 已知限制
 
-- **仅支持 Windows** —— 尚无 macOS、Linux 或移动端客户端。
+- **以 Windows 为主** —— Windows 版本是受支持的发行版；本分支新增了 Linux 桌面
+  构建（AppImage / `.tar.gz`），但 macOS、移动端与上架商店的 Firefox 扩展仍不可用。
 - **没有同步** —— 一个保险库对应一台机器，唯一"迁移"方式是拷贝数据库文件，且必须在 EasyPass 未运行时拷贝。
 - **扩展尚未上架**，必须手动加载已解压的扩展程序。
 - **安装包未签名**，SmartScreen 会提示未知发布者。

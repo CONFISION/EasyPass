@@ -1,5 +1,7 @@
 import 'dart:io';
+import 'dart:math';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 
 /// P1.5 审计 F4：`ProcessException.errorCode` 是非空 int（"无错误码" 也是 0），
@@ -24,9 +26,49 @@ abstract final class AppPaths {
   static Directory get executableDirectory =>
       Directory(p.dirname(Platform.resolvedExecutable));
 
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // P3.5 §6 #1：缓存解析结果。
+  //
+  // 之前 `dataDirectory` / `configDirectory` / `autostartDirectory` 每次
+  // 调用都会重读 `Platform.environment['XDG_DATA_HOME' | 'XDG_CONFIG_HOME' |
+  // 'HOME']` 并 `p.join` 一次。`EasypassDaemon.probe` 在每条 idle 检查期间
+  // 会经过 `daemonInfoFile` 多次取这条路径（AUDIT-P1 #10）—— 既多 syscall，
+  // 又把"env 是否被改"这条隐性假设漏在每次调用上。
+  //
+  // 解析结果对单次进程是稳定的：env 不会变、`resolvedExecutable` 不会变、
+  // 分支不会变（`Platform.isLinux` 在 dart:io 是常量）。`null` = 还没解析。
+  //
+  // 三条语义不变：
+  //   - **fail-loud 仍立即抛**（首次失败原样上抛，不兜底）。
+  //   - 同进程拿到同一个 `Directory` 实例（`identical(...)` 为 true）。
+  //   - 测试可显式 `debugResetAppPathsCacheForTesting()` 重置，绝不连
+  //     累两次。
+  //
+  // 测试钩子参考 `desktop_tray` / `font_discovery_service` 既有的
+  // `debugSet…ForTesting` / `debugReset…ForTesting` 风格 —— 见
+  // `test/app_paths_cache_test.dart`。
+  static Directory? _cachedDataDirectory;
+  static Directory? _cachedConfigDirectory;
+  static Directory? _cachedAutostartDirectory;
+
   /// User-writable application data directory.
+  ///
+  /// Memoized for the lifetime of the process (P3.5 §6 #1). Tests may reset
+  /// via [debugResetAppPathsCacheForTesting]; production callers do not need
+  /// to release anything — a single `Directory` instance is reused.
   static Directory get dataDirectory {
-    // Keep the Windows (and other non-Linux desktop) behavior unchanged.
+    final cached = _cachedDataDirectory;
+    if (cached != null) return cached;
+
+    // Keep the Windows (and other non-Linux desktop) behavior unchanged:
+    // Platform.isLinux is a constant in dart:io for the lifetime of the
+    // process, so resolving once is enough.
+    final resolved = _resolveDataDirectory();
+    _cachedDataDirectory = resolved;
+    return resolved;
+  }
+
+  static Directory _resolveDataDirectory() {
     if (!Platform.isLinux) return executableDirectory;
 
     final configuredDataHome = Platform.environment['XDG_DATA_HOME'];
@@ -35,6 +77,14 @@ abstract final class AppPaths {
         ? configuredDataHome
         : _defaultLinuxDataHome();
     return Directory(p.join(dataHome, _linuxDataDirectoryName));
+  }
+
+  /// P3.5 §6 #1：测试钩子。生产代码**绝不**调用。
+  @visibleForTesting
+  static void debugResetAppPathsCacheForTesting() {
+    _cachedDataDirectory = null;
+    _cachedConfigDirectory = null;
+    _cachedAutostartDirectory = null;
   }
 
   static String _defaultLinuxDataHome() {
@@ -46,6 +96,162 @@ abstract final class AppPaths {
     // Do not silently put a vault in a shared temporary directory when a
     // desktop session has no resolvable home directory.
     throw StateError('HOME is not set; cannot resolve the XDG data directory');
+  }
+
+  /// User-writable configuration directory.
+  ///
+  /// Linux only — Windows keeps the historical layout (data lives beside the
+  /// executable and `%LOCALAPPDATA%` is the equivalent of `XDG_CONFIG_HOME`).
+  /// This is the XDG-resolved equivalent of `BrowserHostInstaller`'s
+  /// `xdgConfigHome` lookup: `$XDG_CONFIG_HOME` first, falling back to
+  /// `~/.config` (matching the freedesktop.org Base Directory Specification).
+  ///
+  /// P3.2 introduces this for the Linux autostart path; it deliberately lives
+  /// here (next to [dataDirectory]) so the XDG lookup rules stay in one place
+  /// rather than spreading across feature folders.
+  ///
+  /// Memoized for the lifetime of the process (P3.5 §6 #1) — see the same
+  /// note on [dataDirectory]. Same `debugResetAppPathsCacheForTesting` reset.
+  static Directory get configDirectory {
+    final cached = _cachedConfigDirectory;
+    if (cached != null) return cached;
+    final resolved = _resolveConfigDirectory();
+    _cachedConfigDirectory = resolved;
+    return resolved;
+  }
+
+  static Directory _resolveConfigDirectory() {
+    // Windows keeps the historical layout — autostart lives in the registry,
+    // not in a directory we resolve here.
+    if (!Platform.isLinux) return executableDirectory;
+    final configuredConfigHome = Platform.environment['XDG_CONFIG_HOME'];
+    final configHome =
+        (configuredConfigHome != null && configuredConfigHome.isNotEmpty)
+        ? configuredConfigHome
+        : _defaultLinuxConfigHome();
+    return Directory(p.join(configHome, _linuxDataDirectoryName));
+  }
+
+  static String _defaultLinuxConfigHome() {
+    final home = Platform.environment['HOME'];
+    if (home != null && home.isNotEmpty) {
+      return p.join(home, '.config');
+    }
+    // Mirror `dataDirectory`'s "fail loud" semantics — silently substituting
+    // /tmp would put user-controlled state in a shared, world-readable place.
+    throw StateError('HOME is not set; cannot resolve the XDG config directory');
+  }
+
+  /// Directory into which per-user autostart `.desktop` files are written.
+  ///
+  /// Linux only — Windows autostart lives in the registry and is managed by
+  /// the installer. Per the Desktop Entry Specification's autostart spec, the
+  /// directory is `$XDG_CONFIG_HOME/autostart/` (default `~/.config/autostart`).
+  /// The directory is created on demand by the autostart installer.
+  ///
+  /// Memoized for the lifetime of the process (P3.5 §6 #1) — see the same
+  /// note on [dataDirectory]. Same `debugResetAppPathsCacheForTesting` reset.
+  static Directory get autostartDirectory {
+    final cached = _cachedAutostartDirectory;
+    if (cached != null) return cached;
+    final resolved = _resolveAutostartDirectory();
+    _cachedAutostartDirectory = resolved;
+    return resolved;
+  }
+
+  static Directory _resolveAutostartDirectory() {
+    if (!Platform.isLinux) return executableDirectory;
+    final configuredConfigHome = Platform.environment['XDG_CONFIG_HOME'];
+    final configHome =
+        (configuredConfigHome != null && configuredConfigHome.isNotEmpty)
+        ? configuredConfigHome
+        : _defaultLinuxConfigHome();
+    return Directory(p.join(configHome, 'autostart'));
+  }
+
+  /// Resolve the absolute path of the EasyPass desktop entry that this app
+  /// would write into [autostartDirectory]. Returns `null` on non-Linux
+  /// platforms (the Windows installer owns autostart).
+  static String? resolveLinuxAutostartDesktopEntryPath() {
+    if (!Platform.isLinux) return null;
+    return p.join(autostartDirectory.path, 'easypass.desktop');
+  }
+
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // P3.5 §6 #6 — 迁移 tmp 路径生成（AUDIT-P1 §2.1 1st item）。
+  //
+  // 历史：固定名 `${file.path}.tmp` 在两个进程同时首次启动的窄窗口里会
+  // 互相覆盖 —— 先到者 `copy + rename`，后到者 `copy` 期间**前者的 tmp**已
+  // 被覆写，后到者的 `rename` 把覆写后的残片搬到 canonical。这是审计
+  // §2.1 1st item 指出的并发首启窄窗口。
+  //
+  // 现状：
+  //   - **唯一性** = `<pid>-<random8>`（2^32 空间，4B 之内足够无冲突）。
+  //     pid 在同一台机器同一瞬时唯一，random 兜住"pid 复用 + 时间接近"
+  //     的边界场景。
+  //   - **可识别**：`_enforceLinuxPrivacy` 扫 glob
+  //     `*.tmp-<pid>-<rand>.tmp`、`*.tmp-<pid>-<rand>` 都能 catch 所有
+  //     历史残留。删除自己产的那个时按精确文件名，不影响别进程的 tmp。
+  //   - **可测试**：`migrationTmpSuffixForTesting` 注入随机源，避免
+  //     `Random.secure()` 不可重放。
+  //
+  // 安全语义保持：
+  //   - 任何 `try/catch` 永远只动**自己创建的**tmp（精确路径）——
+  //     不调 glob 删除。
+  //   - 旧的 `_tightenLegacyDatabasePermissions` 等无影响（只动 legacy 路径）。
+  //   - `_enforceLinuxPrivacy` 改扫 `.<basename>.tmp-*`（一个简单的
+  //     POSIX `*` 通配符在 `dir.list()` 里实现为 `glob`）。
+  //
+  // 跨进程边界（"反向同步"）：
+  //   - `dir.list()` 在 dart:io 上是 snapshot；我们枚举到的 tmp 都是
+  //     当前目录下、由其他进程**之前**留下、还没来得及清理的；不会扫到
+  //     同时进行中的另一进程的 tmp（双方时间差让 stat 漏不到）。
+  //   - 跨文件系统 `rename`：POSIX 的 `rename(2)` 在跨 fs 上 atomicity
+  //     不保证；`File.rename` 在 dart:io 走 c++ `rename(2)`，失败会被 catch
+  //     捕获走"自身 tmp 删除"分支（见上文）。这是既有语义，不变。
+  static const int _migrationSuffixRandomHexChars = 8;
+
+  @visibleForTesting
+  static Random? migrationRandomOverride;
+
+  /// 给一个 canonical 路径算出「我这一进程」的迁移 tmp 绝对路径。
+  ///
+  /// 设计点：
+  ///   - 返回的不是 `File`，仅字符串 —— 这样调用方在 `copy` 失败时仍能
+  ///     基于字符串去 `chmod` / `delete`，不会被 `File` 已 deleted 的状
+  ///     态机误导。
+  ///   - `<pid>-<8 hex>` 让同一台机器上 pid 不同时也不撞名（即便
+  ///     pid 复用 — pid 在 Linux 上不重用，但 macOS / 其他 dart:io 平
+  ///     台上有重用，random 兜底）。
+  @visibleForTesting
+  static String migrationTmpPathForTesting(String canonicalPath) =>
+      _migrationTmpPath(canonicalPath);
+
+  static String _migrationTmpPath(String canonicalPath) {
+    final rng = migrationRandomOverride ?? Random.secure();
+    final suffix = rng.nextInt(1 << (_migrationSuffixRandomHexChars * 4));
+    final hex = suffix.toRadixString(16).padLeft(
+          _migrationSuffixRandomHexChars,
+          '0',
+        );
+    return '$canonicalPath.tmp-$migrationPidForTesting-$hex';
+  }
+
+  @visibleForTesting
+  static int migrationPidForTesting = _readCurrentPid();
+
+  static int _readCurrentPid() {
+    // dart:io top-level `pid` getter 在 Linux / Windows / macOS 上都有；
+    // 这里取一次作为静态值，让测试可以注入固定值。
+    // （dart:io 的 `pid` 是一次 syscall；缓存不丢语义。）
+    return _currentProcessPid();
+  }
+
+  static int _currentProcessPid() {
+    // 隔离函数：避免与上方 `migrationPidForTesting` 重名遮蔽 dart:io 的
+    // `pid` top-level getter（编译器解析 `_currentProcessPid` 内的 `pid`
+    // 走 dart:io，能确定指向）。
+    return pid;
   }
 
   /// Main vault database path.
@@ -106,11 +312,27 @@ abstract final class AppPaths {
 
     final legacyFile = legacyDatabaseFile;
     if (await legacyFile.exists()) {
-      // Copy through a sibling `.tmp` file so an interrupted copy never leaves
-      // a half-written database at the canonical path.  The POSIX rename is
-      // atomic on the same filesystem; the old file stays put in case the new
-      // install ever wants to fall back.
-      final tmpFile = File('${file.path}.tmp');
+      // Copy through a per-process sibling so an interrupted copy never
+      // leaves a half-written database at the canonical path. The POSIX
+      // rename is atomic on the same filesystem; the old file stays put
+      // in case the new install ever wants to fall back.
+      //
+      // P3.5 §6 #6 (AUDIT-P1 §2.1 1st item): the previous fixed
+      // `${file.path}.tmp` collided if two processes started in the same
+      // second (race window: `if (await file.exists()) return file;` is
+      // not atomic across fork / concurrent first-launch) — copy #1 into
+      // shared `.tmp`, copy #2 overwrites it, copy #1 renames to canonical
+      // = a half-written/empty db at canonical. Suffix with pid + random
+      // integer (8 hex chars is 2^32 ≈ 4B possibilities, plenty) so two
+      // processes don't even share a tmp name. Cleanup logic below deletes
+      // only the file we created, not a glob.
+      //
+      // 安全语义不变：
+      //  - `copy` + `rename` 还在用，tmp 文件临终方式不变（不丢不漏）。
+      //  - `tmp` 失败仍走 best-effort 收尾，权限守住 0600。
+      //  - 失败路径仍抛 `FileSystemException`（注释明确"绝不抛未捕获"，
+      //    这里由 `try/catch` 显式抛，等价处理）。
+      final tmpFile = File(_migrationTmpPath(file.path));
       try {
         await legacyFile.copy(tmpFile.path);
         await tmpFile.rename(file.path);
@@ -131,7 +353,7 @@ abstract final class AppPaths {
               if (tmpChmod.exitCode != 0) {
                 // ignore: avoid_print
                 print(
-                  'AppPaths: chmod 600 on migration .tmp '
+                  'AppPaths: chmod 600 on migration tmp '
                   '${tmpFile.path} failed '
                   '(exit ${tmpChmod.exitCode}); continuing',
                 );
@@ -139,7 +361,7 @@ abstract final class AppPaths {
             } on ProcessException catch (e) {
               // ignore: avoid_print
               print(
-                'AppPaths: chmod 600 spawn failed on migration .tmp '
+                'AppPaths: chmod 600 spawn failed on migration tmp '
                 '(${_chmodSpawnDetail(e)}); continuing',
               );
             }
@@ -147,8 +369,9 @@ abstract final class AppPaths {
           try {
             await tmpFile.delete();
           } catch (_) {
-            // Best effort: a stray `.tmp` 现在至少是 0600，下一次启动
-            // 的 _enforceLinuxPrivacy 会再 chmod 一次。
+            // Best effort: a stray migration `tmp` is now at least 0600;
+            // the next start of `_enforceLinuxPrivacy` sweeps any leftover
+            // `*.tmp-<pid>-<rand>` siblings to 0600 too.
           }
         }
         throw FileSystemException(
@@ -158,7 +381,7 @@ abstract final class AppPaths {
         );
       }
       // After a successful migration, the freshly placed `easypass.db` and
-      // any leftover `*.tmp` need the same 0600 treatment. Re-running the
+      // any leftover `*.tmp-*` need the same 0600 treatment. Re-running the
       // helper is cheap (chmod is idempotent) and keeps the contract in one
       // place. 源库权限已在前面的 _tightenLegacyDatabasePermissions 里收紧。
       await _enforceLinuxPrivacy(file);
@@ -197,6 +420,14 @@ abstract final class AppPaths {
       );
     }
   }
+
+  /// P1.4 审计 §⑥：fresh-install 路径上 `prepareDatabaseFile` 返回时 db
+  /// 还没被 drift 创建，所以即便它 chmod 了也拿不到正确的实体文件。
+  /// drift `setup` 回调在打开 SQLite 文件（**包括 onCreate 首次创建**）之后
+  /// 运行，调用本入口把"drift 用 umask 默认 0644 创建的空 db"也收紧到 0600。
+  /// 仅 Linux 公开入口；Windows 仍是 no-op（ACL 由系统保证）。
+  static Future<void> enforceLinuxPrivacyFor(File database) =>
+      _enforceLinuxPrivacy(database);
 
   /// Tighten the Linux data directory to `0700` and the database file (or
   /// any sibling `.tmp` migration intermediate) to `0600`. **Linux only** —

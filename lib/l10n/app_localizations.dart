@@ -1807,6 +1807,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Got it'**
   String get browserBridgePromptOk;
+
+  /// Shown on the Settings/About screen when the Linux tray could not be created (e.g. GNOME without an AppIndicator extension). The fallback is "close exits the app" instead of "close hides to tray".
+  ///
+  /// In en, this message translates to:
+  /// **'System tray unavailable — closing the window will quit the app. (GNOME usually needs the \"AppIndicator and KStatusNotifierItem Support\" extension; KDE Plasma supports trays out of the box.)'**
+  String get trayUnavailableNotice;
+
+  /// No description provided for @systemSection.
+  ///
+  /// In en, this message translates to:
+  /// **'System'**
+  String get systemSection;
+
+  /// No description provided for @autostartTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Start EasyPass when you log in'**
+  String get autostartTitle;
+
+  /// No description provided for @autostartSubtitleEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'EasyPass starts automatically when you log in.'**
+  String get autostartSubtitleEnabled;
+
+  /// No description provided for @autostartSubtitleDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'EasyPass does not start automatically. Toggle to launch it at login.'**
+  String get autostartSubtitleDisabled;
+
+  /// No description provided for @autostartUnsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'Managed by the OS installer on this platform.'**
+  String get autostartUnsupported;
+
+  /// No description provided for @autostartEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'EasyPass will start automatically at login.'**
+  String get autostartEnabled;
+
+  /// No description provided for @autostartDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'EasyPass will no longer start automatically at login.'**
+  String get autostartDisabled;
+
+  /// Shown when the user toggled the autostart switch and the write/delete of ~/.config/autostart/easypass.desktop failed (perm denied, disk full, etc.). {detail} is the diagnostic message.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not change autostart: {detail}'**
+  String autostartFailed(String detail);
 }
 
 class _AppLocalizationsDelegate

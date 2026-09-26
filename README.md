@@ -179,6 +179,94 @@ flutter gen-l10n                                           # after editing lib/l
 > with `Missing implementation of visitDotShorthandPropertyAccess` and writes
 > nothing — bump all three together (see the comments in `pubspec.yaml`).
 
+## Linux (desktop, AppImage)
+
+A Linux desktop build ships as a **single-file AppImage** (plus an unpack-and-run
+`.tar.gz`). It is a port of the Windows feature set — see the release notes below;
+the Windows installer and the `windows/` sources are untouched by it.
+
+### Install in three steps
+
+```bash
+chmod +x EasyPass-2.3.2-linux-x86_64.AppImage    # 1. make it executable
+./EasyPass-2.3.2-linux-x86_64.AppImage           # 2. run it once (creates the vault)
+./EasyPass-2.3.2-linux-x86_64.AppImage --install # 3. add it to the application menu
+```
+
+> **Ubuntu / AppImage without FUSE 2.** If the AppImage refuses to start because
+> `libfuse2` is missing, either install it yourself (`sudo apt install libfuse2` —
+> EasyPass never runs `sudo` or installs packages for you), or use the
+> self-extracting fallback, which needs no FUSE at all:
+>
+> ```bash
+> ./EasyPass-2.3.2-linux-x86_64.AppImage --appimage-extract-and-run
+> ./EasyPass-2.3.2-linux-x86_64.AppImage --appimage-extract-and-run --install
+> ```
+>
+> The `.tar.gz` exists for the same reason: unpack it and run
+> `EasyPass-2.3.2-linux-x86_64/AppRun`.
+
+### Where your data lives (XDG)
+
+| What | Path on Linux |
+|---|---|
+| Vault database | `$XDG_DATA_HOME/easypass/easypass.db` (default `~/.local/share/easypass/easypass.db`) |
+| Daemon registration | `$XDG_DATA_HOME/easypass/daemon.json` |
+| Native-host wrapper | `$XDG_DATA_HOME/easypass/easypass-native-host.sh` |
+| Desktop entry (written by `--install`) | `$XDG_DATA_HOME/applications/easypass.desktop` |
+| Icon (written by `--install`) | `$XDG_DATA_HOME/icons/hicolor/1024x1024/apps/easypass.png` |
+| Autostart entry (Settings toggle) | `$XDG_CONFIG_HOME/autostart/easypass.desktop` (default `~/.config/autostart/`) |
+
+`$XDG_DATA_HOME` unset or empty means `~/.local/share` (XDG Base Directory
+Specification). The data directory is `0700` and the database `0600` — see
+declaration 3 in the release notes.
+
+**Migrating an old layout.** Older builds kept `easypass.db` *next to the
+executable*. On the first Linux start that file is **copied** to
+`$XDG_DATA_HOME/easypass/easypass.db`; the original is **left in place** (copy,
+never move or delete), so nothing is lost if you go back to the old build.
+
+### Desktop integration
+
+```bash
+./EasyPass-2.3.2-linux-x86_64.AppImage --install         # desktop entry + icon (idempotent)
+./EasyPass-2.3.2-linux-x86_64.AppImage --desktop-status  # exit 0 = installed, 1 = points at a dead target, 2 = not installed
+./EasyPass-2.3.2-linux-x86_64.AppImage --uninstall       # removes only what it wrote, then empty directories
+```
+
+`--install` bakes the AppImage's real path (`$APPIMAGE`) into `Exec=`, so moving
+the AppImage afterwards means re-running `--install`.
+
+### Browser extension on Linux
+
+1. Run the host installer once:
+   `./EasyPass-2.3.2-linux-x86_64.AppImage --install-browser-host` (writes the
+   Chrome/Chromium/Brave/Edge and Firefox native-messaging manifests;
+   `--browser-host-status` reports each browser). Then load the unpacked extension.
+2. **Chrome / Chromium / Brave / Edge** — open `chrome://extensions` (or the
+   browser's equivalent), enable **Developer mode**, then **Load unpacked** →
+   `browser_extension/`.
+3. **Firefox** — open `about:debugging#/runtime/this-firefox`, **Load Temporary
+   Add-on…** → `browser_extension/manifest.json`; then check `about:addons` →
+   EasyPass → **Permissions** for native-messaging access. Firefox is **not
+   verified end-to-end yet** — see the limitations below.
+
+### Autostart
+
+The Settings toggle **“Start EasyPass when you log in”** is the only switch: it
+writes/removes `$XDG_CONFIG_HOME/autostart/easypass.desktop`.
+
+### Linux limitations
+
+- **GNOME without an AppIndicator extension** cannot host the tray icon, so
+  EasyPass degrades to *closing the window quits the app* and says so in Settings.
+  Ubuntu ships the extension enabled; KDE Plasma supports trays natively.
+- **Firefox support is untested end-to-end**: the manifests and the native-host
+  wrapper are in place, but Firefox versions that still expect an MV3 event page
+  instead of `background.service_worker` may need a follow-up manifest variant.
+- **Not code-signed**, and the AppImage needs FUSE 2 unless you use
+  `--appimage-extract-and-run` or the `.tar.gz`.
+
 ## Browser extension
 
 The installer registers the native host automatically; in the browser open
@@ -247,9 +335,39 @@ Bitwarden alternative you host yourself.
 payment cards, Steam Guard TOTP, breach checks (opt-in), a CLI, Android-first mobile
 app, macOS/Linux, Firefox extension.
 
+## Release notes
+
+### 2.3.2 — new: Linux desktop support
+
+This branch brings the desktop app to Linux: tray / single-instance / autostart
+parity, XDG data locations, a Linux native-messaging host, AppImage + `.tar.gz`
+artifacts, and the desktop-entry CLI (`--install` / `--uninstall` /
+`--desktop-status`, with the matching `--install-browser-host` family).
+`pubspec.yaml` stays at **2.3.2** on purpose — the Windows release and this build
+share one version string.
+
+Three declarations come with the port:
+
+1. **Cross-platform error wording differs, on purpose.** The new CLIs speak the
+   platform they run on: on Windows they print *“On Windows, use the EasyPass
+   installer (Inno Setup) …”* and exit `0`, while on Linux they print the real
+   result (paths written, per-browser host state). Linux-only failure modes
+   (missing `HOME`, unwritable `$XDG_DATA_HOME`) report their own message instead of
+   a Windows registry error. **No Windows code path changed behaviour.**
+2. **Data directory migration: copy, never delete.** The vault moved from *next to
+   the executable* to `$XDG_DATA_HOME/easypass/` (default `~/.local/share/easypass/`).
+   An exe-adjacent `easypass.db` is **copied** to the new location on first start and
+   the original is kept as a fallback.
+3. **Linux-only permissions.** The data directory is `chmod 0700`, the vault
+   database `0600`, the native-host wrapper `0700`, and the browser-host manifest
+   files `0644` in `0700` directories. These POSIX bits are Linux hardening only;
+   Windows keeps its `%LOCALAPPDATA%` ACL behaviour untouched.
+
 ## Known limitations
 
-- **Windows only** — no macOS, Linux or mobile client yet.
+- **Windows-focused** — the Windows build is the supported release; this branch
+  adds a Linux desktop build (AppImage / `.tar.gz`), and macOS, mobile and a
+  Firefox-store extension are still not available.
 - **No sync** — one machine per vault; copying the database file is the only way to
   move it, and it must not be copied while EasyPass is running.
 - **The extension is not published**, so it must be loaded unpacked.

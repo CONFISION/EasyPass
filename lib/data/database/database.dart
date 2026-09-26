@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 
@@ -210,6 +212,17 @@ LazyDatabase _openConnection() {
     // Windows keeps the database beside the executable. Linux uses the
     // writable XDG data directory and migrates a legacy adjacent file.
     final file = await AppPaths.prepareDatabaseFile();
+    if (Platform.isLinux) {
+      // P1.4 审计 §⑥：fresh-install 路径上 `prepareDatabaseFile` 返回时 db
+      // 还没被 drift 创建，所以即便它 chmod 了也拿不到正确的实体文件。
+      // `setup` 回调在 drift 真正打开这个 SQLite 文件（**包括 onCreate
+      // 的首次创建**）之后运行一次；在这里 chmod 一下，就能把"drift 用
+      // umask 默认 0644 创建的空 db"这一路径也收紧到 0600。
+      // 后续每次 lazy resolve 都会跑 setup，但 chmod 自身幂等。
+      return NativeDatabase.createInBackground(file, setup: (raw) async {
+        await AppPaths.enforceLinuxPrivacyFor(file);
+      });
+    }
     return NativeDatabase.createInBackground(file);
   });
 }

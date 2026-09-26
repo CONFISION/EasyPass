@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../../core/constants/app_constants.dart';
 import '../../core/crypto/crypto_service.dart';
 import '../../core/crypto/totp_service.dart';
@@ -383,23 +385,80 @@ class EasypassDaemon {
     return terminated;
   }
 
+  /// SIGTERM 等待超时。依据：比 [probe] 的 1200ms 长（避免比探测还慢），
+  /// 又要给目标进程退出留余量；`2s = probe timeout × 1.7` 是任务书 §1.1
+  /// 指定的默认值。SIGKILL 兜底只用 1s（不可捕获的强制终止不需要缓冲期）。
+  static const Duration _sigtermWaitTimeout = Duration(seconds: 2);
+  static const Duration _sigkillWaitTimeout = Duration(seconds: 1);
+
+  /// 可注入的进程操作替身（kill / sleep）。默认 = 直接调 [Process.run] /
+  /// `Future.delayed`；测试在 `test/easypass_daemon_terminate_test.dart`
+  /// 里注入假实现覆盖，**不**真杀任何进程。
+  ///
+  /// 用 `@visibleForTesting` 暴露的 [debugSetTerminateIfOursRunner] 钩子
+  /// 在测试间切换，**不**改签名。
+  static TerminateIfOursRunner _terminateRunner =
+      const DefaultTerminateIfOursRunner();
+
+  @visibleForTesting
+  static void debugSetTerminateIfOursRunner(TerminateIfOursRunner runner) {
+    _terminateRunner = runner;
+  }
+
+  /// P3.3 测试钩子：直接调 [_terminateIfOurs]（不走 `retire()` 的 stale 门
+  /// 守卫）。生产代码请用 [retire]。命名沿用 [debugSetTerminateIfOursRunner]
+  /// 风格 —— 测试可见、生产不碰。
+  ///
+  /// 之所以需要这一个：测试要验证"kill -0 失败 → 保守保留"、"自身 pid → 拒
+  /// 绝"等纯函数性行为，绕开 `retire()` 整套 probe + fakeServer 编排。
+  @visibleForTesting
+  static Future<bool> debugTerminateIfOursForTesting(int target) =>
+      _terminateIfOurs(target);
+
+  /// 把抛出的异常归一到一类**不携带路径**的标签。
+  ///
+  /// P1.4 审计 §⑧：`OSError` / `FileSystemException` 的 `toString()` 会把
+  /// `path = '/home/<user>/.local/share/easypass/...'` 拼进去；`runtimeType`
+  /// 本身只有类名，但保险起见白名单化（`FileSystemException`、`OSError`、
+  /// `FormatException`、`SocketException`），其它一律记 `other`。
+  /// **绝不**写入绝对路径或 e.toString()。
+  static String _safeErrorLabel(Object error) {
+    if (error is FormatException) return 'FormatException';
+    if (error is SocketException) return 'SocketException';
+    if (error is FileSystemException) return 'FileSystemException';
+    if (error is OSError) return 'OSError';
+    return 'other';
+  }
+
   /// 只在能确认目标进程确实是本产品（`easypass.exe`）时才结束它。
   ///
   /// 为什么这么谨慎：旧版 `daemon.json` 没有 pid；即使有，pid 也可能被系统
-  /// 复用给别的进程。Windows 上用 tasklist 核对映像名，任何一步失败都静默
+  /// 复用给别的进程。Windows 上用 tasklist 核对映像名；任何一步失败都静默
   /// 返回 false（宁可让用户手动退出旧版，也不能杀错进程）。
   ///
   /// 注意：旧 daemon 可能就住在旧版 UI 进程里（UI 模式和 daemon 同进程），
   /// 所以这里结束的可能是"还开着的旧版 EasyPass"。这是刻意的：只有旧进程
   /// 退出，新构建才能接管那个端口。
   ///
-  /// **Linux 暂不自愈**：P1.4 审计 §⑦。当前没有 `easypass` 进程名核对机制
-  /// （Linux 上没有 `tasklist`，用 `ps` 还要解析命令行），且 PID 在 fork 模型
-  /// 引入后可能不再唯一，所以本轮**不改** kill 行为；陈旧守护进程由
-  /// [probe] 在端口不可达时按 unreachable 清理 `daemon.json`。
+  /// Linux 实现（P3.3）：
+  /// 1. `kill -0 <pid>` 校验存在（[Process.killPid] 是真发信号，必须绕开）
+  /// 2. `kill -TERM` 发出终止信号
+  /// 3. 最多等 [_sigtermWaitTimeout]（2s）让进程体面退出
+  /// 4. 二次 `kill -0` 校验；如果还活着，发 SIGKILL 兜底（最多再等 1s）
+  /// 5. 任何异常 / spawn 失败 → 保守保留（return false），由 `retire()`
+  ///    后续的 `clearStaleInfo` 兜底清 `daemon.json`
+  ///
+  /// **绝不**抛未捕获异常、**绝不**杀自己（pid 守卫在 `retire()` 与本函数
+  /// 双重防护）。
   static Future<bool> _terminateIfOurs(int target) async {
-    if (!Platform.isWindows) return false;
     if (target == pid) return false; // 绝不杀自己
+    if (Platform.isWindows) {
+      return _terminateIfOursWindows(target);
+    }
+    return _terminateIfOursLinux(target);
+  }
+
+  static Future<bool> _terminateIfOursWindows(int target) async {
     try {
       final result = await Process.run(
         'tasklist',
@@ -415,19 +474,32 @@ class EasypassDaemon {
     }
   }
 
-  /// 把抛出的异常归一到一类**不携带路径**的标签。
-  ///
-  /// P1.4 审计 §⑧：`OSError` / `FileSystemException` 的 `toString()` 会把
-  /// `path = '/home/<user>/.local/share/easypass/...'` 拼进去；`runtimeType`
-  /// 本身只有类名，但保险起见白名单化（`FileSystemException`、`OSError`、
-  /// `FormatException`、`SocketException`），其它一律记 `other`。
-  /// **绝不**写入绝对路径或 e.toString()。
-  static String _safeErrorLabel(Object error) {
-    if (error is FormatException) return 'FormatException';
-    if (error is SocketException) return 'SocketException';
-    if (error is FileSystemException) return 'FileSystemException';
-    if (error is OSError) return 'OSError';
-    return 'other';
+  static Future<bool> _terminateIfOursLinux(int target) async {
+    final runner = _terminateRunner;
+    // 1. kill -0 校验存在。不在 PATH / spawn 失败 / 权限拒绝 → 保守保留。
+    if (!await runner.pidAlive(target)) return false;
+
+    // 2. SIGTERM —— 让进程有机会跑 cleanup（关 socket、写 daemon.json 等）
+    final sigtermSent = await runner.sendSignal(target, ProcessSignal.sigterm);
+    if (!sigtermSent) {
+      // spawn 失败 / EPERM —— 同款保守保留
+      return false;
+    }
+
+    // 3. 等 2s 让目标进程体面退出。超时强制往下走（不等就死循环了）
+    await runner.wait(_sigtermWaitTimeout);
+
+    // 4. 二次确认
+    if (!await runner.pidAlive(target)) return true;
+
+    // 5. SIGKILL 兜底（不可捕获，不可阻挡）。再给 1s 等 pid 消失。
+    final sigkillSent = await runner.sendSignal(target, ProcessSignal.sigkill);
+    if (!sigkillSent) return false;
+    await runner.wait(_sigkillWaitTimeout);
+
+    // 最终态：进程要么已经消失（成功），要么还在（失败）。
+    // 返回值仅供日志；调用方依赖 retire() 的 clearStaleInfo 兜底。
+    return !(await runner.pidAlive(target));
   }
 
   /// 探测 [target] 是否对应一个当前存在的进程（**不发信号**）。
@@ -707,4 +779,76 @@ class EasypassDaemon {
   File _defaultInfoFile() {
     return _defaultInfoFileStatic();
   }
+}
+
+/// P3.3：Linux 自愈路径可注入的进程操作抽象。
+///
+/// 把 `kill -0` 校验、发信号、等延迟这几件事做成可替身，测试就能在不真
+/// 杀任何进程的前提下验证整条 `_terminateIfOursLinux` 路径。**所有方法
+/// 都不可抛** —— 失败一律返回 false（语义同 `_isPidAlive` 的保守保留），
+/// 生产代码完全不用 try/catch。
+///
+/// `pidAlive(int)` 与 [_isPidAlive] 的实现一致：调 `kill -0`；spawn 失败
+/// 时返回 true（保守保留）。这里的 runner 复用同一接口签名让 [_isPidAlive]
+/// 在未来也方便接替身 —— 本轮**不**改 `_isPidAlive`，留给未来 P3.x。
+@visibleForTesting
+abstract class TerminateIfOursRunner {
+  /// `kill -0 <pid>` 校验（不发信号）。返回 true = 进程存在 / 我们没权限
+  /// 判断；返回 false = 进程已死。
+  Future<bool> pidAlive(int pid);
+
+  /// 给 [pid] 发 [signal]。返回 true = 已投递；返回 false = spawn 失败 /
+  /// 权限拒绝。
+  Future<bool> sendSignal(int pid, ProcessSignal signal);
+
+  /// 等待 [duration]（测试里通常替换成 0/很短，节省 CI 时间）。
+  Future<void> wait(Duration duration);
+}
+
+/// 默认实现：直接走 shell + `Future.delayed`。spawn 失败（容器无 `kill`）
+/// 一律返回 false。
+@visibleForTesting
+class DefaultTerminateIfOursRunner implements TerminateIfOursRunner {
+  const DefaultTerminateIfOursRunner();
+
+  @override
+  Future<bool> pidAlive(int pid) async {
+    try {
+      final result = await Process.run(
+        'kill',
+        ['-0', pid.toString()],
+      ).timeout(const Duration(milliseconds: 500));
+      return result.exitCode == 0;
+    } catch (_) {
+      // kill 不在 PATH / EACCES —— 保守保留。
+      return true;
+    }
+  }
+
+  @override
+  Future<bool> sendSignal(int pid, ProcessSignal signal) async {
+    // `kill -<signal> <pid>` 比 `Process.killPid` 走 shell 一致。
+    // Dart 的 `Process.killPid(pid, ProcessSignal.sigterm)` 直接调 `kill(2)`，
+    // 在我们的场景里和 shell `kill` 等价；这里统一走 shell 便于测试替身
+    // （`Process.killPid` 不能被替换）。
+    final name = _signalName(signal);
+    try {
+      final result = await Process.run(
+        'kill',
+        ['-$name', pid.toString()],
+      ).timeout(const Duration(milliseconds: 500));
+      return result.exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> wait(Duration duration) => Future<void>.delayed(duration);
+}
+
+String _signalName(ProcessSignal signal) {
+  if (signal == ProcessSignal.sigterm) return 'TERM';
+  if (signal == ProcessSignal.sigkill) return 'KILL';
+  return signal.toString().toUpperCase().replaceFirst('SIG', '');
 }

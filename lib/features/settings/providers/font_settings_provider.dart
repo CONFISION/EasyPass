@@ -10,6 +10,12 @@ final availableFontsProvider = FutureProvider<FontList>((ref) {
   return FontDiscoveryService.discoverAvailableFonts();
 });
 
+/// Storage used by [FontSettingsNotifier]. Exposed as an override so tests
+/// can swap in [FakeSecureStorage] (mirrors `themeStorageProvider` pattern).
+final fontStorageProvider = Provider<FlutterSecureStorage>((ref) {
+  return const FlutterSecureStorage();
+});
+
 /// Selected UI font family setting.
 ///
 /// Values:
@@ -20,8 +26,8 @@ final availableFontsProvider = FutureProvider<FontList>((ref) {
 class FontSettingsNotifier extends StateNotifier<AsyncValue<String?>> {
   final FlutterSecureStorage _storage;
 
-  FontSettingsNotifier()
-    : _storage = const FlutterSecureStorage(),
+  FontSettingsNotifier(FlutterSecureStorage storage)
+    : _storage = storage,
       super(const AsyncLoading<String?>()) {
     _load();
   }
@@ -60,5 +66,5 @@ class FontSettingsNotifier extends StateNotifier<AsyncValue<String?>> {
 
 final fontFamilyProvider =
     StateNotifierProvider<FontSettingsNotifier, AsyncValue<String?>>((ref) {
-      return FontSettingsNotifier();
+      return FontSettingsNotifier(ref.watch(fontStorageProvider));
     });

@@ -458,5 +458,14 @@
   "browserBridgePromptBody": "浏览器扩展需要通过系统里登记的一个小程序与 EasyPass 通信。请运行下面这条命令一次（不需要 root），然后在浏览器里重新加载扩展：",
   "browserBridgePromptCopy": "复制命令",
   "browserBridgePromptCopied": "命令已复制",
-  "browserBridgePromptOk": "知道了"
+  "browserBridgePromptOk": "知道了",
+  "trayUnavailableNotice": "系统托盘不可用 —— 关闭窗口将直接退出应用。GNOME 通常需要安装 “AppIndicator and KStatusNotifierItem Support” 扩展；KDE Plasma 默认支持托盘。",
+  "systemSection": "系统",
+  "autostartTitle": "登录时自动启动 EasyPass",
+  "autostartSubtitleEnabled": "登录后会自动启动 EasyPass。",
+  "autostartSubtitleDisabled": "登录后不会自动启动 EasyPass。打开开关即可在登录时启动。",
+  "autostartUnsupported": "本平台的自启由操作系统安装器管理。",
+  "autostartEnabled": "EasyPass 将在下次登录时自动启动。",
+  "autostartDisabled": "EasyPass 将不再随登录自动启动。",
+  "autostartFailed": "修改开机自启失败：{detail}"
 }

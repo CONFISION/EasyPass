@@ -458,5 +458,23 @@
   "browserBridgePromptBody": "The browser extension talks to EasyPass through a small host registered on your system. Run this command once (no root needed), then reload the extension:",
   "browserBridgePromptCopy": "Copy command",
   "browserBridgePromptCopied": "Command copied",
-  "browserBridgePromptOk": "Got it"
+  "browserBridgePromptOk": "Got it",
+  "trayUnavailableNotice": "System tray unavailable — closing the window will quit the app. (GNOME usually needs the \"AppIndicator and KStatusNotifierItem Support\" extension; KDE Plasma supports trays out of the box.)",
+  "@trayUnavailableNotice": {
+    "description": "Shown on the Settings/About screen when the Linux tray could not be created (e.g. GNOME without an AppIndicator extension). The fallback is \"close exits the app\" instead of \"close hides to tray\"."
+  },
+  "systemSection": "System",
+  "autostartTitle": "Start EasyPass when you log in",
+  "autostartSubtitleEnabled": "EasyPass starts automatically when you log in.",
+  "autostartSubtitleDisabled": "EasyPass does not start automatically. Toggle to launch it at login.",
+  "autostartUnsupported": "Managed by the OS installer on this platform.",
+  "autostartEnabled": "EasyPass will start automatically at login.",
+  "autostartDisabled": "EasyPass will no longer start automatically at login.",
+  "autostartFailed": "Could not change autostart: {detail}",
+  "@autostartFailed": {
+    "description": "Shown when the user toggled the autostart switch and the write/delete of ~/.config/autostart/easypass.desktop failed (perm denied, disk full, etc.). {detail} is the diagnostic message.",
+    "placeholders": {
+      "detail": { "type": "String" }
+    }
+  }
 }

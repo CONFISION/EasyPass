@@ -927,4 +927,38 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get browserBridgePromptOk => 'Got it';
+
+  @override
+  String get trayUnavailableNotice =>
+      'System tray unavailable — closing the window will quit the app. (GNOME usually needs the \"AppIndicator and KStatusNotifierItem Support\" extension; KDE Plasma supports trays out of the box.)';
+
+  @override
+  String get systemSection => 'System';
+
+  @override
+  String get autostartTitle => 'Start EasyPass when you log in';
+
+  @override
+  String get autostartSubtitleEnabled =>
+      'EasyPass starts automatically when you log in.';
+
+  @override
+  String get autostartSubtitleDisabled =>
+      'EasyPass does not start automatically. Toggle to launch it at login.';
+
+  @override
+  String get autostartUnsupported =>
+      'Managed by the OS installer on this platform.';
+
+  @override
+  String get autostartEnabled => 'EasyPass will start automatically at login.';
+
+  @override
+  String get autostartDisabled =>
+      'EasyPass will no longer start automatically at login.';
+
+  @override
+  String autostartFailed(String detail) {
+    return 'Could not change autostart: $detail';
+  }
 }

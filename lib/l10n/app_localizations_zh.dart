@@ -913,4 +913,34 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get browserBridgePromptOk => '知道了';
+
+  @override
+  String get trayUnavailableNotice =>
+      '系统托盘不可用 —— 关闭窗口将直接退出应用。GNOME 通常需要安装 “AppIndicator and KStatusNotifierItem Support” 扩展；KDE Plasma 默认支持托盘。';
+
+  @override
+  String get systemSection => '系统';
+
+  @override
+  String get autostartTitle => '登录时自动启动 EasyPass';
+
+  @override
+  String get autostartSubtitleEnabled => '登录后会自动启动 EasyPass。';
+
+  @override
+  String get autostartSubtitleDisabled => '登录后不会自动启动 EasyPass。打开开关即可在登录时启动。';
+
+  @override
+  String get autostartUnsupported => '本平台的自启由操作系统安装器管理。';
+
+  @override
+  String get autostartEnabled => 'EasyPass 将在下次登录时自动启动。';
+
+  @override
+  String get autostartDisabled => 'EasyPass 将不再随登录自动启动。';
+
+  @override
+  String autostartFailed(String detail) {
+    return '修改开机自启失败：$detail';
+  }
 }

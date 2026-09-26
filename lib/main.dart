@@ -16,6 +16,11 @@ import 'features/browser_bridge/browser_session_registry.dart';
 import 'features/browser_bridge/easypass_daemon.dart';
 import 'features/browser_bridge/native_messaging_service.dart';
 import 'features/browser_bridge/vault_session.dart';
+import 'features/desktop_integration/desktop_integration.dart';
+import 'features/desktop_integration/linux_desktop_integration.dart';
+import 'features/desktop_single_instance/desktop_single_instance.dart';
+import 'features/desktop_single_instance/raise_target_provider.dart';
+import 'features/desktop_tray/desktop_tray.dart';
 
 Future<void> main() async {
   // 浏览器桥接 host 安装/卸载/状态 CLI（Linux 生效）。
@@ -29,6 +34,19 @@ Future<void> main() async {
     // 防御性：`exit()` 不会等异步 stdout 落盘（红队评审 #6）。
     await stdout.flush();
     exit(browserHostCli.exitCode);
+  }
+
+  // P4 桌面集成 CLI（Linux 生效）：`--install` / `--uninstall` /
+  // `--desktop-status`。与上面同款：必须在
+  // `WidgetsFlutterBinding.ensureInitialized()` 之前拦截 —— 这些子命令只写
+  // `$XDG_DATA_HOME` 下的 `.desktop` / 图标，不需要 Flutter UI、不需要
+  // display、不起 daemon、不碰数据库。Windows 上打印"用安装器"提示并退 0
+  // （快捷方式由 Inno Setup 负责，`windows/` 零改动）。
+  final desktopCli = await _maybeRunDesktopCli();
+  if (desktopCli != null) {
+    await stdout.flush();
+    await stderr.flush();
+    exit(desktopCli.exitCode);
   }
 
   WidgetsFlutterBinding.ensureInitialized();
@@ -65,6 +83,23 @@ Future<void> main() async {
     return;
   }
 
+  // P3.2 单实例：UI 模式才需要"唤起已有窗口"语义。`--native-host` / `--service`
+  // 进程是浏览器 / 桥接按需拉起的，不能被"二次启动唤起"拦截 —— 否则桥接
+  // 每连一次都被踢掉。`--install-browser-host` 等 CLI 子命令在
+  // `_maybeRunBrowserHostCli()` 早期已拦截，不会到这里。
+  //
+  // 二次启动：stderr 给一条可读诊断 + exit(0)（不阻断 CI / debug）；
+  // 主实例：拿到 backend，等 UI 准备好后启动 raise 监听。
+  final singleInstanceDecision = await acquireSingleInstance();
+  if (singleInstanceDecision.role == SingleInstanceRole.secondary) {
+    stderr.writeln('easypass: ${singleInstanceDecision.detail}');
+    await stdout.flush();
+    await stderr.flush();
+    exit(0);
+  }
+  // 主实例：保留 backend，挂到 runApp 的 ProviderScope 里给 UI 用。
+  final singleInstanceBackend = singleInstanceDecision.backend;
+
   // UI mode: keep the background daemon (extension backend) alive in this
   // process, Bitwarden style -- closing the window hides the app to the tray
   // while the daemon keeps serving the browser extension.
@@ -80,6 +115,25 @@ Future<void> main() async {
     // The in-process daemon and the Riverpod UI must share one database
     // object.  Constructing a second AppDatabase here creates a second drift
     // executor (and was the source of the "created multiple times" warning).
+    //
+    // P3.5 §6 #3 (AUDIT-P1 #12) — 为什么现在是「只在不可用时构造」而不是
+    // 「永远构造同一个」：
+    //   - **probe.isUsable == true** 时另一进程（升级前的旧 daemon）已经在
+    //     服务扩展，本进程只需要消费 UI，不需要重新拥有数据库（fork/跨进程
+    //     语义上游设计；本仓库不具备 IPC）。
+    //   - 走 `databaseProvider.overrideWithValue(uiDatabase)` 只能把"本进
+    //     进程构造的实例"挂到 Riverpod；旧 daemon 的 `AppDatabase` 实例位
+    //     于另一个进程，挂不进来。如果硬要在 UI 路径上无条件开库，本进程
+    //     与旧 daemon 各持一份 `easypass.db` 的 SQLite handle —— SQLite 允许
+    //     但加重锁竞争，且 drift 会再吐一次 "AppDatabase created multiple
+    //     times" 警告（P1.1 修过）。
+    //   - 这是上游架构问题，不是本仓库能改的。要彻底消除，必须先把 daemon
+    //     从"同进程 / 跨进程"二选一抽到一个明确的 IPC 通道（如 loopback
+    //     上的 query 转发），属于 v3.0 路线图范畴。
+    //
+    // 不改变行为：仅在 `!probe.isUsable` 时构造 `uiDatabase` 并进入
+    // `startInProcessDaemon`；`probe.isUsable` 时一律走 `databaseProvider`
+    // 默认实现（vault_repository.dart:12-14）。
     uiDatabase = AppDatabase();
     try {
       await startInProcessDaemon(database: uiDatabase);
@@ -98,10 +152,22 @@ Future<void> main() async {
   // assets/fonts/) with the text engine before the UI builds.
   await FontDiscoveryService.loadBundledFonts();
 
+  // P3.1 desktop tray (Linux 关窗最小化 + 托盘菜单)。P3.2 复用其
+  // [WindowController]：二次启动 raise 时 `show()` 窗口。`windowController`
+  // 通过 [raiseWindowControllerProvider] 暴露给 UI（见
+  // `lib/features/desktop_single_instance/raise_target_provider.dart`）。
+  final desktopTray = installDesktopTray();
+
   runApp(
     ProviderScope(
       overrides: [
         if (uiDatabase != null) databaseProvider.overrideWithValue(uiDatabase),
+        if (singleInstanceBackend != null)
+          singleInstanceBackendProvider.overrideWithValue(singleInstanceBackend),
+        if (desktopTray.windowController != null)
+          raiseWindowControllerProvider.overrideWithValue(
+            desktopTray.windowController!,
+          ),
       ],
       child: const EasyPassApp(),
     ),
@@ -428,6 +494,147 @@ Future<_BrowserHostCliResult?> _maybeRunBrowserHostCli() async {
     // 从"manifest 不在"扩展为"manifest 在但 wrapper 解析链全断"，仍
     // 映射到 2。详细链状态见 `resolutionChainBroken` 字段。
     return _BrowserHostCliResult(status.toExitCode());
+  }
+
+  return null; // 不会走到这里（上面 contains 已确保命中其一）。
+}
+
+// ─── Desktop-integration installer CLI (P4) ─────────────────────────────────
+//
+// Linux 上的 `--install` / `--uninstall` / `--desktop-status` 三个子命令在这里
+// 路由。Windows 上输出明确提示 "On Windows, use the EasyPass installer..."
+// 并返回 0 —— 快捷方式由 Inno Setup 负责，`windows/` 零改动。
+//
+// 设计点（与上面的 browser-host CLI 完全同构）：
+// - 返回值是"该进程要不要继续走到 UI"的握手对象；null = 走默认路径。
+// - **先判平台再读 HOME**：Windows 没有 HOME，也不该去解析 Linux 的
+//   `$XDG_DATA_HOME`。
+// - 失败一律可读 stderr + 非零退出码；绝不未捕获异常。
+// - 不初始化 binding（没有 display 时 Gtk 会直接报错并退出）。
+class _DesktopCliResult {
+  final int exitCode;
+  const _DesktopCliResult(this.exitCode);
+}
+
+/// `--desktop-status` 的退出码语义来自 [DesktopStatus.toExitCode]
+/// （0 = 已安装可用 / 1 = 入口在但指向失效 / 2 = 未安装），可单测。
+Future<_DesktopCliResult?> _maybeRunDesktopCli() async {
+  final rawArgs = <String>{
+    ..._readCommandLineArguments(),
+    ...Platform.executableArguments,
+  };
+
+  if (!rawArgs.contains('--install') &&
+      !rawArgs.contains('--uninstall') &&
+      !rawArgs.contains('--desktop-status')) {
+    return null;
+  }
+
+  if (!Platform.isLinux) {
+    stdout.writeln(
+        'Skipped: desktop-integration CLI is not supported on ${Platform.operatingSystem}.');
+    stdout.writeln(
+        'On Windows, use the EasyPass installer (Inno Setup) to create shortcuts.');
+    return const _DesktopCliResult(0);
+  }
+
+  final service = LinuxDesktopIntegration();
+
+  if (rawArgs.contains('--install')) {
+    try {
+      final result = await service.install();
+      stdout.writeln(
+          'Installed EasyPass desktop entry: ${result.desktopEntryPath}');
+      stdout.writeln('  Exec=${result.execCommand}');
+      stdout.writeln('  StartupWMClass=${result.startupWmClass}');
+      if (result.iconPaths.isEmpty) {
+        stdout.writeln('  icons: none installed (see warnings)');
+      } else {
+        for (final icon in result.iconPaths) {
+          stdout.writeln('  icon: $icon');
+        }
+      }
+      for (final warning in result.warnings) {
+        stderr.writeln('easypass: warning: $warning');
+      }
+      stdout.writeln(
+          'The launcher should appear in the application menu on the next refresh.');
+      return const _DesktopCliResult(0);
+    } on DesktopIntegrationException catch (e) {
+      stderr.writeln('easypass: $e');
+      return const _DesktopCliResult(2);
+    } on Object catch (e) {
+      stderr.writeln('easypass: desktop integration failed: $e');
+      return const _DesktopCliResult(2);
+    }
+  }
+
+  if (rawArgs.contains('--uninstall')) {
+    try {
+      final result = await service.uninstall();
+      stdout.writeln('Removed EasyPass desktop entry: '
+          '${result.desktopEntryPath} '
+          '(${result.entryRemoved ? "deleted" : "was not present"})');
+      for (final icon in result.iconsRemoved) {
+        stdout.writeln('  removed icon: $icon');
+      }
+      for (final dir in result.prunedDirectories) {
+        stdout.writeln('  pruned empty dir: $dir');
+      }
+      for (final warning in result.warnings) {
+        stderr.writeln('easypass: warning: $warning');
+      }
+      stdout.writeln('Status: uninstalled.');
+      return const _DesktopCliResult(0);
+    } on DesktopIntegrationException catch (e) {
+      stderr.writeln('easypass: $e');
+      return const _DesktopCliResult(2);
+    } on Object catch (e) {
+      stderr.writeln('easypass: desktop integration failed: $e');
+      return const _DesktopCliResult(2);
+    }
+  }
+
+  if (rawArgs.contains('--desktop-status')) {
+    try {
+      final status = await service.status();
+      stdout.writeln('Desktop entry: ${status.desktopEntryPath} '
+          '(${status.entryExists ? "exists" : "missing"})');
+      if (status.entryExists) {
+        stdout.writeln('  Exec=${status.execField ?? "(none)"}');
+        stdout.writeln('  target=${status.execTarget ?? "(unparseable)"} '
+            '(${status.execTargetExecutable ? "executable" : "MISSING or not executable"})');
+        stdout.writeln(
+            '  StartupWMClass=${status.startupWmClass ?? "(none)"}');
+        stdout.writeln('  icon=${status.iconAvailable ? status.iconPaths.join(", ") : "missing"}');
+        if (!status.looksLikeOurs) {
+          stdout.writeln(
+              '  note: this file does not look like an EasyPass entry '
+              '(no "Name=EasyPass" / "Type=Application"); leaving it alone.');
+        }
+      }
+      if (status.isInstalled) {
+        stdout.writeln(status.iconAvailable
+            ? 'Status: installed.'
+            : 'Status: installed, but the icon is missing; re-run --install.');
+      } else if (status.entryExists) {
+        stdout.writeln(
+            'Status: broken. The desktop entry does not point at a usable '
+            'EasyPass executable. Re-run --install to repair (or --uninstall to remove).');
+      } else {
+        stdout.writeln(
+            'Status: not installed. Run --install to create the desktop entry.');
+      }
+      // 退出码语义见 [DesktopStatus.toExitCode]（可单测，
+      // 见 test/desktop_integration_test.dart）。
+      return _DesktopCliResult(status.toExitCode());
+    } on DesktopIntegrationException catch (e) {
+      stderr.writeln('easypass: $e');
+      return const _DesktopCliResult(2);
+    } on Object catch (e) {
+      stderr.writeln('easypass: desktop integration status failed: $e');
+      return const _DesktopCliResult(2);
+    }
   }
 
   return null; // 不会走到这里（上面 contains 已确保命中其一）。

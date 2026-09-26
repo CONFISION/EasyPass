@@ -11,6 +11,7 @@ import '../../auth/providers/auth_provider.dart';
 import '../../../data/repositories/vault_repository.dart';
 import '../../../data/services/font_discovery_service.dart';
 import '../../../data/services/export_import_provider.dart';
+import '../../desktop_autostart/desktop_autostart.dart';
 import '../providers/font_settings_provider.dart';
 import '../providers/theme_provider.dart';
 
@@ -79,6 +80,9 @@ class SettingsScreen extends ConsumerWidget {
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () => _importVault(context, ref),
                 ),
+                const Divider(),
+                _buildSectionHeader(context, l10n.systemSection),
+                _AutostartTile(coordinator: ref.watch(autostartCoordinatorProvider)),
                 const Divider(),
                 _buildSectionHeader(context, l10n.appearanceSection),
                 ListTile(
@@ -225,6 +229,10 @@ class SettingsScreen extends ConsumerWidget {
   void _pickFont(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context);
     final current = ref.read(fontFamilyProvider).valueOrNull;
+    // 当前字体名（用于 dialog 任何状态下的"占位说明"，保证首帧一致性）：
+    // loading 期间 spinner 上面有一行小字写着"当前：xxx"，data 到达后
+    // _FontPickerList 自带视觉标记。这是 P3.4 §6 #8 修复点。
+    final currentLabel = _fontSubtitle(l10n, current);
 
     showDialog(
       context: context,
@@ -237,7 +245,21 @@ class SettingsScreen extends ConsumerWidget {
             builder: (context, ref, _) {
               final fontsAsync = ref.watch(availableFontsProvider);
               return fontsAsync.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
+                loading: () => Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        currentLabel,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    const Expanded(
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                  ],
+                ),
                 error: (_, _) => Center(child: Text(l10n.searchFailed)),
                 data: (fonts) => _FontPickerList(
                   fonts: fonts,
@@ -699,6 +721,97 @@ class _FontPickerList extends StatefulWidget {
 
   @override
   State<_FontPickerList> createState() => _FontPickerListState();
+}
+
+class _AutostartTile extends ConsumerStatefulWidget {
+  const _AutostartTile({required this.coordinator});
+  final LinuxAutostartCoordinator coordinator;
+
+  @override
+  ConsumerState<_AutostartTile> createState() => _AutostartTileState();
+}
+
+class _AutostartTileState extends ConsumerState<_AutostartTile> {
+  AutostartStatus? _status;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final status = await widget.coordinator.query();
+    if (!mounted) return;
+    setState(() => _status = status);
+  }
+
+  Future<void> _setEnabled(bool value) async {
+    setState(() => _busy = true);
+    try {
+      if (value) {
+        await widget.coordinator.enable();
+      } else {
+        await widget.coordinator.disable();
+      }
+      if (!mounted) return;
+      await _refresh();
+      if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            value ? l10n.autostartEnabled : l10n.autostartDisabled,
+          ),
+        ),
+      );
+    } on AutostartException catch (e) {
+      if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.autostartFailed(e.message)),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.autostartFailed(e.toString())),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final status = _status;
+    final supported = status?.platform == AutostartSupport.supported;
+    return ListTile(
+      leading: const Icon(Icons.power_settings_new),
+      title: Text(l10n.autostartTitle),
+      subtitle: Text(
+        !supported
+            ? l10n.autostartUnsupported
+            : status?.enabled == true
+                ? l10n.autostartSubtitleEnabled
+                : l10n.autostartSubtitleDisabled,
+      ),
+      trailing: supported
+          ? Switch(
+              value: status?.enabled ?? false,
+              onChanged: _busy ? null : _setEnabled,
+            )
+          : null,
+    );
+  }
 }
 
 class _FontPickerListState extends State<_FontPickerList> {

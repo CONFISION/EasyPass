@@ -6,6 +6,7 @@
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
+#include "easypass_tray.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
@@ -19,11 +20,39 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
 }
 
+// Quits the application once its window is really gone. Needed because the
+// window is a plain toplevel (see `my_application_activate`), so nothing else
+// would end the main loop after "close without tray".
+static void my_application_window_destroyed(GtkWidget* widget,
+                                            gpointer user_data) {
+  g_application_quit(G_APPLICATION(user_data));
+}
+
+// Close-to-tray: mirrors `windows/runner/flutter_window.cpp`. When a tray icon
+// is live, closing the window hides it and the app keeps running; without a
+// tray host the default GTK behaviour (destroy → quit) is kept so the app
+// never becomes unreachable.
+static gboolean my_application_window_delete(GtkWidget* widget,
+                                             GdkEvent* event,
+                                             gpointer user_data) {
+  if (!easypass_tray_is_active()) {
+    return FALSE;
+  }
+  gtk_widget_hide(widget);
+  return TRUE;
+}
+
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
-  GtkWindow* window =
-      GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  // Deliberately **not** `gtk_application_window_new`: GTK keeps a per-application
+  // window list and ends the main loop as soon as the last window in it is
+  // hidden — which is exactly what "close to tray" does, so the tray icon and
+  // the whole process disappeared with the window (measured: exit code 0 right
+  // after `gtk_widget_hide`). A plain toplevel keeps the loop alive; the app
+  // lifetime is managed explicitly below (hold while the tray is up, quit when
+  // the window is really destroyed).
+  GtkWindow* window = GTK_WINDOW(gtk_window_new(GTK_WINDOW_TOPLEVEL));
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -74,6 +103,23 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+
+  // Tray icon + close-to-hide live in the runner (like Windows), which keeps
+  // the Dart side free of third-party tray packages whose Linux plugins were
+  // measured to be broken.
+  g_signal_connect(window, "delete-event",
+                   G_CALLBACK(my_application_window_delete), nullptr);
+  g_signal_connect(window, "destroy",
+                   G_CALLBACK(my_application_window_destroyed), application);
+  easypass_tray_install(window);
+  if (easypass_tray_is_active()) {
+    // A tray-style app must survive having no visible window: without this
+    // hold, GApplication drops its use count once the last window is hidden
+    // and quits, taking the tray icon with it (measured: the process exited
+    // right after `gtk_widget_hide` even though delete-event was handled).
+    g_application_hold(application);
+  }
+
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
