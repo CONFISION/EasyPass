@@ -1,9 +1,7 @@
-// P3.5 §6 #5：`easypass_sqlite3` 与 `sqlite3_flutter_libs_plugin` 的
+// `easypass_sqlite3` 与 `sqlite3_flutter_libs_plugin` 的
 // `target_compile_definitions` 在 Linux 上必须一致 —— 否则会得到两套
 // SQL 函数/特性宏不同的 SQLite 二进制，"用本地独立库"和"用 plugin"
 // 给用户带来的就是两份不同的 SQLite 行为。
-//
-// 事实链见 dist/P3.5-facts.md §6 #5。
 //
 // 测试策略：
 //   - 读取 `linux/CMakeLists.txt` 抓 `easypass_sqlite3` 的宏集合。
@@ -24,12 +22,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
-  group('P3.5 §6 #5 — easypass_sqlite3 macros stay in sync with the plugin', () {
+  group('easypass_sqlite3 macros stay in sync with the plugin', () {
     test('`easypass_sqlite3` defines BOTH localtime variants (R + S)', () {
       // 事实链：sqlite3.c 里同时使用 `SQLITE_HAVE_LOCALTIME_R` 和
       // `SQLITE_HAVE_LOCALTIME_S`（后者仅在 R 未定义时才走，详见
-      // sqlite3.c:25777-25781）。与插件 CMake 一致地同时声明两个，是 P3.5
-      // §6 #5 对齐结果。
+      // sqlite3.c:25777-25781）。与插件 CMake 一致地同时声明两个，就是这次
+      // 对齐的结果。
       final macros = _readEasypassSqlite3Macros();
       expect(macros, contains('SQLITE_HAVE_LOCALTIME_R'),
           reason:

@@ -29,7 +29,7 @@ class VaultDecryptException implements Exception {
 
 /// [VaultItem]（内存明文模型） ↔ `password_entries` 行 的唯一映射点。
 ///
-/// 规则（2.3.0 冻结，`docs/entry-types.md` 有完整说明）：
+/// 规则（2.3.0 冻结）：
 /// - **登录字段走列**：url / username / password_encrypted /
 ///   totp_secret_encrypted —— 旧数据零迁移，自动填充与 LIKE 搜索不变；
 /// - **其余类型字段 + 所有类型的自定义字段**序列化成 JSON，

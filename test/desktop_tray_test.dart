@@ -1,4 +1,4 @@
-// Tests for the P3.1 desktop-tray layer.
+// Tests for the desktop-tray layer.
 //
 // Coverage:
 //   1. installDesktopTray dispatches to the platform's installer (the test
@@ -22,8 +22,8 @@
 //   - The window_manager `setPreventClose` platform call (would require
 //     a real GTK window).
 //
-// Both are explicitly listed in `dist/PHASE3_1.md` as "manual verification
-// only" — the unit tests stop at the abstraction boundary.
+// Both need a real desktop session and are manual-verification only — the
+// unit tests stop at the abstraction boundary.
 
 import 'package:flutter_test/flutter_test.dart';
 

@@ -24,7 +24,7 @@ class ExportImportException implements Exception {
   String toString() => message;
 }
 
-/// 导出 / 导入服务（导出格式 **2.0.0**，见 `docs/entry-types.md` §6）。
+/// 导出 / 导入服务（导出格式 **2.0.0**）。
 ///
 /// 两种导出格式：
 /// - **明文**：`format: 'plain'`，条目形状就是 `VaultItem.toJson()` ——
@@ -44,7 +44,7 @@ class ExportImportException implements Exception {
 /// - **先全部解析校验、再写库**（写库还包在一个事务里）：解析失败就抛
 ///   [ExportImportException]，不会"导一半"留下半个库。
 class ExportImportService {
-  /// 导出格式版本（契约 §6：1.0.0 → 2.0.0）。
+  /// 导出格式版本（1.0.0 → 2.0.0）。
   static const String formatVersion = '2.0.0';
 
   static const String appName = 'EasyPass';
@@ -115,7 +115,7 @@ class ExportImportService {
             'updated_at': folder.updatedAt,
           },
       ],
-      // 条目形状由 VaultItem.toJson() 决定（契约 §6）：只写当前类型的字段块，
+      // 条目形状由 VaultItem.toJson() 决定：只写当前类型的字段块，
       // 空的自定义字段不写。
       'entries': [for (final item in items) item.toJson()],
     };

@@ -231,7 +231,7 @@ class SettingsScreen extends ConsumerWidget {
     final current = ref.read(fontFamilyProvider).valueOrNull;
     // 当前字体名（用于 dialog 任何状态下的"占位说明"，保证首帧一致性）：
     // loading 期间 spinner 上面有一行小字写着"当前：xxx"，data 到达后
-    // _FontPickerList 自带视觉标记。这是 P3.4 §6 #8 修复点。
+    // _FontPickerList 自带视觉标记。
     final currentLabel = _fontSubtitle(l10n, current);
 
     showDialog(

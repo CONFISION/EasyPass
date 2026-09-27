@@ -1,7 +1,7 @@
 import '../../data/models/entry_type.dart';
 import '../../data/models/vault_item.dart';
 
-/// URL ↔ 条目匹配（契约 2.4，纯函数、可单测）。
+/// URL ↔ 条目匹配（纯函数、可单测）。
 ///
 /// 用于扩展的自动填充：给定当前页面 URL，挑出这个站点该用哪些条目。
 /// 2.3.0 起条目有四种类别，这里**只认登录条目**（`EntryType.login`）——
@@ -20,7 +20,7 @@ class UrlMatcher {
   const UrlMatcher._();
 
   /// 只认 `scheme://` 形式的 scheme；其它输入一律按无 scheme 处理并补
-  /// `https://`（契约要求 `example.com/login` 能解析）。
+  /// `https://`（`example.com/login` 这类输入要能解析）。
   static final RegExp _schemePattern = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.\-]*://');
 
   /// 解析 URL 的 host：小写、去端口、去 userinfo、去开头 `www.`。
@@ -67,7 +67,7 @@ class UrlMatcher {
     return host.isEmpty ? null : host;
   }
 
-  /// 从 [items] 中挑出与 [pageUrl] 匹配的**登录**条目，按契约 2.4 排序。
+  /// 从 [items] 中挑出与 [pageUrl] 匹配的**登录**条目，按匹配优先级排序。
   ///
   /// 非登录类型（笔记 / 身份 / SSH）直接跳过；登录条目的 `url` 为空或不可
   /// 解析时不参与 URL 匹配（但仍会出现在 `getAllCredentials` /

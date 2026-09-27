@@ -9,7 +9,7 @@ import 'health_service.dart';
 ///
 /// 装配流程：从 [vaultRepositoryProvider] 取**登录条目**
 /// （`getItems(type: EntryType.login)` —— 安全笔记 / 身份 / SSH 密钥不参与
-/// 评分，契约 §5），仓储负责用会话密钥解密，再交给纯函数
+/// 评分），仓储负责用会话密钥解密，再交给纯函数
 /// [HealthService.analyze] 计算 [HealthReport]。
 ///
 /// 安全纪律：明文密码只存在于仓储返回的 [VaultItem] 列表与 analyze 的局部

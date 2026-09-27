@@ -1,4 +1,4 @@
-// P3.4 · Linux 系统字体目录扫描测试。
+// Linux 系统字体目录扫描测试。
 //
 // 用 [FontDiscoveryService.debugSetSystemFontDirectoriesForTesting] 把系
 // 统字体目录列表替换成临时目录，**不**真读 `~/.local/share/fonts` 或
@@ -15,9 +15,8 @@
 // 不可自动化的项：
 //   - 真实 Linux 桌面上 `/usr/share/fonts` 的成百个家族名确实被列出来
 //     （手测：`flutter test` 跑过一遍，断言 size > 100 即可验证）。
-//   - GTK 主题颜色变更后 Flutter MaterialApp 是否立刻跟随 —— 任务书
-//     §3.4 已确认由 embedder 自动处理，本仓库不需要改任何代码；详见
-//     `dist/P3.3-facts.md` §3.2 证据链。
+//   - GTK 主题颜色变更后 Flutter MaterialApp 是否立刻跟随 —— 已确认由
+//     embedder 自动处理，本仓库不需要改任何代码。
 
 import 'dart:io';
 import 'dart:typed_data';
@@ -81,7 +80,7 @@ void main() {
     File(path).writeAsBytesSync(bytes);
   }
 
-  group('P3.4 · Linux 系统字体目录扫描（注入目录列表）', () {
+  group('Linux 系统字体目录扫描（注入目录列表）', () {
     test('注入空目录列表 → 返回空', () async {
       FontDiscoveryService.debugSetSystemFontDirectoriesForTesting(const []);
       final names = await FontDiscoveryService.discoverSystemFonts();
@@ -153,7 +152,7 @@ void main() {
     });
   });
 
-  group('P3.4 · 子目录递归（Linux 默认开）', () {
+  group('子目录递归（Linux 默认开）', () {
     test('注入目录列表时也走递归（Linux override 走真生产路径）',
         () async {
       if (!Platform.isLinux) return; // skip on Windows / macOS CI
@@ -173,10 +172,10 @@ void main() {
             : null);
   });
 
-  group('P3.4 · 非 Linux 分支不受影响', () {
+  group('非 Linux 分支不受影响', () {
     test('非 Linux 注入目录列表时：默认 _scanDirectory 不递归',
         () async {
-      // Windows / macOS 上走非递归路径（保持 P3.4 前的语义）
+      // Windows / macOS 上走非递归路径（保持原有语义）
       final fontsDir = Directory(p.join(tmpRoot.path, 'shallow'));
       await fontsDir.create(recursive: true);
       final sub = Directory(p.join(fontsDir.path, 'subfamily'));

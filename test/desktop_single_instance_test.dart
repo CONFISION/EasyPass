@@ -1,4 +1,4 @@
-// P3.2 单实例 + raise 通道测试。
+// 单实例 + raise 通道测试。
 //
 // 覆盖：
 //   1. 平台分派（Linux → 真路径；Windows / 其他 → notApplicable）。
@@ -10,7 +10,7 @@
 //      路径（用临时目录 + [LinuxSingleInstanceBackend.newForTest] 入口）。
 //
 // 不可自动化的项（手动）：真实 GTK 窗口的 `show()` 调用、真实 AppImage
-// spawn 后的 raise 链路 —— 已在 `dist/PHASE3_2.md` §未自动化项列出。
+// spawn 后的 raise 链路 —— 需要真实桌面会话手工确认。
 
 import 'dart:io' show Directory, Platform;
 

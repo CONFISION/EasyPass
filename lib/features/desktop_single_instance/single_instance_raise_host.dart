@@ -1,14 +1,14 @@
-// P3.2 单实例 raise 监听宿主。
+// 单实例 raise 监听宿主。
 //
 // 职责：
 //   - 当 [singleInstanceBackendProvider] 非空（说明当前进程是主实例），在
 //     UI 第一次 build 完成后调一次 `backend.startRaising(handler)`。
-//   - 收到 raise → 调 `LinuxWindowController.show()`（已经存在，P3.1 引入）。
+//   - 收到 raise → 调 `LinuxWindowController.show()`（托盘层已提供）。
 //   - 在 dispose 时调 `backend.stopRaising()`，避免 IPC 监听漏掉 fd。
 //
 // 设计点：
 //   - 用 `ConsumerStatefulWidget` 而非在 `main.dart` 调，是因为主进程下
-//     [desktopTrayResultProvider]（P3.1 注入）也要 `ref.read` 才能拿到
+//     [desktopTrayResultProvider]（由托盘层注入）也要 `ref.read` 才能拿到
 //     `WindowController`。`runApp` 之后 ProviderScope 已就绪，比 `main()`
 //     里同步调用更稳。
 //   - handler 用 fire-and-forget：handler 抛异常不能让 raise 监听崩。

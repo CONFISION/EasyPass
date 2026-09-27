@@ -1,4 +1,4 @@
-// Linux 开机自启（P3.2 第二项）。
+// Linux 开机自启。
 //
 // 设计原则：
 //   1. 抽象层可注入、可单测 —— 见 [LinuxAutostartBackend]。

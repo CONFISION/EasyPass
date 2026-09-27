@@ -14,6 +14,11 @@ AppIndicator* g_indicator = nullptr;
 GtkWindow* g_window = nullptr;
 gboolean g_quitting = FALSE;
 
+// 总线上是否真的有 StatusNotifier 宿主（面板/托盘实现）。`app_indicator_new*()`
+// 在**没有宿主时也照样返回活对象**，所以"indicator 存在"不等于"图标可见"。
+// 见 [status_notifier_host_available]。
+gboolean g_tray_host_available = FALSE;
+
 // Icon candidates, in order. `flutter build linux` puts bundled assets under
 // `<exedir>/data/flutter_assets/`; the AppImage layout keeps them next to the
 // binary in `usr/bin/assets/`. Both are checked at runtime because the same
@@ -37,6 +42,60 @@ gchar* resolve_icon_path() {
     }
   }
   return nullptr;
+}
+
+// 总线上是否注册了 StatusNotifier 宿主 —— KDE 面板、GNOME 的 AppIndicator
+// 扩展、Ubuntu 的 indicator 栈都通过 `org.kde.StatusNotifierWatcher` 暴露这个
+// 属性（StatusNotifierItem 规范）。
+//
+// 为什么必须自己问：`app_indicator_new_with_path()` 在没有宿主时**也会成功**，
+// 图标只是永远不显示。若据此认定"托盘可用"，关窗就会把**唯一**的窗口藏进一个
+// 看不见的托盘里 —— 用户再也拿不回窗口（GNOME 默认不启用该扩展就是这个形态）。
+// 这正是 README 承诺的"没有宿主时降级为关窗即退出"，之前只是没实现。
+//
+// 任何失败（没有会话总线 / watcher 不在 / 超时 / 属性类型不符）一律当作"没有
+// 宿主"：退路是 GTK 默认的"关窗即退出"，属良性降级；反过来判错才会把窗口弄丢。
+gboolean status_notifier_host_available() {
+  g_autoptr(GError) error = nullptr;
+  // GApplication / GTK 已经在用会话总线，这里拿的是进程内缓存的连接 —— 正常
+  // 桌面下即时返回；只有总线本身挂死才会阻塞，而那时整个桌面都已不可用。
+  g_autoptr(GDBusConnection) bus =
+      g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &error);
+  if (bus == nullptr) {
+    g_message("easypass tray: no session bus (%s); assuming no tray host",
+              error != nullptr ? error->message : "unknown");
+    return FALSE;
+  }
+
+  // 250ms 超时：install() 跑在 activate 里、首帧之前，所以这是启动路径上的同
+  // 步调用。面板正常时只是本地总线的一次往返（亚毫秒）；只有"名字在但不答"
+  // 的病态面板才会等满，代价也只是把首帧推迟 250ms —— 换来的是"判不出来就当
+  // 没有宿主"这个安全默认值。若将来真出现启动卡顿，可改成
+  // `g_dbus_connection_call` 异步：届时旗标在应答前保持 FALSE，方向同样安全。
+  g_autoptr(GVariant) reply = g_dbus_connection_call_sync(
+      bus, "org.kde.StatusNotifierWatcher", "/StatusNotifierWatcher",
+      "org.freedesktop.DBus.Properties", "Get",
+      g_variant_new("(ss)", "org.kde.StatusNotifierWatcher",
+                    "IsStatusNotifierHostRegistered"),
+      G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 250, nullptr, &error);
+  if (reply == nullptr) {
+    g_message("easypass tray: StatusNotifierWatcher not reachable (%s); "
+              "assuming no tray host",
+              error != nullptr ? error->message : "unknown");
+    return FALSE;
+  }
+
+  g_autoptr(GVariant) value = g_variant_get_child_value(reply, 0);
+  if (value == nullptr ||
+      !g_variant_is_of_type(value, G_VARIANT_TYPE_VARIANT)) {
+    return FALSE;
+  }
+  g_autoptr(GVariant) unwrapped = g_variant_get_variant(value);
+  if (unwrapped == nullptr ||
+      !g_variant_is_of_type(unwrapped, G_VARIANT_TYPE_BOOLEAN)) {
+    return FALSE;
+  }
+  return g_variant_get_boolean(unwrapped);
 }
 
 void on_open_activate(GtkMenuItem* item, gpointer user_data) {
@@ -78,7 +137,8 @@ GtkWidget* build_menu() {
 
 gboolean easypass_tray_install(GtkWindow* window) {
   if (g_indicator != nullptr) {
-    return TRUE;
+    // 幂等：已经装过就沿用上次的宿主判定。
+    return g_tray_host_available;
   }
 
   // CI / smoke-test hook. The runner honours `EASYPASS_DEBUG_NO_TRAY` to
@@ -87,6 +147,16 @@ gboolean easypass_tray_install(GtkWindow* window) {
   if (g_getenv("EASYPASS_DEBUG_NO_TRAY") != nullptr) {
     g_warning("easypass tray: EASYPASS_DEBUG_NO_TRAY set; skipping install");
     return FALSE;
+  }
+
+  // 有宿主才算"托盘可用"。只算一次：宿主一般在登录时就已注册；用户在启动之后
+  // 才启用 GNOME 扩展的情况要重启应用才会开始"关窗隐藏"。这是**安全**的方向
+  // —— 宁可关窗退出，也不要把窗口藏进看不见的托盘。
+  g_tray_host_available = status_notifier_host_available();
+  if (!g_tray_host_available) {
+    g_warning("easypass tray: no StatusNotifier host registered; the icon "
+              "would be invisible, so closing the window quits the app "
+              "instead of hiding to the tray");
   }
 
   g_autofree gchar* icon_path = resolve_icon_path();
@@ -128,11 +198,17 @@ gboolean easypass_tray_install(GtkWindow* window) {
   app_indicator_set_status(g_indicator, APP_INDICATOR_STATUS_ACTIVE);
 
   g_window = window;
-  return TRUE;
+  // 返回"托盘是否真的可用"而不是"indicator 对象是否建起来了"：没有宿主时图标
+  // 不可见，调用方**不该**依赖托盘（头文件里写明了这个契约）。当前调用点
+  // （`my_application.cc`）忽略返回值、用 `easypass_tray_is_active()` 决策，
+  // 所以这里只是把语义修正到与文档一致。
+  return g_tray_host_available;
 }
 
 gboolean easypass_tray_is_active(void) {
-  return g_indicator != nullptr && !g_quitting;
+  // 三个条件缺一不可：indicator 建起来了、总线上真有宿主（否则图标不可见，
+  // 藏窗口等于把应用弄丢）、且不是正在退出。
+  return g_indicator != nullptr && g_tray_host_available && !g_quitting;
 }
 
 // CI / smoke-test hook only. Marks the tray state as quitting so the

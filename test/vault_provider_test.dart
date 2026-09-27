@@ -19,7 +19,7 @@ import 'package:easypass/features/vault/providers/vault_provider.dart';
 import 'fakes.dart';
 
 /// 保险库 provider 的契约（2.3.0：全部 stream / hold [VaultItem]）：
-/// 1) 列表那条流把 **文件夹 + 类型 + 收藏** 三个维度叠加，互不覆盖（契约 §10.9）；
+/// 1) 列表那条流把 **文件夹 + 类型 + 收藏** 三个维度叠加，互不覆盖；
 /// 2) 类型筛选对收藏视图同样生效；
 /// 3) `selectedFolderNameProvider` 在文件夹消失时返回 null（旧实现 firstWhere
 ///    没有 orElse，会抛 StateError 把整屏打崩）；

@@ -1,7 +1,5 @@
 // Linux 单实例 + raise 通道实现（flock + unix socket）。
 //
-// 设计选择与边界，详见 `dist/P3.2-facts.md` §4.3 / §5。
-//
 // 关键不变量（实现要保证）：
 //   1. 锁文件目录 = `dataDirectory`，与 `easypass.db` 同处一地 —— 复用
 //      P1 的 0700 收紧（共享 `AppPaths._enforceLinuxPrivacy` 的语义，**不
@@ -12,8 +10,8 @@
 //   3. 进程退出路径必须 dispose（`[exitHook]` 注册 onExit），否则 `flock`
 //      会一直挂到内核回收（崩溃时内核自动释放，正常退出时仍要显式
 //      unlock）。
-//   4. secondary 路径：拿到锁失败 → 不再尝试 "lock 文件残留" 的旧 PID 自愈
-//      （P3.4 任务），只走 "connect raise socket → 写 1 字节 → exit"。
+//   4. secondary 路径：拿到锁失败 → 不再尝试 "lock 文件残留" 的旧 PID 自愈，
+//      只走 "connect raise socket → 写 1 字节 → exit"。
 
 import 'dart:async';
 import 'dart:io';

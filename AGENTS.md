@@ -10,13 +10,20 @@ and Phase 2 (browser extension, native messaging, encrypted export/import, TOTP)
 are implemented. **2.3.x** adds four entry types (login / secure note / identity /
 SSH key) with custom fields, live TOTP codes, folder management (icons, rename,
 guarded delete), type filtering and `type:`/`folder:`/`url:` search prefixes.
-Phase 3 (cloud sync, sharing, emergency access, multi-platform) is still planned.
+**2.3.3** adds the **Linux desktop port** (AppImage): tray + close-to-tray in the GTK
+runner, single instance with a unix-socket wake-up, XDG autostart, the desktop-entry
+CLI (`--install` / `--uninstall` / `--desktop-status`) and browser-host registration
+(`--install-browser-host` / `--uninstall-browser-host` / `--browser-host-status`),
+with the vault moved to `$XDG_DATA_HOME/easypass/`. **Supported desktops are Windows
+and Linux;** Phase 3 (cloud sync, sharing, emergency access, mobile/macOS) is still
+planned.
 
 > **Local-only docs (NOT in a fresh clone — `.gitignore` excludes them):** the
 > roadmap `Plan.md`, the working agreement/pitfalls `HANDOFF.md`, the 2.3.x
 > interface contract `docs/entry-types.md`, the acceptance checklist
-> `docs/acceptance-2.3.0.md` and release notes under `docs/`. Never write a
-> committed file that *depends* on them; this file and the READMEs must stand alone.
+> `docs/acceptance-2.3.0.md`, release notes under `docs/`, and the `dist/` audit /
+> phase evidence dumps. Never write a committed file that *depends* on them; this
+> file and the READMEs must stand alone.
 
 Security model: the master password is never stored. PBKDF2-HMAC-SHA256
 (100,000 iterations) derives an AES-256-CBC key; only salt + hash are persisted
@@ -25,37 +32,50 @@ via `flutter_secure_storage`. The derived key lives in a Riverpod
 
 ## Build / Test / Lint
 
-Requires Flutter with Dart SDK `^3.12.2`.
+Requires Flutter with Dart SDK `^3.12.2`. Linux builds additionally need GTK 3 and
+`libayatana-appindicator3-dev`.
 
 ```bash
 flutter pub get          # install deps
 dart run build_runner build --delete-conflicting-outputs   # regenerate database.g.dart (drift)
 flutter gen-l10n        # regenerate app_localizations.dart after editing lib/l10n/*.arb
 flutter analyze         # lint (flutter_lints)
-flutter test            # 412 unit/integration tests: crypto, TOTP, generator, entry types, export/import, auth, daemon, bridge, vault UI
+flutter test            # 545 cases on Windows (536 pass / 9 Linux-only skipped); ~568 declarations in total
 flutter run -d windows  # run desktop app
-flutter build windows   # release build
+flutter build windows   # release build → build\windows\x64\runner\Release\easypass.exe
+flutter build linux --release   # Linux bundle → build/linux/x64/release/bundle/
 ```
 
 - **Windows 构建命令固定为 `flutter build windows`** — 每次需要构建 Windows 发布版时都使用这条命令。
 - **C++ runner 改动可以不用 MSBuild 验证** — `windows\runner\check_syntax.bat` 用与真实构建相同的开关
   （`/W4 /WX`、`cl /Zs`）对 `windows/runner/*.cpp` 做语法与类型检查，不产出任何文件、不调用 MSBuild。
-  改过 `windows/runner/**` 后先跑它，别把编译错误留给用户。
-- **窗口最小尺寸在原生层强制** — `windows/runner/win32_window.cpp` 的 `WM_GETMINMAXINFO`
-  （`kMinWindowWidth/kMinWindowHeight` = 900×600 逻辑像素，按 DPI 缩放，并夹到显示器工作区内）。
-  这两个常量必须与 `lib/features/vault/screens/vault_screen.dart` 里侧边栏的固定宽度保持一致，
-  否则窄窗又会溢出。
+  改过 `windows/runner/**` 后先跑它，别把编译错误留给用户。**该脚本末尾还会提示工作区的强制完整性
+  标签问题**（见 `check_integrity.bat` 与下方 pitfalls）。
+- **`windows/runner/**` 的源码必须是纯 ASCII** — `check_syntax.bat` 不带 `/utf-8`，cl.exe 按系统
+  ANSI 代码页（本机 936）解码，中文注释/全角标点会以 C4819 命中 `/WX` 直接失败。`linux/runner/**`
+  由 clang/gcc 编译，中文注释没问题。
+- **Windows 上做完原生检查后要还原被 flutter 改写的 Linux 生成物** —
+  `linux/flutter/generated_plugin_registrant.{cc,h}` 与 `generated_plugins.cmake` 会被 Windows 端的
+  `flutter` 命令以 CRLF 重写（本仓库 `core.autocrlf=true` 且无 `.gitattributes`），
+  提交前用 `git checkout -- linux/flutter/generated_*` 还原。
+- **窗口最小尺寸在原生层强制** — Windows 在 `windows/runner/win32_window.cpp` 的 `WM_GETMINMAXINFO`
+  （`kMinWindowWidth/kMinWindowHeight` = 900×600 逻辑像素，按 DPI 缩放，并夹到显示器工作区内）；
+  Linux 在 `linux/runner/my_application.cc` 用 `gtk_widget_set_size_request`，同样先夹到
+  `gdk_monitor_get_workarea`。这两个值必须与 `lib/features/vault/screens/vault_screen.dart` 里侧边栏的
+  固定宽度保持一致，否则窄窗又会溢出。
 - **构建分工（重要约定）** — Windows 原生构建（`flutter build windows` / `flutter run -d windows`）
   由用户亲自执行；agent 负责到构建前的完整测试与 debug（`flutter analyze`、`flutter test`、
   代码审查与修复）。agent 的执行环境与 MSBuild 存在兼容问题（FileTracker 崩溃），
   不要尝试在 agent 侧执行原生构建，也不要将其结果作为交付依据。
-- **同理：凡是产出最终交付物的构建/打包，都交给用户** —— 安装包（ISCC）、`docker build`、
-  `npm run build`、代码签名、发布上传等，agent 一律不自行执行；交付前把**确切命令**与
-  验收要点写清楚即可。只读/轻量验证（测试、lint、语法检查、协议探针）agent 应当自己跑。
+- **同理：凡是产出最终交付物的构建/打包，都交给用户** —— 安装包（ISCC）、`flutter build linux`、
+  AppImage（`installer/appimage/build_appimage.sh`）、`docker build`、`npm run build`、代码签名、
+  发布上传等，agent 一律不自行执行；交付前把**确切命令**与验收要点写清楚即可。
+  只读/轻量验证（测试、lint、语法检查、协议探针）agent 应当自己跑。
 - **版本号约定（`major.minor.patch`，见下方 Versioning）** — 推进版本时同步更新 `pubspec.yaml` 的
   `version` 字段、`settings_screen.dart` 中显示的版本号、扩展 `manifest.json` 的 `version`
   与 `installer/easypass_setup.iss` 的 `MyAppVersion` / `VersionInfoVersion`
-  （`browser_extension/tools/check_extension.mjs` 会校验这四处一致）。
+  （`browser_extension/tools/check_extension.mjs` 会校验这四处一致）。README 徽章与发布说明也
+  一并更新。
 - **打包安装包** — `& "C:\Program Files\Inno Setup 7\ISCC.exe" installer\easypass_setup.iss`
   （用户执行；产物在 `build\installer\EasypassSetup.exe`）。安装包需要 app-local 的
   MSVC 运行时（`msvcp140.dll` / `vcruntime140.dll` / `vcruntime140_1.dll`），而 Flutter 生成的
@@ -63,6 +83,9 @@ flutter build windows   # release build
   只带 app/ICU/插件 DLL/字体/资源）：`installer/copy_vc_runtime.bat` 负责拷贝，并由
   `windows/runner/CMakeLists.txt` 的 POST_BUILD 调用（**该文件入库受版本控制，别把这段 hook 删了**）；
   `.iss` 里还有一层系统目录兜底，缺文件时不会中止编译。
+- **打包 AppImage** — `installer/appimage/build_appimage.sh <bundle 目录> <输出 .AppImage>`
+  （用户执行；bundle 来自 `flutter build linux --release`，脚本从 `pubspec.yaml` 读版本号，
+  `appimagetool` 可用 `$APPIMAGETOOL` 覆盖）。
 
 - Regenerating code: after editing `lib/data/database/tables.drift`, you **must**
   rerun build_runner — `AppDatabase` and companions in `database.g.dart` are generated.
@@ -70,17 +93,25 @@ flutter build windows   # release build
   `auth_test.dart` / `export_import_test.dart` override `cryptoServiceProvider`
   and `databaseProvider` with `AppDatabase.forTesting()` and set
   `driftRuntimeOptions.dontWarnAboutMultipleDatabases`.
+- Linux-only test files (`browser_host_installer_test.dart`, `linux_window_controller_test.dart`,
+  the POSIX-exec-bit cases in `desktop_integration_test.dart`, the SIGTERM path in
+  `easypass_daemon_terminate_test.dart`) detect the platform and **register no cases on
+  Windows** (or `skip:` themselves), so a Windows run reports fewer cases, not failures.
 
 ## Architecture
 
 ```
-lib/main.dart                  Entry: ProviderScope + portrait lock
+lib/main.dart                  Entry: ProviderScope + portrait lock; CLI dispatch (--service, --native-host,
+                               --install/--uninstall/--desktop-status, --install-browser-host/…)
 lib/app.dart                   MaterialApp.router; go_router routes + auth redirect logic
 ├── core/
-│   ├── constants/app_constants.dart    PBKDF2/AES parameters, secure-storage keys
-│   └── crypto/
-│       ├── crypto_service.dart         Manual PBKDF2, AES-256-CBC (IV||cipher, base64), secure storage
-│       └── totp_service.dart           RFC 6238 TOTP (SHA-1, base32 secret, 30s/6-digit)
+│   ├── constants/app_constants.dart    PBKDF2/AES parameters, secure-storage keys, bridgeProtocolVersion
+│   ├── crypto/
+│   │   ├── crypto_service.dart         Manual PBKDF2, AES-256-CBC (IV||cipher, base64), secure storage
+│   │   ├── totp_service.dart           RFC 6238 TOTP (SHA-1, base32 secret, 30s/6-digit)
+│   │   └── ssh_key_service.dart        OpenSSH public-key parsing + SHA256/MD5 fingerprints (pure)
+│   └── platform/app_paths.dart         Data dir + file paths per platform (XDG on Linux, exe dir on Windows),
+│                                       permission tightening (0700/0600), legacy-DB migration
 ├── data/
 │   ├── database/
 │   │   ├── tables.drift                Schema: folders, password_entries (schemaVersion 2)
@@ -94,25 +125,37 @@ lib/app.dart                   MaterialApp.router; go_router routes + auth redir
 │   ├── repositories/vault_repository.dart  Item API (watchItems/saveItem/searchItems/reencryptAll) + legacy row API
 │   ├── state/session_key.dart          encryptionKeyProvider (data layer so the repo can read the key)
 │   └── services/export_import_service.dart  JSON + encrypted export/import (export_import_provider.dart)
-├── core/crypto/ssh_key_service.dart    OpenSSH public-key parsing + SHA256/MD5 fingerprints (pure)
 └── features/                           Feature-first UI layer
     ├── auth/     auth_provider.dart (AuthState/AuthNotifier), lock/set-master-password screens
     ├── vault/    vault_provider.dart (stream/future providers), vault CRUD screens,
     │             widgets/{entry_card,entry_type_bits,custom_fields_editor,custom_fields_view}.dart
     ├── generator/ generator_provider.dart, generator_screen.dart
     ├── settings/ settings_screen.dart, providers/{font_settings,theme}_provider.dart
-    └── browser_bridge/  native_messaging_service.dart (protocol), vault_session.dart (session),
-                         url_matcher.dart (URL↔entry), browser_session_registry.dart, easypass_daemon.dart
+    ├── browser_bridge/  native_messaging_service.dart (protocol), vault_session.dart (session),
+    │                    url_matcher.dart (URL↔entry), browser_session_registry.dart, easypass_daemon.dart,
+    │                    browser_host_installer.dart (per-browser native-messaging manifests),
+    │                    browser_host_prompt.dart (first-run registration prompt)
+    ├── desktop_integration/  desktop_integration.dart (facade) + linux_desktop_integration.dart
+    │                         (desktop entry / icon / --desktop-status), windows_desktop_integration.dart
+    ├── desktop_tray/    desktop_tray.dart (facade) + linux_desktop_tray.dart, windows_desktop_tray.dart,
+    │                    linux_window_controller.dart (MethodChannel `com.easypass.app/window`)
+    ├── desktop_autostart/  desktop_autostart.dart + linux_autostart.dart (XDG), windows_autostart.dart
+    └── desktop_single_instance/  desktop_single_instance.dart + linux_single_instance.dart
+                                  (easypass.db.lock + unix socket), windows_single_instance.dart (no-op)
 browser_extension/                      Chrome MV3 extension (see below)
 docs/entry-types.md                     2.3.x interface contract (LOCAL ONLY — gitignored)
 docs/acceptance-2.3.0.md                Manual acceptance checklist (LOCAL ONLY — gitignored)
-windows/                                Generated Flutter Windows runner (CMake)
+windows/                                Flutter Windows runner (CMake) + the tray/single-instance glue
+linux/                                  Flutter Linux runner (CMake): my_application.cc (window + method
+                                        channel), easypass_tray.cc (libayatana-appindicator + a
+                                        StatusNotifierWatcher host probe)
 ```
 
 **Data flow (app):** master password → PBKDF2 key → hash verify → key stored in
 `encryptionKeyProvider` (defined in `lib/data/state/session_key.dart`) → UI calls
 providers → `VaultRepository` → `VaultItemMapper` → `CryptoService` encrypts
-sensitive fields → drift/SQLite (`easypass.db` next to the executable).
+sensitive fields → drift/SQLite (`easypass.db`: next to the executable on Windows,
+`$XDG_DATA_HOME/easypass/easypass.db` on Linux).
 
 **Entry types (2.3.x):** one row can be `login`, `secure_note`, `identity` or
 `ssh_key`. Login fields stay in the legacy columns (`url`, `username`,
@@ -130,6 +173,16 @@ host id `com.easypass.app`) → bridge exe → daemon (`easypass.exe --service`)
 carries `type` + per-type blocks (`identity` / `sshKey` / `customFields`);
 `hasTotp` replaces the TOTP secret, and `getCredentials` (autofill candidates)
 returns **login entries only**.
+**On Linux the native-messaging host is the app binary itself** (`easypass
+--native-host`, invoked by the generated wrapper script) — there is no separate
+x86 bridge there.
+
+**Desktop lifecycle (both platforms):** a windowless daemon (`--service`) is
+cold-started on demand by the native host and exits after 10 minutes idle; the tray
+icon hides the window on close **only when the icon was really registered**
+(`check_integrity.bat` exists because a Low integrity label makes that registration
+fail silently). On Linux a second launch takes `easypass.db.lock` and wakes the
+running instance over a unix socket; Windows has no single-instance gate yet.
 
 **Routing / auth gating** is centralized in `lib/app.dart` (`_routerProvider`
 redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
@@ -138,8 +191,12 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
 ## Key Files & Directories
 
 - **`lib/core/constants/app_constants.dart`** — crypto parameters (PBKDF2
-  iterations=100000, key 32B, salt 32B, IV 16B) and secure-storage key names.
-  Changing these breaks stored data.
+  iterations=100000, key 32B, salt 32B, IV 16B), secure-storage key names and
+  `bridgeProtocolVersion`. Changing these breaks stored data or the extension.
+- **`lib/core/platform/app_paths.dart`** — every platform-dependent path in one
+  place (XDG dirs, exe dir, daemon.json, native-host wrapper, autostart/desktop
+  entry, migration temporaries). Diagnostics go to **stderr** (`stdout` is the
+  native-messaging channel in `--native-host` mode).
 - **`lib/data/database/tables.drift`** — the schema (folders, password_entries).
   Sensitive columns are `*_encrypted` TEXT; plaintext never touches the DB.
 - **`lib/features/browser_bridge/native_messaging_service.dart`** — the native
@@ -148,8 +205,13 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
 - **`browser_extension/native_host/com.easypass.app.json`** — host registration
   pointing at `easypass_native_host.exe`; the installer rewrites the equivalent
   manifest under `%LOCALAPPDATA%\EasyPass\` to point at the install directory.
-- **`windows/`** — generated runner; binary name `easypass`; DB file is written
-  next to the executable (see `_openConnection()` in `database.dart`).
+- **`windows/`** — the Windows runner (tracked source, not disposable output);
+  binary name `easypass`, plus `check_syntax.bat` and `check_integrity.bat`.
+- **`linux/runner/`** — the GTK runner: `my_application.cc` (window, min size,
+  `com.easypass.app/window` method channel), `easypass_tray.cc` (AppIndicator +
+  StatusNotifier host probe).
+- **`installer/appimage/build_appimage.sh`** — AppImage packaging (version from
+  `pubspec.yaml`).
 - **`Plan.md`** — roadmap (Chinese, **local-only**; not in a fresh clone).
 - **`README.md`** / **`README_zh.md`** — product READMEs (features, security model, build, extension status).
 
@@ -170,7 +232,11 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
 - **Encryption discipline:** passwords/notes/TOTP secrets are always encrypted
   via `CryptoService` before persistence; derive the key from
   `encryptionKeyProvider`; never log or print secrets.
-- **Comments:** mixed Chinese/English comments throughout.
+- **Comments:** mixed Chinese/English comments throughout — **except
+  `windows/runner/**`, which must stay pure ASCII** (see Build/Test/Lint).
+- **Formatting:** do **not** run `dart format` on this repo. It predates Dart 3.13's
+  new formatter, so it rewrites files that were never touched and buries real changes.
+  `flutter analyze` is the gate.
 - **Localization:** all UI strings live in `lib/l10n/app_en.arb` (source) and
   `app_zh.arb` (Chinese); reference them via `AppLocalizations.of(context)`.
   After adding a key to an ARB file, run `flutter gen-l10n`. The UI follows the
@@ -185,6 +251,10 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
   via secure storage); `AuthState.autoLockMinutes` drives the settings UI.
 - **Export/import** distinguishes `format: 'encrypted'` backups (restorable) from
   plain JSON; plain imports are re-encrypted with the session key on import.
+- **Platform split:** `features/desktop_*/` and `core/platform/` hold the platform
+  differences; Dart-side `Platform.isLinux` / `Platform.isWindows` checks belong
+  inside those files, never scattered through the UI. New platform behaviour needs
+  a test that either fakes the platform or skips cleanly on the other OS.
 
 ## Versioning
 
@@ -198,6 +268,7 @@ in-app version shown on the Settings screen:
   UI 打磨等不改变功能的行为调整。
 
 Rule of thumb: 功能变更 → `y`，纯优化/修复 → `z`，架构/安全模型重构 → `x`。
+新增平台（如 2.3.3 的 Linux 桌面端）按"功能变更"走 `y`。
 
 ## Git Workflow
 
@@ -206,11 +277,17 @@ Rule of thumb: 功能变更 → `y`，纯优化/修复 → `z`，架构/安全�
 - `.gitignore` ignores the whole `build/` output tree; `windows/flutter/ephemeral/` is
   ignored by `windows/.gitignore`. **The rest of `windows/` IS tracked** (runner sources,
   CMake files, icon) — treat it as normal source, not as disposable generated output.
+  `linux/flutter/generated_*` **is** tracked: keep it committed, but restore it with
+  `git checkout --` after a Windows-side `flutter` run (CRLF rewrite).
 
 ## CI/CD
 
 No CI configuration exists (no `.github/` or equivalent). Tests are not run by
-any pipeline; `flutter analyze` and `flutter test` are manual gates.
+any pipeline. The manual gates, all run by the agent before handing a build to the
+user: `flutter analyze --no-pub`, `flutter test --no-pub`,
+`node browser_extension/tools/check_extension.mjs` (+ the three jsdom smoke
+scripts), `cmd /c windows\runner\check_syntax.bat` and
+`cmd /c windows\runner\check_integrity.bat`.
 
 ## Tips for AI Agents
 
@@ -226,10 +303,16 @@ any pipeline; `flutter analyze` and `flutter test` are manual gates.
   builds a v1 database by hand and asserts the upgrade — extend it when you add a column.
   Also: drift does **not** enable SQLite foreign keys, so `ON DELETE SET NULL` never fires —
   `deleteFolderAndUnassign()` clears `folder_id` explicitly.
-- **SQLite file location gotcha:** the DB opens at `Platform.resolvedExecutable`
-  dir (`easypass.db`). Widget/unit tests that construct `AppDatabase()` will hit
-  the real file — use `AppDatabase.forTesting()` with `NativeDatabase.memory()`
-  and override `cryptoServiceProvider` with `FakeSecureStorage` (`test/fakes.dart`).
+- **SQLite file location gotcha:** the DB opens through `app_paths.dart`
+  (exe dir on Windows, `$XDG_DATA_HOME/easypass/` on Linux). Widget/unit tests that
+  construct `AppDatabase()` will hit the real file — use `AppDatabase.forTesting()`
+  with `NativeDatabase.memory()` and override `cryptoServiceProvider` with
+  `FakeSecureStorage` (`test/fakes.dart`).
+- **`pubspec.yaml`'s sqlite3 hook must stay Linux-scoped.** It reads
+  `hooks: user_defines: sqlite3: source: {linux: system}` — the `linux:` key, with **no
+  `default:`**. Removing the hook or adding a default makes the Windows build download
+  package binaries instead of using `sqlite3_flutter_libs`, and `flutter test` then fails
+  with `Failed to load dynamic library 'sqlite3.dll'` (206 tests at once).
 - **The native host exe IS built by the Windows build.** `windows/runner/CMakeLists.txt`
   (tracked in git) has a POST_BUILD step that runs `browser_extension/native_host/build_bridge.bat`
   (cl.exe, x86, no MSBuild) next to `easypass.exe`; a second POST_BUILD step copies the MSVC
@@ -242,6 +325,12 @@ any pipeline; `flutter analyze` and `flutter test` are manual gates.
   `SystemChrome` (harmless, but relevant if adding responsive layouts).
 - **Secrets in code:** never print encryption keys/passwords; follow the
   existing pattern of passing `Uint8List` keys around by reference only.
+- **Linux debugging hooks (2.3.3):** `EASYPASS_DEBUG_NO_TRAY=1` forces the
+  "no StatusNotifier host" path and `EASYPASS_DEBUG_AUTO_CLOSE_MS=<ms>` closes the
+  window by itself, so the degrade-on-close behaviour can be checked without a
+  desktop session that lacks a tray. The CLI surface for scripted checks is
+  `--install`, `--uninstall`, `--desktop-status`, `--install-browser-host`,
+  `--uninstall-browser-host`, `--browser-host-status`.
 - **Plan.md** (local-only) holds the roadmap: v2.4 = extension store listing + Bitwarden import + CI +
   release engineering; v3.0 = key-hierarchy rework + self-hosted sync. Sync is **not** implemented, and the
   health report is (login entries only).
@@ -263,6 +352,34 @@ any pipeline; `flutter analyze` and `flutter test` are manual gates.
 Each of these cost real debugging time — do not re-introduce them. The Chinese long-form
 version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
 
+- **A Low mandatory integrity label on the workspace breaks the app in ways that look like
+  code bugs.** Windows gives a process the integrity level of its image's mandatory label;
+  a process started from a Low-labelled exe runs at **Low integrity**, and a Low process
+  cannot register a tray icon (`Shell_NotifyIcon` fails silently) and cannot write to
+  Medium locations (`%TEMP%`, `%LOCALAPPDATA%`, `%APPDATA%`). Symptom set seen on
+  2026-09-27: no tray icon from `build\`, `daemon.json` never updated, settings that did not
+  stick, a SmartScreen prompt — with the vault itself perfectly fine (the DB sits in the
+  same Low directory, so write-*down* succeeds). The label came from an agent sandbox in
+  *workspace-write* mode (it labels the workspace Low on purpose, as its write-up
+  protection). Detect and fix with `cmd /c windows\runner\check_integrity.bat` /
+  `… /fix`; `check_syntax.bat` warns about it too. A Low **file** can survive inside an
+  already-Medium directory, so check the exe, not just the folder.
+- **`windows/runner/**` must stay pure ASCII.** `check_syntax.bat` does not pass `/utf-8`,
+  so cl.exe decodes the sources with the system ANSI code page: a Chinese comment or a
+  full-width character trips C4819, which `/WX` turns into a build failure (and can shift
+  reported line numbers enough to look like a parse error).
+- **The `sqlite3` hook in `pubspec.yaml` is scoped to Linux on purpose** (see the Tips
+  section): unscope it and 206 Windows tests fail on `sqlite3.dll`.
+- **Never trust a script's own success message when it changes permissions or ACLs.**
+  While writing `check_integrity.bat`, two batch bugs made it print the `/fix` branch
+  without `/fix` (parenthesised strings inside a multi-line `if (...)` block confuse cmd's
+  parser, so the block was mis-scoped and `icacls` never ran) and report a false positive
+  (`findstr /i "Low Mandatory"` is an **OR** match, so it matched every `Mandatory
+  Label\Medium…` line — use `/c:"Low Mandatory"`). Always verify the resulting state with a
+  separate `icacls` call.
+- **A Windows-side `flutter` run rewrites the tracked `linux/flutter/generated_*` files with
+  CRLF.** They show up as modified without anyone touching Linux; `git checkout --` them
+  before reviewing or committing (the repo has `core.autocrlf=true` and no `.gitattributes`).
 - **`Text` inside a `Row` needs `Expanded`/`Flexible`** — otherwise `overflow: ellipsis`
   never engages (the Text asks for its intrinsic width in unbounded space) and the row
   overflows: that was the narrow-window yellow/black stripes.
@@ -282,8 +399,8 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
   jsdom also does no layout (`offsetParent` is always null, `getBoundingClientRect` always
   zero), so visibility APIs must be stubbed when testing the content script.
 - **Verify numbers against the code before writing them into docs** — "auto-lock 1–60 min"
-  was wrong (the UI offers 1/3/5/15/30), and `^3.12.2` is the *Dart* SDK constraint, not a
-  Flutter version.
+  was wrong (the UI offers 1/3/5/15/30/60), `^3.12.2` is the *Dart* SDK constraint rather
+  than a Flutter version, and the test count in this file was stale for three releases.
 - **When a CLI takes long text from PowerShell, put it in a file** — embedded double quotes
   break argument parsing (`git commit -F msg.txt`; the same bit `ov add-memory`).
 - **`Select-Object -First N` closes the pipeline early**, so the upstream command can be
@@ -326,3 +443,9 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
 - **A dialog that silently swallows a failure looks like a dead button.** The delete path wraps
   both the count and the delete in try/catch and reports the error in a SnackBar; without that,
   a failed write leaves the user staring at an unchanged list.
+- **A window state that hides the only window needs a way back.** Close-to-tray used to hide
+  the window unconditionally, even when the icon was never registered — the app then ran on
+  with no visible UI and no tray entry (user report: "the process is still there but the app
+  is gone"). Close-to-tray now requires a *successful* icon registration (and a
+  `TaskbarCreated` re-add after an Explorer restart); on Linux the tray degrades to "close
+  quits" when no StatusNotifier host is registered.

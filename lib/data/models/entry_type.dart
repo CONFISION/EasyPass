@@ -2,7 +2,7 @@
 ///
 /// 存储与协议都用 [wireName]，**不要**依赖枚举下标：
 /// - DB：`password_entries.type`（TEXT，默认 `'login'`，2.3.0 起）
-/// - 桥接协议：[wireName] 出现在条目 JSON 的 `type` 字段（契约 3）
+/// - 桥接协议：[wireName] 出现在条目 JSON 的 `type` 字段（协议 3）
 /// - 导出：[wireName] 出现在 JSON 的 `type` 字段（导出格式 2.0.0）
 ///
 /// 未知值一律回退到 [EntryType.login]（旧导出/旧 daemon 的条目没有 type 字段，

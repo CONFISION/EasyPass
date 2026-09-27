@@ -3,7 +3,7 @@
 //
 // 做法：把 popup.html 交给 jsdom 加载（popup.js 真的执行），注入一个假的 `chrome` API：
 //   - chrome.i18n.getMessage 从 _locales/zh_CN/messages.json 取值并替换占位符
-//   - chrome.runtime.sendMessage 交给一个"假本机宿主"，按 HANDOFF_V21_CONTRACT.md 返回数据
+//   - chrome.runtime.sendMessage 交给一个"假本机宿主"，按桥接协议返回数据
 //   - chrome.tabs.query / sendMessage 返回可观测的假 tab
 // 然后断言 popup 的关键行为（解锁态渲染 / 填充 / 复制 / 生成器 / 健康 / 锁定）。
 //

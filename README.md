@@ -2,23 +2,25 @@
 
 **中文版**: [README_zh.md](README_zh.md)
 
-A **local-first password manager for Windows** with a companion Chrome/Edge
-extension: an encrypted vault on your own machine, a background service that keeps
-it available, and one-click auto-fill in the browser. The long-term goal is a
-**self-hostable Bitwarden alternative** — same convenience, no cloud you don't
+A **local-first password manager for Windows and Linux** with a companion
+Chrome/Edge extension: an encrypted vault on your own machine, a background service
+that keeps it available, and one-click auto-fill in the browser. The long-term goal
+is a **self-hostable Bitwarden alternative** — same convenience, no cloud you don't
 control.
 
-![release](https://img.shields.io/badge/release-2.3.2-blue)
-![platform](https://img.shields.io/badge/platform-Windows-0078D6)
-![tests](https://img.shields.io/badge/tests-412%20passing-brightgreen)
+![release](https://img.shields.io/badge/release-2.3.3-blue)
+![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D6)
+![tests](https://img.shields.io/badge/tests-536%20passing-brightgreen)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-> **Current release: 2.3.2** — the vault holds **four entry types** (login, secure
-> note, identity, SSH key) with custom fields; the detail page shows live TOTP
-> codes; folders can be created, renamed, re-iconed and deleted; and everything you
-> edit shows up immediately. 2.3.1/2.3.2 fixed what real use turned up: a folder
-> picker that only ever offered the first folder, screens that kept showing stale
-> data after an edit, and folder rename/delete being reachable only by a long-press.
+> **Current release: 2.3.3 — the Linux desktop port.** 2.3.3 adds a native Linux
+> build (AppImage): tray icon and close-to-tray, single instance with "raise the
+> existing window", XDG autostart, desktop-entry CLI and browser-host registration,
+> with the vault moved to `$XDG_DATA_HOME/easypass/` under `0700`/`0600` POSIX
+> permissions. It also hardens the Windows runner's tray handling. The vault itself
+> keeps the 2.3.0 feature set: **four entry types** (login, secure note, identity,
+> SSH key) with custom fields, live TOTP codes, folder management, and instant UI
+> updates after every edit.
 
 ---
 
@@ -40,8 +42,8 @@ control.
   type.
 - **Fully open source and auditable.** Crypto, storage, the bridge protocol and the
   extension are all in this repository under GPL-3.0.
-- **No admin rights required.** The installer is per-user and lands in your own
-  `%LOCALAPPDATA%`.
+- **No admin rights required.** Windows installs per-user into `%LOCALAPPDATA%`, and
+  the Linux AppImage is a single file in your home directory — nothing needs `sudo`.
 
 ## Features
 
@@ -106,37 +108,26 @@ control.
 
 ### Desktop & system integration
 
+| | Windows | Linux |
+|---|---|---|
+| Tray icon + close-to-tray | `windows/runner` (Win32 `Shell_NotifyIcon`) | `linux/runner` (GTK + libayatana-appindicator) |
+| Single instance | not implemented (no gate) | locks `easypass.db.lock` and wakes the running instance over a unix socket, so a second launch raises the existing window |
+| Start at logon | `HKCU\…\Run` entry, optional in the installer | `$XDG_CONFIG_HOME/autostart/easypass.desktop`, toggled in Settings |
+| Application menu entry | Inno Setup shortcut | `--install` (desktop entry + hicolor icon), `--desktop-status`, `--uninstall` |
+| Browser host registration | Inno Setup writes the registry keys | `--install-browser-host` writes the per-browser manifests |
+
 - Background daemon (`easypass.exe --service`): windowless, cold-started on demand
   by the native-messaging bridge, exits by itself after 10 minutes idle.
-- Tray icon: closing the window hides EasyPass instead of quitting.
-- Start at logon (HKCU Run key), optional in the installer.
-- Architecture: browser → `easypass_native_host.exe` (x86 bridge) → loopback TCP
-  with a random per-run token handshake → daemon → encrypted SQLite.
-- Native minimum window size 900×600; persistent sidebar.
-
-## How it compares
-
-Honest snapshot. “Planned” means it is on the roadmap, not that it works now.
-
-| | **EasyPass 2.3.2** | **Bitwarden + Vaultwarden** | **KeePassXC** |
-|---|---|---|---|
-| Where data lives | Your PC (encrypted SQLite) | Your server (Vaultwarden) or Bitwarden cloud | Your PC (encrypted `.kdbx`) |
-| Server required | No | Yes (for self-hosting) | No |
-| Entry types | Login, secure note, identity, SSH key (+ custom fields) | Login, card, identity, note, SSH key | Login, group, note, card, identity |
-| Browser auto-fill | Yes (Chrome/Edge) | Yes (all major browsers) | Yes (KeePassXC-Browser) |
-| Multi-device sync | **No** — *planned for 3.0* | Yes | Only via your own file sync |
-| Mobile apps | **No** — *planned* | Yes | Companion apps (not KeePassXC itself) |
-| Sharing / organizations | **No** — *planned* | Yes | No |
-| Self-hosting effort | Not applicable yet (no server) | Vaultwarden: low (single container) | Not applicable (file-based) |
-| License | GPL-3.0 | Clients GPL-3.0 / server AGPL-3.0 | GPL-2.0/3.0 |
-
-Where EasyPass wins today: single-machine Windows users who want a native app, a
-real background service for browser auto-fill, and no server or subscription.
-Where it clearly loses: anything multi-device.
+- Architecture (Windows): browser → `easypass_native_host.exe` (x86 bridge) →
+  loopback TCP with a random per-run token handshake → daemon → encrypted SQLite.
+  On Linux the native-messaging host is the main binary itself
+  (`easypass --native-host`), started by the generated wrapper script.
+- Native minimum window size 900×600 on both platforms (enforced in the runner), with
+  a persistent sidebar.
 
 ## Installation
 
-### Option 1 — Installer (recommended)
+### Option 1 — Installer (Windows, recommended)
 
 Download `EasypassSetup.exe` from the releases page and run it. It installs
 **per-user** (no administrator rights) into `%LOCALAPPDATA%\Programs\EasyPass`,
@@ -146,7 +137,7 @@ host for Chrome and Edge, and can start EasyPass at logon.
 > ⚠️ The installer is **not code-signed yet**, so SmartScreen may warn about an
 > unknown publisher. Verify the SHA-256 of the file if you have the checksum.
 
-### Option 2 — Build from source
+### Option 2 — Build from source (Windows)
 
 | Requirement | Notes |
 |---|---|
@@ -181,30 +172,32 @@ flutter gen-l10n                                           # after editing lib/l
 
 ## Linux (desktop, AppImage)
 
-A Linux desktop build ships as a **single-file AppImage** (plus an unpack-and-run
-`.tar.gz`). It is a port of the Windows feature set — see the release notes below;
-the Windows installer and the `windows/` sources are untouched by it.
+The Linux build ships as a **single-file AppImage**. It has feature parity with the
+Windows desktop app (vault, tray, autostart, browser host); the Windows installer and
+the `windows/` sources are untouched by it.
 
 ### Install in three steps
 
 ```bash
-chmod +x EasyPass-2.3.2-linux-x86_64.AppImage    # 1. make it executable
-./EasyPass-2.3.2-linux-x86_64.AppImage           # 2. run it once (creates the vault)
-./EasyPass-2.3.2-linux-x86_64.AppImage --install # 3. add it to the application menu
+chmod +x EasyPass-2.3.3-linux-x86_64.AppImage    # 1. make it executable
+./EasyPass-2.3.3-linux-x86_64.AppImage           # 2. run it once (creates the vault)
+./EasyPass-2.3.3-linux-x86_64.AppImage --install # 3. add it to the application menu
 ```
 
 > **Ubuntu / AppImage without FUSE 2.** If the AppImage refuses to start because
 > `libfuse2` is missing, either install it yourself (`sudo apt install libfuse2` —
-> EasyPass never runs `sudo` or installs packages for you), or use the
-> self-extracting fallback, which needs no FUSE at all:
+> EasyPass never runs `sudo` or installs packages for you), or unpack and run it in
+> place, which needs no FUSE at all:
 >
 > ```bash
-> ./EasyPass-2.3.2-linux-x86_64.AppImage --appimage-extract-and-run
-> ./EasyPass-2.3.2-linux-x86_64.AppImage --appimage-extract-and-run --install
+> ./EasyPass-2.3.3-linux-x86_64.AppImage --appimage-extract-and-run
+> ./EasyPass-2.3.3-linux-x86_64.AppImage --appimage-extract-and-run --install
 > ```
->
-> The `.tar.gz` exists for the same reason: unpack it and run
-> `EasyPass-2.3.2-linux-x86_64/AppRun`.
+
+Build it yourself with `installer/appimage/build_appimage.sh <bundle_dir>
+<output_appimage>` after `flutter build linux --release`; the script reads the
+version from `pubspec.yaml` and needs `appimagetool` (override its location with
+`$APPIMAGETOOL`).
 
 ### Where your data lives (XDG)
 
@@ -218,8 +211,7 @@ chmod +x EasyPass-2.3.2-linux-x86_64.AppImage    # 1. make it executable
 | Autostart entry (Settings toggle) | `$XDG_CONFIG_HOME/autostart/easypass.desktop` (default `~/.config/autostart/`) |
 
 `$XDG_DATA_HOME` unset or empty means `~/.local/share` (XDG Base Directory
-Specification). The data directory is `0700` and the database `0600` — see
-declaration 3 in the release notes.
+Specification). The data directory is `0700` and the database `0600`.
 
 **Migrating an old layout.** Older builds kept `easypass.db` *next to the
 executable*. On the first Linux start that file is **copied** to
@@ -229,18 +221,24 @@ never move or delete), so nothing is lost if you go back to the old build.
 ### Desktop integration
 
 ```bash
-./EasyPass-2.3.2-linux-x86_64.AppImage --install         # desktop entry + icon (idempotent)
-./EasyPass-2.3.2-linux-x86_64.AppImage --desktop-status  # exit 0 = installed, 1 = points at a dead target, 2 = not installed
-./EasyPass-2.3.2-linux-x86_64.AppImage --uninstall       # removes only what it wrote, then empty directories
+./EasyPass-2.3.3-linux-x86_64.AppImage --install         # desktop entry + icon (idempotent)
+./EasyPass-2.3.3-linux-x86_64.AppImage --desktop-status  # exit 0 = installed, 1 = points at a dead target, 2 = not installed
+./EasyPass-2.3.3-linux-x86_64.AppImage --uninstall       # removes only what it wrote, then empty directories
 ```
 
 `--install` bakes the AppImage's real path (`$APPIMAGE`) into `Exec=`, so moving
 the AppImage afterwards means re-running `--install`.
 
+The GTK application id is `com.easypass.app` (2.3.3+; earlier builds used the
+Flutter template default `com.example.easypass`). A desktop entry written by an
+older build therefore carries a stale `StartupWMClass` — run `--install` once after
+upgrading, otherwise window grouping and icon lookup in the taskbar/dock use the
+old class.
+
 ### Browser extension on Linux
 
 1. Run the host installer once:
-   `./EasyPass-2.3.2-linux-x86_64.AppImage --install-browser-host` (writes the
+   `./EasyPass-2.3.3-linux-x86_64.AppImage --install-browser-host` (writes the
    Chrome/Chromium/Brave/Edge and Firefox native-messaging manifests;
    `--browser-host-status` reports each browser). Then load the unpacked extension.
 2. **Chrome / Chromium / Brave / Edge** — open `chrome://extensions` (or the
@@ -258,21 +256,24 @@ writes/removes `$XDG_CONFIG_HOME/autostart/easypass.desktop`.
 
 ### Linux limitations
 
-- **GNOME without an AppIndicator extension** cannot host the tray icon, so
-  EasyPass degrades to *closing the window quits the app* and says so in Settings.
-  Ubuntu ships the extension enabled; KDE Plasma supports trays natively.
+- **The tray needs a StatusNotifier host** (KDE Plasma, or GNOME with the
+  AppIndicator extension — Ubuntu ships it enabled). When no host is registered on
+  the session bus, EasyPass keeps the icons out of the way and makes **closing the
+  window quit the app** instead of hiding it, so the window can never end up hidden
+  with no tray icon to bring it back.
 - **Firefox support is untested end-to-end**: the manifests and the native-host
   wrapper are in place, but Firefox versions that still expect an MV3 event page
   instead of `background.service_worker` may need a follow-up manifest variant.
 - **Not code-signed**, and the AppImage needs FUSE 2 unless you use
-  `--appimage-extract-and-run` or the `.tar.gz`.
+  `--appimage-extract-and-run`.
 
 ## Browser extension
 
-The installer registers the native host automatically; in the browser open
-`chrome://extensions` (or `edge://extensions`), enable **Developer mode** and choose
-**Load unpacked** → `browser_extension/`. The extension is not published to any
-store yet, so this manual step is required.
+The Windows installer registers the native host automatically; on Linux run
+`--install-browser-host` once (see above). Then open `chrome://extensions` (or
+`edge://extensions`), enable **Developer mode** and choose **Load unpacked** →
+`browser_extension/`. The extension is not published to any store yet, so this
+manual step is required.
 
 If the popup reports *“Unknown action”* or a stale background service, an older
 daemon is still running: quit EasyPass completely (including the tray) and start it
@@ -282,8 +283,13 @@ again — protocol version 3 retires the old process.
 
 ```powershell
 flutter analyze --no-pub
-flutter test --no-pub                 # 412 unit/integration tests
+flutter test --no-pub      # 536 passed / 9 skipped on Windows (545 cases)
+flutter build linux --release   # Linux desktop bundle (needs GTK 3 + libayatana-appindicator3-dev)
 ```
+
+The 9 skipped cases are the Linux-only suites (`browser_host_installer_test.dart`
+and friends): they register their cases only on Linux, so a Windows run reports them
+as skipped instead of silently passing.
 
 Extension checks (no browser needed; `jsdom` must be installed):
 
@@ -298,16 +304,29 @@ Live debugging helpers: `node browser_extension/tools/probe_daemon.mjs` (talk to
 running daemon) and `probe_bridge.mjs` (spawn the bridge end-to-end) tell you
 whether the daemon, the bridge or the extension is at fault.
 
-`cmd /c windows\runner\check_syntax.bat` compiles `windows/runner/*.cpp` with the
-same warning flags as the real build (`/W4 /WX`) without invoking MSBuild.
+Two native pre-build checks, neither of which needs MSBuild:
+
+```powershell
+cmd /c windows\runner\check_syntax.bat      # compiles windows/runner/*.cpp with the real flags (/W4 /WX)
+cmd /c windows\runner\check_integrity.bat   # Low integrity label on the workspace? (see Troubleshooting)
+```
+
+### Troubleshooting
+
+| Symptom | First thing to check |
+|---|---|
+| Windows: no tray icon after closing/reopening, or settings that do not stick | `cmd /c windows\runner\check_integrity.bat`. A **Low mandatory integrity label** on the workspace (e.g. left behind by an agent sandbox in *workspace-write* mode) makes every process started from `build\` run at Low integrity: no tray icon, and silent write failures under `%TEMP%` / `%LOCALAPPDATA%` / `%APPDATA%`. Fix with `check_integrity.bat /fix`. |
+| Extension: “Unknown action”, timeouts, empty popup | Old daemon still running — quit EasyPass (tray included) and start it again; then `node browser_extension/tools/probe_bridge.mjs`. |
+| Windows: `flutter test` fails to load `sqlite3.dll` | `pubspec.yaml` must keep the sqlite3 hook scoped to Linux (`source: {linux: system}`); unscoped it also changes how Windows loads SQLite. |
+| Linux: app starts but the tray icon never appears | No StatusNotifier host on the session bus — see *Linux limitations*. |
 
 ## Data & security model
 
-- **Vault database** — `easypass.db`, stored next to the executable (per-user
-  install → writable, no admin rights).
+- **Vault database** — `easypass.db`, next to the executable on Windows and in
+  `$XDG_DATA_HOME/easypass/` on Linux (per-user, writable, no admin rights).
 - **Master password** — never stored; PBKDF2-HMAC-SHA256 (100,000 iterations,
   32-byte salt) derives the AES-256-CBC key. Only the salt and a verification hash
-  are kept in `flutter_secure_storage` (DPAPI on Windows).
+  are kept in `flutter_secure_storage` (DPAPI on Windows, Secret Service on Linux).
 - **Session** — the derived key lives in memory only; locking clears it. The browser
   session key is held by the daemon and wiped after the idle timeout.
 - **Encryption coverage** — passwords, TOTP secrets, notes, identity/SSH blocks and
@@ -333,46 +352,53 @@ Bitwarden alternative you host yourself.
 
 **Later (not scheduled).** Attachments, passkeys, biometric unlock, SQLCipher,
 payment cards, Steam Guard TOTP, breach checks (opt-in), a CLI, Android-first mobile
-app, macOS/Linux, Firefox extension.
+app, macOS, Firefox extension.
 
 ## Release notes
 
-### 2.3.2 — new: Linux desktop support
+### 2.3.3 — Linux desktop support
 
-This branch brings the desktop app to Linux: tray / single-instance / autostart
-parity, XDG data locations, a Linux native-messaging host, AppImage + `.tar.gz`
-artifacts, and the desktop-entry CLI (`--install` / `--uninstall` /
-`--desktop-status`, with the matching `--install-browser-host` family).
-`pubspec.yaml` stays at **2.3.2** on purpose — the Windows release and this build
-share one version string.
+**New platform.** A native Linux build (`flutter build linux` → AppImage) with the
+same vault as Windows: tray icon and close-to-tray implemented in the GTK runner
+(`libayatana-appindicator`), single instance with a unix-socket wake-up so a second
+launch raises the existing window, XDG autostart, the desktop-entry CLI
+(`--install` / `--uninstall` / `--desktop-status`) and browser-host registration
+(`--install-browser-host` / `--uninstall-browser-host` / `--browser-host-status`).
 
-Three declarations come with the port:
+Four notes that come with the port:
 
-1. **Cross-platform error wording differs, on purpose.** The new CLIs speak the
-   platform they run on: on Windows they print *“On Windows, use the EasyPass
-   installer (Inno Setup) …”* and exit `0`, while on Linux they print the real
-   result (paths written, per-browser host state). Linux-only failure modes
-   (missing `HOME`, unwritable `$XDG_DATA_HOME`) report their own message instead of
-   a Windows registry error. **No Windows code path changed behaviour.**
-2. **Data directory migration: copy, never delete.** The vault moved from *next to
-   the executable* to `$XDG_DATA_HOME/easypass/` (default `~/.local/share/easypass/`).
-   An exe-adjacent `easypass.db` is **copied** to the new location on first start and
-   the original is kept as a fallback.
-3. **Linux-only permissions.** The data directory is `chmod 0700`, the vault
-   database `0600`, the native-host wrapper `0700`, and the browser-host manifest
-   files `0644` in `0700` directories. These POSIX bits are Linux hardening only;
-   Windows keeps its `%LOCALAPPDATA%` ACL behaviour untouched.
+1. **The vault moved on Linux.** It now lives in `$XDG_DATA_HOME/easypass/` instead
+   of next to the executable; an old exe-adjacent `easypass.db` is **copied** on
+   first start and the original is kept as a fallback.
+2. **Linux-only permissions.** Data directory `0700`, database and migration
+   temporaries `0600`, native-host wrapper `0700`, browser manifests `0644` inside
+   `0700` directories. These POSIX bits are Linux hardening only; Windows keeps its
+   `%LOCALAPPDATA%` ACL behaviour.
+3. **The Linux native-messaging host is the app binary itself**
+   (`easypass --native-host`, started by the generated wrapper). Windows keeps its
+   separate x86 bridge executable and the `--service` daemon contract.
+4. **Windows tray handling was hardened at the same time**: the runner now checks
+   that the icon was really registered (and would rather quit on close than hide a
+   window nobody can restore), re-adds the icon when Explorer restarts
+   (`TaskbarCreated`), and enforces the 900×600 minimum window size on Linux too.
+
+### 2.3.0–2.3.2 — the vault grew up
+
+Four entry types (login / secure note / identity / SSH key) with custom fields,
+live TOTP codes, folder management (icons, rename, guarded delete), `type:` /
+`folder:` / `url:` search prefixes, and the fixes real use turned up in 2.3.1/2.3.2:
+a folder picker that only offered the first folder, screens that kept showing stale
+data after an edit, and folder rename/delete reachable only by a long-press.
 
 ## Known limitations
 
-- **Windows-focused** — the Windows build is the supported release; this branch
-  adds a Linux desktop build (AppImage / `.tar.gz`), and macOS, mobile and a
-  Firefox-store extension are still not available.
+- **Windows and Linux desktop only** — no macOS, no mobile, and the extension is
+  Chrome/Edge (Firefox not verified).
 - **No sync** — one machine per vault; copying the database file is the only way to
   move it, and it must not be copied while EasyPass is running.
 - **The extension is not published**, so it must be loaded unpacked.
-- **The installer is not code-signed**, so SmartScreen warns about an unknown
-  publisher.
+- **Neither the installer nor the AppImage is code-signed**, so SmartScreen may warn
+  about an unknown publisher on Windows.
 - **No CI** — `flutter analyze`, `flutter test` and the extension checks are run
   manually.
 - **Auto-fill gaps** — two-step sign-in flows (username page first) only fill the

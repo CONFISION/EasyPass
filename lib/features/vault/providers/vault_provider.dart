@@ -27,7 +27,7 @@ final vaultEntriesProvider = StreamProvider<List<VaultItem>>((ref) {
 
 /// 列表真正渲染的那条流：**文件夹 + 类型 + 收藏**三者叠加。
 ///
-/// 三个维度在这里 combine（契约 §3 / §10.9），UI 不需要自己拼状态：
+/// 三个维度在这里 combine，UI 不需要自己拼状态：
 /// 换文件夹不会清掉类型筛选，切收藏也不会清掉类型筛选。
 final filteredVaultEntriesProvider = StreamProvider<List<VaultItem>>((ref) {
   ref.watch(encryptionKeyProvider);
@@ -56,7 +56,7 @@ final vaultFavoritesProvider = StreamProvider<List<VaultItem>>((ref) {
 // ─── Search ───────────────────────────────────────────────
 
 /// 搜索走 [VaultRepository.watchSearch]：支持 `type:` / `folder:` / `url:`
-/// 前缀，并匹配身份 / SSH / 自定义字段（契约 §3）。
+/// 前缀，并匹配身份 / SSH / 自定义字段。
 ///
 /// **流式**（2.3.1 修复）：原来是 `FutureProvider.family`，同一个查询词会被
 /// 永久缓存 —— "搜一次 → 编辑条目 → 再搜同一个词"看到的是旧结果。

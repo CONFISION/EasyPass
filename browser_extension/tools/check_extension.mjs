@@ -148,7 +148,7 @@ if (manifest) {
 }
 
 // ─── 5. 协议动作覆盖 ──────────────────────────────────────
-// 与 HANDOFF_V21_CONTRACT.md 第 2.1 节保持同步
+// 必须与 background.js 的动作分发保持同步
 const PROTOCOL_ACTIONS = [
   'getStatus',
   'getAllCredentials',

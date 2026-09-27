@@ -8,6 +8,67 @@
 #include "flutter/generated_plugin_registrant.h"
 #include "easypass_tray.h"
 
+// ─── Dart → runner window channel ───────────────────────────────────────────
+//
+// 窗口归本 runner 所有（托盘菜单、关窗最小化都在 C++ 侧），但"二次启动唤起
+// 已有窗口"的起点在 Dart：`single_instance_raise_host.dart` 收到 raise 字节
+// 后调 `WindowController.show()`。这里只提供那一个原生方法。通道名必须与
+// `lib/features/desktop_tray/linux_window_controller.dart` 的
+// `kLinuxWindowChannelName` 一致。
+static FlMethodChannel* g_window_channel = nullptr;
+
+static void window_method_call_cb(FlMethodChannel* channel,
+                                  FlMethodCall* method_call,
+                                  gpointer user_data) {
+  // 与同文件其它回调一致：显式标注未使用参数，避免将来开启 -Wextra 时被
+  // `-Wunused-parameter` + `-Werror` 断掉构建。
+  (void)channel;
+  (void)user_data;
+  g_autoptr(GError) error = nullptr;
+  if (g_strcmp0(fl_method_call_get_name(method_call), "show") == 0) {
+    easypass_window_show();
+    if (!fl_method_call_respond_success(method_call, nullptr, &error)) {
+      // `@error` 是 (allow-none)：引擎有"返回 FALSE 但不设 error"的路径
+      // （fl_binary_messenger.cc 的 g_return_val_if_fail 分支），直接取
+      // error->message 会空指针解引用。
+      g_warning("easypass window channel: failed to respond: %s",
+                error != nullptr ? error->message : "unknown");
+    }
+    return;
+  }
+  if (!fl_method_call_respond_not_implemented(method_call, &error)) {
+    g_warning("easypass window channel: failed to respond: %s",
+              error != nullptr ? error->message : "unknown");
+  }
+}
+
+// 注册一次、进程内复用：`activate` 只跑一次（`G_APPLICATION_NON_UNIQUE`
+// 加单实例闸门），所以静态持有是安全的；`fl_method_channel_new` 返回的是
+// 非浮动引用（messenger 自己也持一份），进程退出时随进程回收。
+static void window_channel_register(FlView* view) {
+  if (g_window_channel != nullptr) {
+    return;
+  }
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  g_window_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "com.easypass.app/window", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(g_window_channel,
+                                            window_method_call_cb, nullptr,
+                                            nullptr);
+}
+
+// 窗口最小尺寸，与 Windows runner 的 kMinWindowWidth / kMinWindowHeight
+// (windows/runner/win32_window.cpp) 对齐；那两个常量又是按
+// `lib/features/vault/screens/vault_screen.dart` 的固定侧边栏宽度
+// (_sidebarWidth = 248) 定的。少了它，Linux 上窄窗会像当年 Windows 那样溢出
+// （见 AGENTS.md「窗口最小尺寸在原生层强制」）。
+//
+// GTK 的 size request 用**逻辑像素**，所以这里不需要像 Win32 那样自己乘 DPI
+// 缩放、也不需要手动夹到显示器工作区 —— 由 GTK / 窗口管理器处理。
+static const int kMinWindowWidth = 900;
+static const int kMinWindowHeight = 600;
+
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
@@ -150,6 +211,30 @@ static void my_application_activate(GApplication* application) {
   }
 
   gtk_window_set_default_size(window, 1280, 720);
+  // 最小尺寸（见 kMinWindowWidth/kMinWindowHeight），并**夹到显示器工作区**：
+  // 在 1920x1080@200% 这类缩放下逻辑工作区只有 960x540，硬要 600 逻辑像素的
+  // 高度会让窗口比屏幕还高，底部 UI 永远够不到。Windows runner 同样要夹
+  // （AGENTS.md「窗口最小尺寸在原生层强制 … 并夹到显示器工作区内」），这里
+  // 用 GTK 的等价物。`gdk_monitor_get_workarea` 给的是应用（逻辑）像素，与
+  // size request 同单位，所以直接比较即可 —— 不需要像 Win32 那样自己乘 DPI。
+  // 取不到显示器 / 工作区不可信（0）时保持原值：宁可尺寸大一点，也不要因为
+  // 探测失败把最小值设成 0 而失去保护。
+  gint min_width = kMinWindowWidth;
+  gint min_height = kMinWindowHeight;
+  GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(window));
+  GdkMonitor* monitor =
+      display != nullptr ? gdk_display_get_monitor(display, 0) : nullptr;
+  if (monitor != nullptr) {
+    GdkRectangle workarea = {0, 0, 0, 0};
+    gdk_monitor_get_workarea(monitor, &workarea);
+    if (workarea.width > 0 && min_width > workarea.width) {
+      min_width = workarea.width;
+    }
+    if (workarea.height > 0 && min_height > workarea.height) {
+      min_height = workarea.height;
+    }
+  }
+  gtk_widget_set_size_request(GTK_WIDGET(window), min_width, min_height);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
@@ -171,6 +256,9 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+
+  // Dart 侧调 `WindowController.show()` 的入口（二次启动唤起窗口）。
+  window_channel_register(view);
 
   // Tray icon + close-to-hide live in the runner (like Windows), which keeps
   // the Dart side free of third-party tray packages whose Linux plugins were
@@ -195,10 +283,19 @@ static void my_application_activate(GApplication* application) {
   // user-data is the precise teardown — the only `delete-event` handler that
   // captures the FlView is the embedder's. (The trampoline function is a
   // private static symbol in libflutter_linux_gtk.so and not exported.)
+  //
+  // 已对 engine 源码核实（`shell/platform/linux/fl_view.cc` 的 realize_cb）：
+  // toplevel 上只连了 `delete-event`，它其余的信号连接都挂在 view 自己的子
+  // 部件上。即便如此这里仍把匹配**收窄到 delete-event**：传 signal_id = 0 会
+  // 摘掉"这个窗口上所有 user-data 为 view 的处理器"，今天只有 embedder 那
+  // 一个，但收窄过的匹配不会在将来悄悄让某个新处理器失效。若
+  // `g_signal_lookup` 返回 0（找不到），id 退化为 0 = 旧行为，不会更糟。
+  const guint delete_event_signal =
+      g_signal_lookup("delete-event", GTK_TYPE_WIDGET);
   g_signal_handlers_disconnect_matched(
       window,
       G_SIGNAL_MATCH_DATA,
-      0, 0, nullptr, nullptr, view);
+      delete_event_signal, 0, nullptr, nullptr, view);
 
   easypass_tray_install(window);
   if (easypass_tray_is_active()) {

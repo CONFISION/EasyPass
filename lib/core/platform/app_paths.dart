@@ -4,7 +4,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 
-/// P1.5 审计 F4：`ProcessException.errorCode` 是非空 int（"无错误码" 也是 0），
+/// `ProcessException.errorCode` 是非空 int（"无错误码" 也是 0），
 /// 与类型拼起来便于诊断，同时不泄漏路径 / 参数 / message。
 String _chmodSpawnDetail(ProcessException e) {
   if (e.errorCode != 0) return 'errno=${e.errorCode}';
@@ -27,12 +27,12 @@ abstract final class AppPaths {
       Directory(p.dirname(Platform.resolvedExecutable));
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // P3.5 §6 #1：缓存解析结果。
+  // 缓存解析结果。
   //
   // 之前 `dataDirectory` / `configDirectory` / `autostartDirectory` 每次
   // 调用都会重读 `Platform.environment['XDG_DATA_HOME' | 'XDG_CONFIG_HOME' |
   // 'HOME']` 并 `p.join` 一次。`EasypassDaemon.probe` 在每条 idle 检查期间
-  // 会经过 `daemonInfoFile` 多次取这条路径（AUDIT-P1 #10）—— 既多 syscall，
+  // 会经过 `daemonInfoFile` 多次取这条路径 —— 既多 syscall，
   // 又把"env 是否被改"这条隐性假设漏在每次调用上。
   //
   // 解析结果对单次进程是稳定的：env 不会变、`resolvedExecutable` 不会变、
@@ -53,7 +53,7 @@ abstract final class AppPaths {
 
   /// User-writable application data directory.
   ///
-  /// Memoized for the lifetime of the process (P3.5 §6 #1). Tests may reset
+  /// Memoized for the lifetime of the process. Tests may reset
   /// via [debugResetAppPathsCacheForTesting]; production callers do not need
   /// to release anything — a single `Directory` instance is reused.
   static Directory get dataDirectory {
@@ -79,7 +79,7 @@ abstract final class AppPaths {
     return Directory(p.join(dataHome, _linuxDataDirectoryName));
   }
 
-  /// P3.5 §6 #1：测试钩子。生产代码**绝不**调用。
+  /// 测试钩子。生产代码**绝不**调用。
   @visibleForTesting
   static void debugResetAppPathsCacheForTesting() {
     _cachedDataDirectory = null;
@@ -106,11 +106,11 @@ abstract final class AppPaths {
   /// `xdgConfigHome` lookup: `$XDG_CONFIG_HOME` first, falling back to
   /// `~/.config` (matching the freedesktop.org Base Directory Specification).
   ///
-  /// P3.2 introduces this for the Linux autostart path; it deliberately lives
+  /// Introduced for the Linux autostart path; it deliberately lives
   /// here (next to [dataDirectory]) so the XDG lookup rules stay in one place
   /// rather than spreading across feature folders.
   ///
-  /// Memoized for the lifetime of the process (P3.5 §6 #1) — see the same
+  /// Memoized for the lifetime of the process — see the same
   /// note on [dataDirectory]. Same `debugResetAppPathsCacheForTesting` reset.
   static Directory get configDirectory {
     final cached = _cachedConfigDirectory;
@@ -149,7 +149,7 @@ abstract final class AppPaths {
   /// directory is `$XDG_CONFIG_HOME/autostart/` (default `~/.config/autostart`).
   /// The directory is created on demand by the autostart installer.
   ///
-  /// Memoized for the lifetime of the process (P3.5 §6 #1) — see the same
+  /// Memoized for the lifetime of the process — see the same
   /// note on [dataDirectory]. Same `debugResetAppPathsCacheForTesting` reset.
   static Directory get autostartDirectory {
     final cached = _cachedAutostartDirectory;
@@ -178,12 +178,12 @@ abstract final class AppPaths {
   }
 
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // P3.5 §6 #6 — 迁移 tmp 路径生成（AUDIT-P1 §2.1 1st item）。
+  // 迁移 tmp 路径生成。
   //
   // 历史：固定名 `${file.path}.tmp` 在两个进程同时首次启动的窄窗口里会
   // 互相覆盖 —— 先到者 `copy + rename`，后到者 `copy` 期间**前者的 tmp**已
-  // 被覆写，后到者的 `rename` 把覆写后的残片搬到 canonical。这是审计
-  // §2.1 1st item 指出的并发首启窄窗口。
+  // 被覆写，后到者的 `rename` 把覆写后的残片搬到 canonical。这就是并发首启
+  // 的窄窗口。
   //
   // 现状：
   //   - **唯一性** = `<pid>-<random8>`（2^32 空间，4B 之内足够无冲突）。
@@ -292,11 +292,11 @@ abstract final class AppPaths {
     await file.parent.create(recursive: true);
 
     // Tighten the data directory and the database file BEFORE any early
-    // return. The previous P1.2 implementation only ran this on the
+    // return. The previous implementation only ran this on the
     // "first-run / legacy-migration" path; on the dominant path
     // (`easypass.db` already exists) it was skipped, leaving the directory
     // at the umask default (`drwxr-xr-x` / `-rw-r--r--`). That is exactly
-    // the leak the audit §1.1 called out, so this must run on every call.
+    // the leak described above, so this must run on every call.
     // Failures here must not block the app from opening the vault (the
     // directory may be on a filesystem that does not support POSIX
     // permissions, or the user may be inside a container that already
@@ -304,7 +304,7 @@ abstract final class AppPaths {
     // start on a writable filesystem that simply lacks the chmod bit, which
     // is worse than running with the umask-derived default.
     await _enforceLinuxPrivacy(file);
-    // P1.4 审计 §⑤：源库（legacy exe 旁拷贝）在"已存在新库"路径上完全没被
+    // 源库（legacy exe 旁拷贝）在"已存在新库"路径上完全没被
     // 触碰过——所以它的 umask 默认 0644 会一直挂着。每次调用都顺手收紧。
     await _tightenLegacyDatabasePermissions();
 
@@ -317,7 +317,7 @@ abstract final class AppPaths {
       // rename is atomic on the same filesystem; the old file stays put
       // in case the new install ever wants to fall back.
       //
-      // P3.5 §6 #6 (AUDIT-P1 §2.1 1st item): the previous fixed
+      // The previous fixed
       // `${file.path}.tmp` collided if two processes started in the same
       // second (race window: `if (await file.exists()) return file;` is
       // not atomic across fork / concurrent first-launch) — copy #1 into
@@ -337,34 +337,15 @@ abstract final class AppPaths {
         await legacyFile.copy(tmpFile.path);
         await tmpFile.rename(file.path);
       } catch (error) {
-        // P1.4 审计 §⑥：异常路径上也要保证权限收紧。delete 之前先 chmod 600，
+        // 异常路径上也要保证权限收紧。delete 之前先 chmod 600，
         // 这样即使 delete 失败（文件被锁 / 磁盘满），tmp 也不会以宽权限
         // 留在磁盘上。canonical path 在异常路径上不会被触碰。
         if (await tmpFile.exists()) {
           if (Platform.isLinux) {
-            // chmod 不致命，失败时仍尝试删除。P1.5 审计 F4：把
-            // `ProcessException`（spawn 失败 / PATH 没 chmod / EACCES）
-            // 也归一到 "best-effort"——这条 catch 在迁移失败路径上，绝
-            // 不能因为 chmod spawn 失败而把 FileSystemException 顶到上层
-            // 阻断开库。
-            try {
-              final tmpChmod =
-                  await Process.run('chmod', ['600', tmpFile.path]);
-              if (tmpChmod.exitCode != 0) {
-                // ignore: avoid_print
-                print(
-                  'AppPaths: chmod 600 on migration tmp '
-                  '${tmpFile.path} failed '
-                  '(exit ${tmpChmod.exitCode}); continuing',
-                );
-              }
-            } on ProcessException catch (e) {
-              // ignore: avoid_print
-              print(
-                'AppPaths: chmod 600 spawn failed on migration tmp '
-                '(${_chmodSpawnDetail(e)}); continuing',
-              );
-            }
+            // chmod 不致命，失败时仍尝试删除（best-effort）。这条 catch 在
+            // 迁移失败路径上，绝不能因为 chmod 失败而把 FileSystemException
+            // 顶到上层阻断开库。
+            await _tightenMigrationTmp(tmpFile);
           }
           try {
             await tmpFile.delete();
@@ -397,7 +378,7 @@ abstract final class AppPaths {
   /// helper is a no-op on Windows so callers (e.g. [EasypassDaemon._persistInfo])
   /// can invoke it unconditionally.
   ///
-  /// **P1.5 审计 F4**: `Process.run` may itself throw (PATH 里没有
+  /// `Process.run` may itself throw (PATH 里没有
   /// `chmod` / 沙箱拒 spawn / EACCES)。spawn 失败**不能**冒泡 —— 注释
   /// 早已声明 "must not prevent the vault from opening"，所以一律吞掉
   /// `ProcessException`，并把诊断标签脱敏化（仅留 `<basename> / <errno>`，
@@ -413,15 +394,14 @@ abstract final class AppPaths {
         );
       }
     } on ProcessException catch (e) {
-      // ignore: avoid_print
-      print(
+      _diagnostic(
         'AppPaths: chmod spawn failed for ${p.basename(file.path)} '
         '(${_chmodSpawnDetail(e)}); continuing',
       );
     }
   }
 
-  /// P1.4 审计 §⑥：fresh-install 路径上 `prepareDatabaseFile` 返回时 db
+  /// fresh-install 路径上 `prepareDatabaseFile` 返回时 db
   /// 还没被 drift 创建，所以即便它 chmod 了也拿不到正确的实体文件。
   /// drift `setup` 回调在打开 SQLite 文件（**包括 onCreate 首次创建**）之后
   /// 运行，调用本入口把"drift 用 umask 默认 0644 创建的空 db"也收紧到 0600。
@@ -429,16 +409,58 @@ abstract final class AppPaths {
   static Future<void> enforceLinuxPrivacyFor(File database) =>
       _enforceLinuxPrivacy(database);
 
-  /// Tighten the Linux data directory to `0700` and the database file (or
-  /// any sibling `.tmp` migration intermediate) to `0600`. **Linux only** —
-  /// Windows is intentionally skipped; the equivalent protection there is
-  /// the `%LOCALAPPDATA%` ACL that the installer / OS already applies.
+  /// Diagnostics sink for this file.
+  ///
+  /// **Never `print`** — on Linux stdout is the browser's native-messaging
+  /// channel whenever the process runs as the native host (`--native-host`):
+  /// `runNativeHost()` constructs `AppDatabase()`, which reaches
+  /// `prepareDatabaseFile()` below, and the service writes 4-byte-length
+  /// prefixed frames to stdout. A single line of text on stdout desynchronises
+  /// that parser and the extension sees a timeout instead of an answer. Going
+  /// to stderr keeps the diagnostic and leaves the protocol stream untouched.
+  static void _diagnostic(String message) {
+    try {
+      stderr.writeln(message);
+    } catch (_) {
+      // A closed/broken stderr must never prevent the vault from opening
+      // (same contract as the chmod failures reported through here).
+    }
+  }
+
+  /// `chmod 600` on a migration intermediate. Best effort, never throws.
+  ///
+  /// Used both by the failure path of the migration itself and by the sweep in
+  /// [_enforceLinuxPrivacy], so the two can not drift apart (the sweep used to
+  /// look for a fixed `<db>.tmp` name while the migration had started writing
+  /// `<db>.tmp-<pid>-<8hex>`, which left an interrupted copy world-readable).
+  static Future<void> _tightenMigrationTmp(File tmp) async {
+    try {
+      final result = await Process.run('chmod', ['600', tmp.path]);
+      if (result.exitCode != 0) {
+        _diagnostic(
+          'AppPaths: chmod 600 on ${tmp.path} failed '
+          '(exit ${result.exitCode}); continuing',
+        );
+      }
+    } on ProcessException catch (e) {
+      _diagnostic(
+        'AppPaths: chmod 600 spawn failed on ${p.basename(tmp.path)} '
+        '(${_chmodSpawnDetail(e)}); continuing',
+      );
+    }
+  }
+
+  /// Tighten the Linux data directory to `0700`, the database file to `0600`
+  /// and every migration intermediate (`<db>.tmp`, `<db>.tmp-<pid>-<8hex>`) to
+  /// `0600`. **Linux only** — Windows is intentionally skipped; the equivalent
+  /// protection there is the `%LOCALAPPDATA%` ACL that the installer / OS
+  /// already applies.
   ///
   /// Best effort: a chmod failure (filesystem without POSIX bits, container
   /// with read-only root, etc.) must not prevent the vault from opening.
-  /// The audit log surfaces the failure for diagnosis.
+  /// Failures are reported on **stderr** (see [_diagnostic]) for diagnosis.
   ///
-  /// **P1.5 审计 F4**: 三处 `Process.run('chmod', …)` 都被 try/`on
+  /// 三处 `Process.run('chmod', …)` 都被 try/`on
   /// ProcessException` 包住。spawn 失败（PATH 没 chmod / 沙箱拒 spawn）
   /// 不再冒泡阻断开库；诊断标签脱敏化（用 `p.basename` 替路径）。`exitCode != 0`
   /// 既有处理保持不变。
@@ -451,20 +473,18 @@ abstract final class AppPaths {
     try {
       final dirResult = await Process.run('chmod', ['700', dir.path]);
       if (dirResult.exitCode != 0) {
-        // stderr from `chmod` already explains why; we deliberately do not
+        // `chmod`'s own stderr already explains why; we deliberately do not
         // rethrow so a sandboxed build (e.g. a snap with no chmod support)
         // can still launch.
-        // ignore: avoid_print
-        print(
+        _diagnostic(
           'AppPaths: chmod 700 on ${dir.path} failed '
           '(exit ${dirResult.exitCode}); continuing with umask permissions',
         );
       }
     } on ProcessException catch (e) {
-      // P1.5 审计 F4：spawn 失败（PATH 没 chmod / EACCES）必须吞掉 —— 这一行
+      // spawn 失败（PATH 没 chmod / EACCES）必须吞掉 —— 这一行
       // 路径在 `prepareDatabaseFile` 每次开库都跑，绝不能阻断开库。
-      // ignore: avoid_print
-      print(
+      _diagnostic(
         'AppPaths: chmod 700 spawn failed on ${p.basename(dir.path)} '
         '(${_chmodSpawnDetail(e)}); continuing',
       );
@@ -476,52 +496,57 @@ abstract final class AppPaths {
         // A freshly first-launched user may not yet have the database file;
         // the legacy-migration path below will create it. ENOENT is the only
         // case that is not a real privacy failure; everything else still logs.
-        final stderr = dbResult.stderr.toString();
-        final isMissing = stderr.contains('No such file') ||
-            stderr.contains('does not exist');
-        // ignore: avoid_print
-        print(
+        final chmodStderr = dbResult.stderr.toString();
+        final isMissing = chmodStderr.contains('No such file') ||
+            chmodStderr.contains('does not exist');
+        _diagnostic(
           'AppPaths: chmod 600 on ${database.path} '
           '${isMissing ? 'skipped (file does not exist yet)' : 'failed'} '
           '(exit ${dbResult.exitCode}); continuing',
         );
       }
     } on ProcessException catch (e) {
-      // ignore: avoid_print
-      print(
+      _diagnostic(
         'AppPaths: chmod 600 spawn failed on ${p.basename(database.path)} '
         '(${_chmodSpawnDetail(e)}); continuing',
       );
     }
 
-    // Any leftover migration intermediate (`.tmp`) gets the same treatment
-    // so it does not become the leak the migration was meant to plug.
-    final tmp = File('${database.path}.tmp');
-    if (await tmp.exists()) {
-      try {
-        final tmpResult = await Process.run('chmod', ['600', tmp.path]);
-        if (tmpResult.exitCode != 0) {
-          // ignore: avoid_print
-          print(
-            'AppPaths: chmod 600 on ${tmp.path} failed '
-            '(exit ${tmpResult.exitCode})',
-          );
+    // Any leftover migration intermediate gets the same treatment so it does
+    // not become the leak the migration was meant to plug. Both shapes are
+    // matched: the fixed `<db>.tmp` older builds used and the per-process
+    // `<db>.tmp-<pid>-<8hex>` of [_migrationTmpPath].
+    //
+    // Tighten only — never delete. Another process may still be mid-copy and
+    // will rename its own intermediate into place; deleting a foreign tmp is
+    // exactly what the migration's "只动自己创建的 tmp" rule forbids.
+    final dbName = p.basename(database.path);
+    try {
+      if (await dir.exists()) {
+        await for (final entity in dir.list(followLinks: false)) {
+          if (entity is! File) continue;
+          final name = p.basename(entity.path);
+          if (name != '$dbName.tmp' && !name.startsWith('$dbName.tmp-')) {
+            continue;
+          }
+          await _tightenMigrationTmp(entity);
         }
-      } on ProcessException catch (e) {
-        // ignore: avoid_print
-        print(
-          'AppPaths: chmod 600 spawn failed on ${p.basename(tmp.path)} '
-          '(${_chmodSpawnDetail(e)}); continuing',
-        );
       }
+    } on FileSystemException catch (e) {
+      // Same contract as the chmod calls above: a diagnostics failure must
+      // never prevent the vault from opening.
+      _diagnostic(
+        'AppPaths: migration tmp sweep failed in ${p.basename(dir.path)} '
+        '(${e.osError?.errorCode ?? e.runtimeType}); continuing',
+      );
     }
   }
 
-  /// P1.4 审计 §⑤：迁移成功后收紧**源库**权限。`prepareDatabaseFile` 复制
+  /// 迁移成功后收紧**源库**权限。`prepareDatabaseFile` 复制
   /// 不删源库，旧副本若仍是 `-rw-r--r--`，就绕过整个权限防线。仅 Linux。
   /// 失败不致命：和 `_enforceLinuxPrivacy` 同款语义。
   ///
-  /// **P1.5 审计 F4**：spawn 失败（PATH 没 chmod）也吞掉 —— 这一行在每次
+  /// spawn 失败（PATH 没 chmod）也吞掉 —— 这一行在每次
   /// Linux 开库都跑，绝不能阻断开库。
   static Future<void> _tightenLegacyDatabasePermissions() async {
     if (!Platform.isLinux) return;
@@ -530,15 +555,13 @@ abstract final class AppPaths {
     try {
       final result = await Process.run('chmod', ['600', legacy.path]);
       if (result.exitCode != 0) {
-        // ignore: avoid_print
-        print(
+        _diagnostic(
           'AppPaths: chmod 600 on legacy ${legacy.path} failed '
           '(exit ${result.exitCode}); continuing',
         );
       }
     } on ProcessException catch (e) {
-      // ignore: avoid_print
-      print(
+      _diagnostic(
         'AppPaths: chmod 600 spawn failed on legacy '
         '${p.basename(legacy.path)} '
         '(${_chmodSpawnDetail(e)}); continuing',

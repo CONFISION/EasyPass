@@ -112,7 +112,7 @@ class NativeMessagingService {
 
   void stop() {
     _running = false;
-    // 注意（C 方案，契约 2.5）：**不**在这里清除解锁态。连接断开不是锁定
+    // 注意：**不**在这里清除解锁态。连接断开不是锁定
     // 信号，只有 `lock` 动作、空闲超时、进程退出才清除密钥。
     // 例外：自建会话（`--native-host` 单进程模式）随服务一起停止，
     // 保持旧行为；daemon 注入的共享会话不受影响。
@@ -219,10 +219,10 @@ class NativeMessagingService {
 
   // ─── Action Handlers ────────────────────────────────────
 
-  /// 按域名匹配（契约 2.4）：不再用 `searchEntries(完整 URL)` 的 LIKE 模糊匹配，
+  /// 按域名匹配：不再用 `searchEntries(完整 URL)` 的 LIKE 模糊匹配，
   /// 否则 `https://github.com/login` 会因为 URL 里多了路径而漏掉条目。
   ///
-  /// **只返回登录条目**（契约 §5）：安全笔记 / 身份 / SSH 密钥不参与自动填充；
+  /// **只返回登录条目**：安全笔记 / 身份 / SSH 密钥不参与自动填充；
   /// 匹配失败回退"全部条目"时同样只给登录条目，否则扩展的填充面板里会冒出笔记。
   Future<List<Map<String, dynamic>>> _getCredentials(String? url) async {
     _requireUnlocked();
@@ -351,7 +351,7 @@ class NativeMessagingService {
     };
   }
 
-  /// 健康报告（契约 2.3 / §5）：只分析**登录条目**，在服务端解密并统计，
+  /// 健康报告：只分析**登录条目**，在服务端解密并统计，
   /// 只回传统计数字与条目 id/name，**绝不下发明文密码**（也不下发 TOTP 密钥）。
   ///
   /// 非登录条目没有"密码强弱 / 缺网址"这些概念：安全笔记本来就没有 URL，
@@ -426,7 +426,7 @@ class NativeMessagingService {
     return key;
   }
 
-  /// [VaultItem] → **协议 3** 的条目 JSON（契约 §5，键名与形状冻结）。
+  /// [VaultItem] → **协议 3** 的条目 JSON（键名与形状冻结）。
   ///
   /// - `url` / `username` / `password`：登录条目取登录字段；身份条目的
   ///   `username` 取 `identity.username`；其余类型一律空串（扩展侧不必判 null）；

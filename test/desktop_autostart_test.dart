@@ -1,4 +1,4 @@
-// P3.2 开机自启测试。
+// 开机自启测试。
 //
 // 覆盖：
 //   1. isEnabled 反映「文件存在 + 内容是 EasyPass」。
@@ -12,7 +12,7 @@
 //      AutostartException。
 //
 // 不可自动化的项：GNOME / KDE 真实桌面下 `~/.config/autostart/easypass.desktop`
-// 确实被列出 —— 已在 `dist/PHASE3_2.md` §未自动化项列出。
+// 确实被列出 —— 需要真实桌面会话手工确认。
 
 import 'dart:io' show Directory, File, Platform;
 
@@ -78,8 +78,15 @@ void main() {
       expect(content, contains('[Desktop Entry]'));
       expect(content, contains('Type=Application'));
       expect(content, contains('Name=EasyPass'));
-      // Exec= 必须绝对路径。
-      expect(content, contains(RegExp(r'^Exec=/.+$', multiLine: true)));
+      // Exec= 必须是**当前平台的**绝对路径：Linux 上是 `/…`，Windows 测试
+      // 宿主上是 `C:\…`（`Platform.resolvedExecutable`）。用 package:path 的
+      // 平台语义判断，不把 `/` 写死 —— 否则本文件在 Windows 上必红。
+      final rawExec = RegExp(r'^Exec=(.+)$', multiLine: true)
+          .firstMatch(content)!
+          .group(1)!;
+      final execPath = rawExec.replaceAll('"', '').trim();
+      expect(execPath, isNotEmpty);
+      expect(p.isAbsolute(execPath), isTrue);
       // 桌面自动启动相关（GNOME / KDE 都接管）。
       expect(content, contains('X-GNOME-Autostart-enabled=true'));
       expect(content, contains('Hidden=false'));
@@ -127,11 +134,14 @@ void main() {
       await backend.enable();
       final content = await File(desktopEntryPath).readAsString();
       // 在 Linux CI 上 `Platform.resolvedExecutable` 是 `flutter_tester` 之
-      // 类的路径 —— 我们只断言 Exec= 是绝对路径且不是空，不强制等于
-      // resolvedExecutable（CI 上可能因为 hook 而不同）。
+      // 类的路径 —— 我们只断言 Exec= 是**当前平台的**绝对路径且不是空，不强制
+      // 等于 resolvedExecutable（CI 上可能因为 hook 而不同），也不假设它以
+      // `/` 开头（Windows 宿主上是 `C:\…`）。
       final match = RegExp(r'^Exec=(.+)$', multiLine: true).firstMatch(content);
       expect(match, isNotNull);
-      expect(match!.group(1)!.startsWith('/'), isTrue);
+      final execPath = match!.group(1)!.replaceAll('"', '').trim();
+      expect(execPath, isNotEmpty);
+      expect(p.isAbsolute(execPath), isTrue);
     });
   });
 

@@ -28,7 +28,7 @@ Future<void> main() async {
   // CLI 不需要 Flutter UI、不需要起 daemon、不需要碰数据库；如果先初
   // 始化 binding，没有 display 时 Gtk 会直接报错并退出 —— 阻止 CLI
   // 子命令运行。Windows 上运行这些 CLI 会得到明确的"Windows 用安装器"
-  // 提示，原注册表逻辑（P1.5 之前的装机 + PowerShell 脚本）完全不变。
+  // 提示，原注册表逻辑（早前的装机 + PowerShell 脚本）完全不变。
   final browserHostCli = await _maybeRunBrowserHostCli();
   if (browserHostCli != null) {
     // 防御性：`exit()` 不会等异步 stdout 落盘（红队评审 #6）。
@@ -83,7 +83,7 @@ Future<void> main() async {
     return;
   }
 
-  // P3.2 单实例：UI 模式才需要"唤起已有窗口"语义。`--native-host` / `--service`
+  // 单实例：UI 模式才需要"唤起已有窗口"语义。`--native-host` / `--service`
   // 进程是浏览器 / 桥接按需拉起的，不能被"二次启动唤起"拦截 —— 否则桥接
   // 每连一次都被踢掉。`--install-browser-host` 等 CLI 子命令在
   // `_maybeRunBrowserHostCli()` 早期已拦截，不会到这里。
@@ -116,7 +116,7 @@ Future<void> main() async {
     // object.  Constructing a second AppDatabase here creates a second drift
     // executor (and was the source of the "created multiple times" warning).
     //
-    // P3.5 §6 #3 (AUDIT-P1 #12) — 为什么现在是「只在不可用时构造」而不是
+    // 为什么现在是「只在不可用时构造」而不是
     // 「永远构造同一个」：
     //   - **probe.isUsable == true** 时另一进程（升级前的旧 daemon）已经在
     //     服务扩展，本进程只需要消费 UI，不需要重新拥有数据库（fork/跨进程
@@ -126,7 +126,7 @@ Future<void> main() async {
     //     于另一个进程，挂不进来。如果硬要在 UI 路径上无条件开库，本进程
     //     与旧 daemon 各持一份 `easypass.db` 的 SQLite handle —— SQLite 允许
     //     但加重锁竞争，且 drift 会再吐一次 "AppDatabase created multiple
-    //     times" 警告（P1.1 修过）。
+    //     times" 警告（此前修过）。
     //   - 这是上游架构问题，不是本仓库能改的。要彻底消除，必须先把 daemon
     //     从"同进程 / 跨进程"二选一抽到一个明确的 IPC 通道（如 loopback
     //     上的 query 转发），属于 v3.0 路线图范畴。
@@ -152,7 +152,7 @@ Future<void> main() async {
   // assets/fonts/) with the text engine before the UI builds.
   await FontDiscoveryService.loadBundledFonts();
 
-  // P3.1 desktop tray (Linux 关窗最小化 + 托盘菜单)。P3.2 复用其
+  // desktop tray (Linux 关窗最小化 + 托盘菜单)。单实例 raise 复用其
   // [WindowController]：二次启动 raise 时 `show()` 窗口。`windowController`
   // 通过 [raiseWindowControllerProvider] 暴露给 UI（见
   // `lib/features/desktop_single_instance/raise_target_provider.dart`）。

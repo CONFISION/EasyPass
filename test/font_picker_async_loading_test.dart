@@ -1,8 +1,8 @@
-// P3.4 §6 #8 · `_pickFont` AsyncLoading 首帧一致性测试。
+// `_pickFont` AsyncLoading 首帧一致性测试。
 //
 // 验证：用户打开"字体"对话框时，**即使** `availableFontsProvider` 还在
 // `AsyncLoading`，dialog 也应展示当前字体名（避免 spinner 期间"空 dialog"
-// 闪一下）。这是任务书 §6 #8 + 评审 R1 提到的"首帧字体一致性"修复点。
+// 闪一下）。这是"首帧字体一致性"修复点。
 //
 // 实现：用 ProviderContainer override 把 `availableFontsProvider` 替换成
 // 一个永远不会 resolve 的 FutureProvider，模拟"正在扫盘"的真实场景。
@@ -30,7 +30,7 @@ void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 
   /// 永不 resolve 的 [Completer]。测试用它把 [availableFontsProvider] 钉
-  /// 在 `AsyncLoading` 状态（任务书 §6 #8 修复点场景）。
+  /// 在 `AsyncLoading` 状态（首帧一致性修复点场景）。
   late Completer<FontList> neverCompletes;
   setUp(() {
     neverCompletes = Completer<FontList>();
@@ -63,7 +63,7 @@ void main() {
           fontStorageProvider.overrideWithValue((FakeSecureStorage()
             ..store[AppConstants.fontFamilyStorageKey] = 'Maple Mono NF CN')),
           // 关键：把可用字体 provider 替换成永不 resolve 的替身 —— 模拟
-          // "正在扫盘"的真实场景（任务书 §6 #8 修复点）。
+          // "正在扫盘"的真实场景（首帧一致性修复点）。
           availableFontsProvider.overrideWith((ref) {
             return neverCompletes.future;
           }),
@@ -103,15 +103,14 @@ void main() {
       expect(find.byType(CircularProgressIndicator), findsWidgets,
           reason: 'loading 状态必须展示 spinner');
       // 关键断言：dialog **内部**能找到当前字体名（不仅仅在 Settings
-      // ListTile 的 subtitle 里 —— 那条会污染断言）。P3.4 §6 #8 修复点
-      // 是 dialog loading 状态也要展示当前字体名（首帧一致性）。
+      // ListTile 的 subtitle 里 —— 那条会污染断言）。修复点是 dialog
+      // loading 状态也要展示当前字体名（首帧一致性）。
       final dialogText = find.descendant(
         of: find.byType(AlertDialog),
         matching: find.text('Maple Mono NF CN'),
       );
       expect(dialogText, findsOneWidget,
-          reason: 'loading 期间 dialog **内部**必须展示当前字体名（任务书'
-              ' §6 #8 修复点）');
+          reason: 'loading 期间 dialog **内部**必须展示当前字体名（首帧一致性）');
 
       // 反向断言：第 0 项修复前的"空 dialog"行为 ——
       // dialog**不**应只显示一个 spinner 而没有当前字体名。

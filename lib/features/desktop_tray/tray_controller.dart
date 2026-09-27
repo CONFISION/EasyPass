@@ -1,4 +1,4 @@
-// Tray controller abstraction (P3.1).
+// Tray controller abstraction.
 //
 // The tray menu items map to one of these actions. The Linux implementation
 // (see `linux_desktop_tray.dart`) wires each menu item to a callback that

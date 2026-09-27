@@ -15,7 +15,7 @@ import 'package:easypass/data/services/export_import_service.dart';
 
 import 'fakes.dart';
 
-/// 导出格式 2.0.0 的**四种类型**往返测试（契约 §6）。
+/// 导出格式 2.0.0 的**四种类型**往返测试。
 ///
 /// 覆盖：明文导出 / 加密备份两条路径下类型与字段是否存活，以及加密备份的
 /// 原始文本里是否真的没有明文机密。

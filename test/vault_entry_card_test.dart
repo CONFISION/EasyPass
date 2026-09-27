@@ -8,7 +8,7 @@ import 'package:easypass/features/vault/widgets/entry_card.dart';
 import 'package:easypass/features/vault/widgets/entry_type_bits.dart';
 import 'package:easypass/l10n/app_localizations.dart';
 
-/// `EntryCard` 的类型化渲染（2.3.0 契约 §4"列表"）：
+/// `EntryCard` 的类型化渲染（列表）：
 /// - 每类一个图标 + 强调色（映射统一来自 `EntryTypeBits`，不在这里另写一套）；
 /// - 类型徽章显示该类型的本地化名字；
 /// - 副标题统一用 `item.subtitle`；
@@ -167,12 +167,12 @@ void main() {
 
     // 619 = 900（原生最小窗口）− 248（侧边栏）− 1（分隔线）− 32（卡片左右外边距），
     // 也就是这个 app 里卡片能拿到的最小宽度；名字必须走 ellipsis 而不是把
-    // Row 顶爆（§10.6 的黄黑条纹就是这么来的）。
+    // Row 顶爆（黄黑条纹就是这么来的）。
     await pumpCard(tester, item, width: 619, onCopyPassword: () {});
 
     expect(find.byType(EntryCard), findsOneWidget);
     expect(tester.takeException(), isNull,
-        reason: 'Row 里的 Text 必须 Expanded/Flexible，否则窄卡片会溢出（§10.6）');
+        reason: 'Row 里的 Text 必须 Expanded/Flexible，否则窄卡片会溢出');
   });
 
   testWidgets('点整张卡片触发 onTap', (tester) async {

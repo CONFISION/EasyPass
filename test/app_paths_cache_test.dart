@@ -1,4 +1,4 @@
-// P3.5 §6 #1：`AppPaths.dataDirectory` / `configDirectory` / `autostartDirectory`
+// `AppPaths.dataDirectory` / `configDirectory` / `autostartDirectory`
 // 在同进程内必须复用同一个 `Directory` 实例，避免每次 `daemonInfoFile` 等
 // 调用都重读 env + `p.join`。
 //
@@ -7,7 +7,7 @@
 //   - `debugResetAppPathsCacheForTesting()` 必须真正清空缓存，下一次访问
 //     重新解析（用于测试 env 变化场景）。
 //   - 失败语义保留：HOME 缺失时 `dataDirectory` 必须抛 `StateError`，不静默
-//     兜底（P1.2 审计禁止）。
+//     兜底（不允许静默兜底）。
 //   - 三条 getter (`dataDirectory` / `configDirectory` / `autostartDirectory`)
 //     缓存相互独立 —— reset 一个不影响其他（实现是三个独立字段）。
 //
@@ -22,7 +22,7 @@ import 'package:path/path.dart' as p;
 import 'package:easypass/core/platform/app_paths.dart';
 
 void main() {
-  group('P3.5 §6 #1 AppPaths memoization', () {
+  group('AppPaths memoization（同进程复用同一实例）', () {
     setUp(() {
       AppPaths.debugResetAppPathsCacheForTesting();
     });
@@ -38,7 +38,7 @@ void main() {
         identical(a, b),
         isTrue,
         reason:
-            'dataDirectory must memoize its result (P3.5 §6 #1). '
+            'dataDirectory must memoize its result (same instance per process). '
             'Re-computing every call re-reads Platform.environment and '
             're-joins paths, which EasypassDaemon.probe hits hard on each '
             'idle check.',
@@ -101,7 +101,7 @@ void main() {
     test(
         'fail-loud semantics: `_resolveDataDirectory` throws when HOME + XDG_DATA_HOME both unset',
         () {
-      // The P3.5 §6 #1 promise was: "首次调用仍失败就大声报错（保持现有
+      // The promise was: "首次调用仍失败就大声报错（保持现有
       // fail-loud, 不要改成静默兜底）". We can prove it for the helper
       // directly, without touching the environment of the test runner:
       // the @visibleForTesting setter for the cache lets us sidestep a

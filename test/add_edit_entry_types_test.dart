@@ -8,7 +8,7 @@ import 'package:easypass/features/vault/screens/add_edit_entry_screen.dart';
 
 import 'add_edit_entry_harness.dart';
 
-/// 四种条目类型的字段分区、校验与持久化（契约 `docs/entry-types.md` §2/§4）。
+/// 四种条目类型的字段分区、校验与持久化。
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 

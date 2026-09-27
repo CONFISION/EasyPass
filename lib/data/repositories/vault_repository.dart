@@ -11,10 +11,10 @@ import '../state/session_key.dart';
 
 /// 全局唯一的默认 [AppDatabase] 实例。Riverpod 容器里所有依赖此 provider
 /// 的对象（仓储、TOTP、UI 状态等）都会拿到**同一个** `AppDatabase` 实例，
-/// 这是 P1.1 修过的"AppDatabase created multiple times"警告的根因（多个
+/// 这是此前修过的"AppDatabase created multiple times"警告的根因（多个
 /// provider 各自构造 → 每个一份 drift executor）。
 ///
-/// P3.5 §6 #3（AUDIT-P1 #12）—— 配合 `main.dart:97-109` 的「只在不可用时
+/// 配合 `main.dart` 的「只在不可用时
 /// override」读：
 ///   - **本进程守护**（首次冷启 / 旧 daemon 已被收回）：`main.dart` 走
 ///     `if (uiDatabase != null) databaseProvider.overrideWithValue(...)`，

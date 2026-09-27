@@ -46,7 +46,7 @@ class FontDiscoveryService {
   /// Fonts registered in the system font folders (Windows + Linux).
   ///
   /// Windows: `C:\Windows\Fonts` + `%LOCALAPPDATA%\Microsoft\Windows\Fonts`.
-  /// Linux (P3.4): 按 freedesktop.org Fontconfig 默认扫描顺序加入 4 个
+  /// Linux: 按 freedesktop.org Fontconfig 默认扫描顺序加入 4 个
   /// 目录 —— `~/.local/share/fonts`（用户级，优先级最高）、`~/.fonts`（旧
   /// 路径，仍有发行版沿用）、`/usr/local/share/fonts`（系统管理员级）、
   /// `/usr/share/fonts`（发行版打包）。子目录递归开（Fontconfig 默认行为；
@@ -71,8 +71,8 @@ class FontDiscoveryService {
   /// 系统字体目录列表（按优先级顺序）。
   ///
   /// 默认实现：Windows 用 `C:\Windows\Fonts` + `%LOCALAPPDATA%\Microsoft\
-  /// Windows\Fonts`（P3.4 前既有行为）；Linux 用 4 个 Fontconfig 标准目录
-  /// （P3.4 新增）。其他平台返回空列表（macOS / 测试 stub 都走这条）。
+  /// Windows\Fonts`（既有行为）；Linux 用 4 个 Fontconfig 标准目录
+  /// （Linux 侧新增）。其他平台返回空列表（macOS / 测试 stub 都走这条）。
   ///
   /// 测试可注入：参考 `LinuxFontDirectoryOverride.newForTest`；生产代码不
   /// 直接调这个 getter —— 走 [discoverSystemFonts]。
@@ -107,12 +107,12 @@ class FontDiscoveryService {
     return dirs;
   }
 
-  /// P3.4：把字体目录列表临时替换成测试替身（仅内存）。**必须**在
+  /// 把字体目录列表临时替换成测试替身（仅内存）。**必须**在
   /// `addTearDown` 调 [debugResetSystemFontDirectoriesForTesting] 还原，
   /// 否则会污染跨测试的全局状态。
   static List<Directory>? _systemFontDirectoriesOverride;
 
-  /// P3.4 测试钩子：把 [discoverSystemFonts] 的目录列表替换成 [override]。
+  /// 测试钩子：把 [discoverSystemFonts] 的目录列表替换成 [override]。
   /// 生产代码**绝不**调这个函数；命名沿用 `desktop_tray_test.dart` 同款
   /// `debugSet…ForTesting` 风格。
   static void debugSetSystemFontDirectoriesForTesting(
@@ -120,7 +120,7 @@ class FontDiscoveryService {
     _systemFontDirectoriesOverride = override;
   }
 
-  /// P3.4 测试钩子：还原默认的目录列表。
+  /// 测试钩子：还原默认的目录列表。
   static void debugResetSystemFontDirectoriesForTesting() {
     _systemFontDirectoriesOverride = null;
   }

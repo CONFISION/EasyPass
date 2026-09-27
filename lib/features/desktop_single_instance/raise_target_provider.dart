@@ -1,16 +1,15 @@
-// P3.2 raise 目标 provider —— 主进程上，让 raise handler 能拿到
+// raise 目标 provider —— 主进程上，让 raise handler 能拿到
 // `WindowController` 来恢复窗口。
 //
 // 为什么不在 `lib/features/desktop_tray/desktop_tray.dart` 里加：
-//   - P3.1 引入 tray 时没把 `installDesktopTray()` 的结果接到 Riverpod
-//     （`main.dart:108-114` 调完即丢，PHASE3_1 报告里写的
-//     `desktopTrayResultProvider` 实际代码里不存在 —— 见
-//     `dist/REVIEW-P3A.md` R2/R3 的同类问题：本轮要避免再添一个"声明但未
-//     接线"的 Riverpod provider）。
-//   - 本轮仅借用 WindowController 这一种最小职责，把它放 P3.2 自己模块里，
+//   - 引入 tray 时没把 `installDesktopTray()` 的结果接到 Riverpod
+//     （`main.dart` 里调完即丢，曾经提过的 `desktopTrayResultProvider`
+//     在代码里并不存在）：本轮要避免再添一个"声明但未接线"的
+//     Riverpod provider）。
+//   - 本轮仅借用 WindowController 这一种最小职责，把它放本模块里，
 //     主进程上由 `main.dart` 注入 override；非 Linux / 没用上 = `null`。
 //
-// 升级路径：未来 P4 / 后续轮把 `installDesktopTray()` 的结果真正接到
+// 升级路径：把 `installDesktopTray()` 的结果真正接到
 // `desktopTrayResultProvider` 后，本文件可删，`raise_host` 直接读那个
 // provider。
 

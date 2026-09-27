@@ -1,4 +1,4 @@
-// Window controller abstraction (P3.1).
+// Window controller abstraction.
 //
 // The desktop-tray layer needs three things from the host window:
 //   1. Interception of the native close button so we can choose between
@@ -6,7 +6,7 @@
 //   2. `show()` / `hide()` for the "Open EasyPass" menu item and the
 //      daemon-driven "display the locked window" path.
 //   3. A way to ask "are we visible right now?" so the menu can label itself
-//      "Open" vs "Hide EasyPass" (Windows uses the latter; Linux P3.1 uses
+//      "Open" vs "Hide EasyPass" (Windows uses the latter; Linux uses
 //      the former because the menu also lacks a "Hide" item, mirroring
 //      `windows/runner/flutter_window.cpp:137-148`).
 //

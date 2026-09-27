@@ -158,10 +158,10 @@ class EasypassDaemon {
   /// 测试钩子：在 `start()` 中**取代** [start] 里 `_persistInfo` 调用的整段
   /// 落盘逻辑（写 daemon.json + makePrivate）。默认 = 走原 [_persistInfo]。
   ///
-  /// P1.5 审计 F1：注入一个会在写完文件后抛错的钩子，覆盖"P1.4 审计 §④"警告
-  /// 但 §④ 测试未能真正验证的路径——"bind 成功、file 写入成功、makePrivate
-  /// 抛错 → 端口挂着、文件残留"。生产代码绝不允许这条路径出现，而默认实现
-  /// 也确实会兜底；只需让单测能可靠触发来验证兜底正确。
+  /// 注入一个会在写完文件后抛错的钩子，覆盖此前测试未能真正验证的路径——
+  /// "bind 成功、file 写入成功、makePrivate 抛错 → 端口挂着、文件残留"。
+  /// 生产代码绝不允许这条路径出现，而默认实现也确实会兜底；只需让单测能
+  /// 可靠触发来验证兜底正确。
   Future<void> Function(int port, String token)? onPersistInfo;
 
   EasypassDaemon(
@@ -263,7 +263,7 @@ class EasypassDaemon {
     final filePid = rawPid is int ? rawPid : null;
     final fileVersion = rawVersion is int ? rawVersion : null;
 
-    // P1.4 审计 §⑦：pid 写一次不刷新，但探测时**主动校验**它是否还存活。
+    // pid 写一次不刷新，但探测时**主动校验**它是否还存活。
     // pid 已死（无论端口是否还应答）就当作 unreachable，由调用方 retire()
     // 清文件；返回前不再尝试 TCP 连接，避免把"另一进程占用此端口"误认成
     // 旧 daemon 的残留。
@@ -386,8 +386,8 @@ class EasypassDaemon {
   }
 
   /// SIGTERM 等待超时。依据：比 [probe] 的 1200ms 长（避免比探测还慢），
-  /// 又要给目标进程退出留余量；`2s = probe timeout × 1.7` 是任务书 §1.1
-  /// 指定的默认值。SIGKILL 兜底只用 1s（不可捕获的强制终止不需要缓冲期）。
+  /// 又要给目标进程退出留余量；`2s = probe timeout × 1.7` 是选定的默认值。
+  /// SIGKILL 兜底只用 1s（不可捕获的强制终止不需要缓冲期）。
   static const Duration _sigtermWaitTimeout = Duration(seconds: 2);
   static const Duration _sigkillWaitTimeout = Duration(seconds: 1);
 
@@ -405,7 +405,7 @@ class EasypassDaemon {
     _terminateRunner = runner;
   }
 
-  /// P3.3 测试钩子：直接调 [_terminateIfOurs]（不走 `retire()` 的 stale 门
+  /// 测试钩子：直接调 [_terminateIfOurs]（不走 `retire()` 的 stale 门
   /// 守卫）。生产代码请用 [retire]。命名沿用 [debugSetTerminateIfOursRunner]
   /// 风格 —— 测试可见、生产不碰。
   ///
@@ -417,7 +417,7 @@ class EasypassDaemon {
 
   /// 把抛出的异常归一到一类**不携带路径**的标签。
   ///
-  /// P1.4 审计 §⑧：`OSError` / `FileSystemException` 的 `toString()` 会把
+  /// `OSError` / `FileSystemException` 的 `toString()` 会把
   /// `path = '/home/<user>/.local/share/easypass/...'` 拼进去；`runtimeType`
   /// 本身只有类名，但保险起见白名单化（`FileSystemException`、`OSError`、
   /// `FormatException`、`SocketException`），其它一律记 `other`。
@@ -440,7 +440,7 @@ class EasypassDaemon {
   /// 所以这里结束的可能是"还开着的旧版 EasyPass"。这是刻意的：只有旧进程
   /// 退出，新构建才能接管那个端口。
   ///
-  /// Linux 实现（P3.3）：
+  /// Linux 实现：
   /// 1. `kill -0 <pid>` 校验存在（[Process.killPid] 是真发信号，必须绕开）
   /// 2. `kill -TERM` 发出终止信号
   /// 3. 最多等 [_sigtermWaitTimeout]（2s）让进程体面退出
@@ -513,10 +513,10 @@ class EasypassDaemon {
   /// - 解析失败 / 超时 / 异常一律视为"未知"——返回 true 保留 pid 字段的诊断
   ///   价值，不在探针阶段误杀。
   ///
-  /// P1.4 审计 §⑦：探测时校验 pid 存活，避免"端口活着但 pid 是别人"
+  /// 探测时校验 pid 存活，避免"端口活着但 pid 是别人"
   /// /"pid 死了但端口巧合还应答"两种诊断盲区。
   ///
-  /// **P1.5 审计 F2**: Windows 上旧实现只看 `exitCode == 0 && stdout.isNotEmpty`
+  /// Windows 上旧实现只看 `exitCode == 0 && stdout.isNotEmpty`
   /// —但 `tasklist` 在"没有匹配"时退出码仍是 0，并且吐一行本地化的 INFO
   /// 文本（"INFO: No tasks are running which match..."），导致
   /// `stdout.isNotEmpty` 恒为真 → 在 Windows 上恒返回"存活"，校验形同空操作。
@@ -535,18 +535,12 @@ class EasypassDaemon {
         ).timeout(const Duration(milliseconds: 500));
         if (result.exitCode != 0) return false;
         final stdout = result.stdout.toString();
-        // P1.5 审计 F2：正面匹配。先尝试把 CSV 第一列解析成整数；命中
-        // target 才算"存活"。"1,234" 这类本地化千分位也会被吃掉逗号。
+        // 正面匹配。**PID 是第二列**（第一列是映像名，见
+        // [csvLineReportsPid]）；"1,234" 这类本地化千分位也会被吃掉逗号。
         // 没有 CSV 行 / 没有任何一行 PID == target → 视为不存活。
         for (final line in const LineSplitter().convert(stdout)) {
           if (line.isEmpty) continue;
-          // 去引号、拆 , 拼回去，去掉首尾 " 与空白；本地化千分位
-          // （如 "1,234"）一并去除逗号。
-          final fields = parseCsvLine(line);
-          if (fields.isEmpty) continue;
-          final pidText = fields.first
-              .replaceAll(RegExp(r'[^0-9]'), '');
-          if (int.tryParse(pidText) == target) return true;
+          if (csvLineReportsPid(line, target)) return true;
         }
         return false;
       } catch (_) {
@@ -566,18 +560,39 @@ class EasypassDaemon {
     }
   }
 
-  /// 极简 CSV 单行解析（仅用于 `tasklist /FO CSV` 第一列是 PID 的场景）。
+  /// [`tasklist`] 的一行 CSV 是否**正面命中** [target]。
+  ///
+  /// `tasklist /FO CSV /NH` 的列顺序是
+  /// `"Image Name","PID","Session Name","Session#","Mem Usage"` —— PID 在
+  /// **第二列**（索引 1）。早期实现把 [parseCsvLine] 的第一列（映像名）当
+  /// PID 解析：`easypass.exe` 去掉非数字后是空串，于是**任何活着的进程都被
+  /// 判成"已不存活"**，`probe()` 因此在 TCP 握手之前就返回 `unreachable`，
+  /// 把在跑的 daemon 的 `daemon.json` 当残留删掉。本函数把列号固定在一处，
+  /// 并由单测用真实 tasklist 行锁住（`test/easypass_daemon_test.dart`）。
+  ///
+  /// 兼容本地化千分位（`"1,234"`）。字段不足两列时返回 false ——
+  /// "INFO: No tasks are running…" 这类本地化提示行因此不会被误判为命中。
+  static bool csvLineReportsPid(String line, int target) {
+    final fields = parseCsvLine(line);
+    if (fields.length < 2) return false;
+    final pidText = fields[1].replaceAll(RegExp(r'[^0-9]'), '');
+    if (pidText.isEmpty) return false;
+    return int.tryParse(pidText) == target;
+  }
+
+  /// 极简 CSV 单行解析（用于 `tasklist /FO CSV` 的行，见
+  /// [csvLineReportsPid] 取第二列）。
   ///
   /// 兼容：
   /// - `"Image Name","PID","Session Name",...`  → `["Image Name","PID",...]`
   /// - `"System Idle Process","0","Services",...` （PID 可能带本地化千分位）
   /// - 不规范的行（字段数 ≠ 列数）→ 返回原始去引号 token 列表，便于
-  ///   上层用首列兜底判断。
+  ///   上层按列号兜底判断。
   ///
   /// 不引入外部依赖：内联实现，手测覆盖 `tasklist /FO CSV /NH` 的常见输出。
   ///
-  /// **P1.5 审计 F2 注释**：这一段从单测视角保持库可见（去掉下划线），
-  /// 是为了让审计要求的 "F2 解析逻辑可被独立单测验证" 不需要改签名。
+  /// 这一段从单测视角保持库可见（去掉下划线），
+  /// 是为了让"CSV 解析逻辑可被独立单测验证"不需要改签名。
   /// 仍是 package-private（不会暴露到产品 API）。
   static List<String> parseCsvLine(String line) {
     final fields = <String>[];
@@ -634,10 +649,10 @@ class EasypassDaemon {
   /// 写入顺序：先 bind → 生成 token → 开始 listen → 最后才落 `daemon.json`。
   /// 这样 `_persistInfo`（含 `makePrivate` 的 chmod 600）哪怕抛错，桥接也不会
   /// 看到一份"指向死端口"的残留文件。若 `start()` 整体失败，catch 块仍然按
-  /// pid/token 校验删除自己写过的注册信息（P1.4 审计 §④）。
+  /// pid/token 校验删除自己写过的注册信息。
   ///
-  /// P1.5 审计 F1：`_persistInfo` 由 [onPersistInfo] 可替身；测试可以注入一个
-  /// "写完文件再抛错"的实现来真正覆盖 P1.4 §④ 的兜底路径。
+  /// `_persistInfo` 由 [onPersistInfo] 可替身；测试可以注入一个
+  /// "写完文件再抛错"的实现来真正覆盖上面的兜底路径。
   Future<void> start() async {
     try {
       final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
@@ -781,7 +796,7 @@ class EasypassDaemon {
   }
 }
 
-/// P3.3：Linux 自愈路径可注入的进程操作抽象。
+/// Linux 自愈路径可注入的进程操作抽象。
 ///
 /// 把 `kill -0` 校验、发信号、等延迟这几件事做成可替身，测试就能在不真
 /// 杀任何进程的前提下验证整条 `_terminateIfOursLinux` 路径。**所有方法

@@ -18,7 +18,7 @@ import '../widgets/entry_type_bits.dart';
 
 /// 条目详情页（四种类型共用一页）。
 ///
-/// 字段分工见 `docs/entry-types.md` §4「详情页」：
+/// 详情页字段分工：
 /// - login：用户名 · 密码（验证主密码后显示） · 网址 · **TOTP 动态码 + 倒计时**；
 /// - secure_note：正文（可选文字、可复制）；
 /// - identity：按 个人 / 联系方式 / 证件 / 地址 分组展示非空字段；
@@ -376,7 +376,7 @@ class _EntryDetailBody extends ConsumerWidget {
     );
   }
 
-  /// 收藏走 `repo.saveItem(item.copyWith(...))`（契约 §3：UI 不许自己拼
+  /// 收藏走 `repo.saveItem(item.copyWith(...))`（UI 不许自己拼
   /// companion）。
   ///
   /// **不需要任何手动失效**：[entryItemProvider] 监听的是 drift 的单行查询

@@ -23,12 +23,12 @@ import 'l10n/app_localizations.dart';
 /// Selected UI locale; `null` follows the system language.
 final localeProvider = StateProvider<Locale?>((ref) => null);
 
-/// P3.2 single-instance backend: `null` on non-Linux platforms (or when the
+/// Single-instance backend: `null` on non-Linux platforms (or when the
 /// primary instance check failed and the process should exit, but `main.dart`
 /// already `exit(0)`s in that branch before reaching `runApp`).
 final singleInstanceBackendProvider = Provider<SingleInstanceBackend?>((ref) => null);
 
-/// P3.2 autostart coordinator (Linux only).
+/// Autostart coordinator (Linux only).
 final autostartCoordinatorProvider = Provider<LinuxAutostartCoordinator>(
   (ref) => LinuxAutostartCoordinator(),
 );
@@ -140,7 +140,7 @@ class EasyPassApp extends ConsumerWidget {
       routerConfig: router,
       // 首次启动的浏览器集成提示（方案 B：不做设置页 UI，只提示一次）。
       builder: (context, child) => BrowserHostPromptHost(
-        // P3.2 单实例：UI 准备好后启动 raise 监听，让二次启动的进程能把窗口
+        // 单实例：UI 准备好后启动 raise 监听，让二次启动的进程能把窗口
         // 唤到前台。该 Host 是 ConsumerStatefulWidget，只在主实例上挂 handler
         // （backend 非 null）；非 Linux / 没有 backend 时是空操作。
         child: SingleInstanceRaiseHost(child: child ?? const SizedBox.shrink()),

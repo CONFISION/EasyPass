@@ -10,7 +10,7 @@
 //   - freedesktop.org **Icon Theme Specification**：应用图标按
 //     `hicolor/<size>x<size>/apps/<name>.png` 存放。
 //
-// 全部取值的取证/推导过程见 `dist/P4-facts.md`。本文件只做机械实现。
+// 本文件只做机械实现：取值全部以上述规范为准。
 //
 // 不变量：
 //   - 幂等（覆盖写，不追加）；卸载没装过也成功。
@@ -50,17 +50,17 @@ class LinuxDesktopIntegration implements DesktopIntegrationBackend {
 
   /// `StartupWMClass=` 取值。
   ///
-  /// **依据（见 `dist/P4-facts.md` §1）**：`linux/CMakeLists.txt:10` 定义
-  /// `APPLICATION_ID "com.example.easypass"`，`linux/runner/my_application.cc:143`
+  /// **依据**：`linux/CMakeLists.txt:10` 定义
+  /// `APPLICATION_ID "com.easypass.app"`，`linux/runner/my_application.cc:143`
   /// 把它交给 `g_set_prgname()`、`:146` 作为 GTK application-id；全仓库
   /// **没有** `gtk_window_set_wmclass` / `gdk_set_program_class` 调用 ——
   /// 也就是说 WMClass 完全由 GTK/GDK 从 prgname（= application id）推导，
   /// 不是应用自己设的字符串。因此这里与之保持一致，写同一个值。
   ///
-  /// **注意**：真实 X11 会话下的 `xprop WM_CLASS` 尚未实测（见 P4-facts
-  /// 的"未确认 + 需要什么证据"）。若实测发现 res_class 首字母被大写
+  /// **注意**：真实 X11 会话下的 `xprop WM_CLASS` 尚未实测。若实测发现
+  /// res_class 首字母被大写
   /// （GDK 的历史行为），需要把本常量改成实测值 —— 这是唯一需要跟着改的地方。
-  static const String startupWmClass = 'com.example.easypass';
+  static const String startupWmClass = 'com.easypass.app';
 
   /// `Exec=` 里的 URL 占位符（`%U` = 可接受多个 URL；与桌面环境约定一致）。
   static const String execUrlPlaceholder = '%U';
@@ -411,7 +411,7 @@ class LinuxDesktopIntegration implements DesktopIntegrationBackend {
   ///   - `Type=Application` —— 启动的是应用。
   ///   - `Exec=<绝对路径> %U` —— Spec 显式禁止相对路径；`%U` 表示可接受 URL。
   ///   - `Icon=easypass` —— 名字型引用，由 hicolor 主题解析（见 install()）。
-  ///   - `Categories=Utility;Security;` —— 任务书点名。
+  ///   - `Categories=Utility;Security;` —— 应用菜单归类（Utility + Security）。
   ///   - `Terminal=false` —— 不起终端。
   ///   - `StartupWMClass=` —— 让桌面环境把运行中的窗口归到本入口
   ///     （取值依据见 [startupWmClass]）。
@@ -599,7 +599,7 @@ class LinuxDesktopIntegration implements DesktopIntegrationBackend {
   /// 刷新桌面数据库 / 图标缓存 —— 只允许 best-effort。
   ///
   /// 命令不存在、spawn 失败、非零退出码一律只记 warning；**不影响**流程
-  /// 结果与退出码（任务书：命令不存在或失败不得让流程失败）。
+  /// 结果与退出码（命令不存在或失败不得让流程失败）。
   Future<List<String>> _refreshCaches() async {
     final warnings = <String>[];
     await _runBestEffort(

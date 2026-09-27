@@ -13,12 +13,15 @@
 // exported the D-Bus menu; 0.5.x never registered the item).
 //
 // [window] must be the application window. Returns TRUE when a tray icon was
-// installed; FALSE when no host is available (the caller then keeps the
-// platform default of "closing the window quits the app").
+// installed. FALSE means "do not rely on the tray": no StatusNotifier host is
+// registered (the icon would be invisible) or the debug hook disabled it — in
+// both cases the caller keeps the platform default of "closing the window
+// quits the app".
 gboolean easypass_tray_install(GtkWindow* window);
 
-// Whether a tray icon is live, i.e. whether a window close should hide the
-// window instead of quitting.
+// Whether closing the window should hide it instead of quitting: the icon is
+// installed AND a StatusNotifier host is actually registered. A live
+// AppIndicator object on its own does not prove the icon is visible.
 gboolean easypass_tray_is_active(void);
 
 // Restore + raise the application window. Used by the tray's "Open EasyPass"

@@ -1,4 +1,4 @@
-// P3.3 · Linux 旧进程自愈（`_terminateIfOurs`）测试。
+// Linux 旧进程自愈（`_terminateIfOurs`）测试。
 //
 // 全部通过 `debugSetTerminateIfOursRunner` 注入替身 —— **不**真杀任何
 // 进程、**不**真 `kill -0`：
@@ -13,7 +13,7 @@
 //   7. 默认 runner 在 Linux 上**不**抛异常（用不存在的 pid）。
 //   8. Windows 上注入的 Linux runner **不**被调用（保证 Linux-only 改动
 //      不污染 Windows 路径）。
-//   9. `probe()` 死 pid + `retire()` 清 `daemon.json` 的整条链路在 P3.3
+//   9. `probe()` 死 pid + `retire()` 清 `daemon.json` 的整条链路在本轮
 //      改动后**不**退化。
 //
 // 不可自动化的项：
@@ -29,6 +29,16 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:easypass/data/database/database.dart';
 import 'package:easypass/features/browser_bridge/easypass_daemon.dart';
+
+/// `_terminateIfOurs Linux 路径` 那组的 `skip` 参数。
+///
+/// `EasypassDaemon._terminateIfOurs` 先按 `Platform.isWindows` 分流，**之后**
+/// 才用注入的 runner；所以 Windows 上这些用例会走真实 `tasklist`，替身一个
+/// 方法都收不到。断言的是 Linux 语义 → 用 `skip:` 显式跳过（而不是静默
+/// `return`），跳过的用例必须出现在测试报告里。
+Object? get _needsLinuxTerminatePath => Platform.isLinux
+    ? null
+    : 'Linux-only：Windows 上 _terminateIfOurs 走 tasklist 分支';
 
 /// 把 `kill -0` / 发信号 / 等延迟 做成可替身；每一步记进 log。
 ///
@@ -106,7 +116,7 @@ void main() {
     );
   });
 
-  group('P3.3 · _terminateIfOurs Linux 路径（注入 runner）', () {
+  group('_terminateIfOurs Linux 路径（注入 runner）', () {
     test('自身 pid（target == pid）→ 拒绝，**不**调 runner 任何方法',
         () async {
       final stub = _RecordingRunner();
@@ -135,7 +145,7 @@ void main() {
         'wait(2000ms)',
         'pidAlive(${pid + 1})',
       ], reason: 'kill -0 → SIGTERM → wait 2s → 二次 kill -0');
-    });
+    }, skip: _needsLinuxTerminatePath);
 
     test('Linux：kill -0 失败（PID 不存在）→ 保守保留，不发任何信号',
         () async {
@@ -150,7 +160,7 @@ void main() {
       expect(killed, isFalse);
       expect(stub.log, ['pidAlive(${pid + 1})'],
           reason: 'PID 不存在：一步到位，根本不发 SIGTERM');
-    });
+    }, skip: _needsLinuxTerminatePath);
 
     test('Linux：SIGTERM 后进程仍存活 → SIGKILL 兜底', () async {
       final stub = _RecordingRunner(
@@ -171,7 +181,7 @@ void main() {
         'wait(1000ms)',
         'pidAlive(${pid + 1})', // 最终确认
       ], reason: '升级到 SIGKILL 后再确认一次');
-    });
+    }, skip: _needsLinuxTerminatePath);
 
     test('Linux：SIGKILL 后进程仍存活（极端）→ 保守保留', () async {
       final stub = _RecordingRunner(
@@ -185,7 +195,7 @@ void main() {
       expect(killed, isFalse,
           reason: 'SIGKILL 都杀不死 → 保守保留，由 retire() 的 clearStaleInfo 兜底');
       expect(stub.log.length, 7);
-    });
+    }, skip: _needsLinuxTerminatePath);
 
     test('Linux：SIGTERM 投递失败（EPERM）→ 保守保留，不升级 SIGKILL',
         () async {
@@ -203,10 +213,10 @@ void main() {
         'sendSignal(${pid + 1}, SIGTERM)',
       ], reason: 'SIGTERM 失败：不再二次 pidAlive、不再升级 SIGKILL');
       expect(stub.log.where((e) => e.contains('SIGKILL')), isEmpty);
-    });
+    }, skip: _needsLinuxTerminatePath);
   });
 
-  group('P3.3 · Linux 默认 runner（真实 `kill` 命令）', () {
+  group('Linux 默认 runner（真实 `kill` 命令）', () {
     test('不存在的 pid → 默认 runner 走 kill -0 → exitCode=1 → 保守保留',
         () async {
       EasypassDaemon.debugSetTerminateIfOursRunner(
@@ -222,7 +232,7 @@ void main() {
     });
   });
 
-  group('P3.3 · Windows 路径不污染', () {
+  group('Windows 路径不污染', () {
     test('Windows 上注入的 Linux runner **不**被调用（保证改动只在 Linux 生效）',
         () async {
       if (!Platform.isWindows) {
@@ -244,7 +254,7 @@ void main() {
     });
   });
 
-  group('P3.3 · probe 死 pid → 清 daemon.json（路径不退化）', () {
+  group('probe 死 pid → 清 daemon.json（路径不退化）', () {
     late Directory tempDir;
     late File probeFile;
 

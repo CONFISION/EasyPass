@@ -953,6 +953,34 @@ void main() {
       );
     });
 
+    test(r'#2b：uninstall 与 install 用同一份 $XDG_CONFIG_HOME 口径', () async {
+      // 回归：uninstall 曾经不读 $XDG_CONFIG_HOME（也不收这个参数），于是
+      // 设了该变量的用户执行卸载时去 ~/.config 找不到东西，报
+      // "Already absent (no-op)" 退 0，而 manifest 留在原地。
+      final xdgConfig = Directory(p.join(sandbox.path, 'xdgcfg-uninstall'))
+        ..createSync(recursive: true);
+      final roots = BrowserHostInstaller.resolveVendorRootPaths(homeDir.path,
+          xdgConfigHome: xdgConfig.path);
+      await Directory(roots[BrowserVendor.chrome]!).create(recursive: true);
+
+      final installed = await installer.install(
+        homeDir: homeDir.path,
+        xdgConfigHome: xdgConfig.path,
+      );
+      final manifest = installed.manifests![BrowserVendor.chrome]!;
+      expect(manifest.startsWith(xdgConfig.path), isTrue);
+      expect(File(manifest).existsSync(), isTrue);
+
+      final result = await installer.uninstall(
+        homeDir: homeDir.path,
+        xdgConfigHome: xdgConfig.path,
+      );
+      expect(result.uninstalled, isTrue);
+      expect(result.removed, contains(BrowserVendor.chrome));
+      expect(result.missing, isNot(contains(BrowserVendor.chrome)));
+      expect(File(manifest).existsSync(), isFalse);
+    });
+
     test('#3：PATH 可注入 —— 宿主 PATH 上有 easypass 也不会翻转闸门', () async {
       await setupVendorRoots([BrowserVendor.chrome]);
       await installer.install(homeDir: homeDir.path);

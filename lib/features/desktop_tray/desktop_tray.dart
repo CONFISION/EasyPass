@@ -1,4 +1,4 @@
-// Linux 桌面体验对等（P3.1）· 关窗最小化到托盘 + 托盘菜单/图标。
+// Linux 桌面体验对等 · 关窗最小化到托盘 + 托盘菜单/图标。
 //
 // 设计原则：
 //   1. 抽象层可注入、单测不依赖真实桌面会话 —— 见 [WindowController] /
@@ -45,7 +45,7 @@ enum DesktopTrayStatus {
   unavailable,
 
   /// The desktop layer is a no-op for this platform (Windows: the C++ runner
-  /// owns the tray and close interception; macOS: out of scope for P3.1).
+  /// owns the tray and close interception; macOS: out of scope).
   inactive,
 }
 
@@ -99,7 +99,7 @@ void debugSetInstallerForTesting(DesktopTrayInstaller? installer) {
 ///     (e.g. GNOME without an AppIndicator extension); close now exits the
 ///     app, [DesktopTrayResult.detail] explains why.
 ///   - [DesktopTrayStatus.inactive] on platforms where the layer is a no-op
-///     (Windows: the C++ runner owns the tray; macOS: out of scope for P3.1).
+///     (Windows: the C++ runner owns the tray; macOS: out of scope).
 DesktopTrayResult installDesktopTray({DateTime Function()? clock}) {
   final at = (clock ?? DateTime.now)();
   final installer = _installerOverride ?? _defaultInstallerForPlatform();

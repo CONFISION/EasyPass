@@ -16,7 +16,7 @@ class WindowsAutostart implements LinuxAutostartBackend {
       );
     }
     // Future improvement: read HKCU\…\Run\EasyPass via ProcessRegistry. Out
-    // of scope for P3.2 — Windows autostart remains "managed by the
+    // of scope — Windows autostart remains "managed by the
     // installer". The Settings UI hides the toggle on non-Linux.
     return const AutostartStatus(
       enabled: false,

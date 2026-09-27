@@ -9,8 +9,6 @@
 //      （带 basename，不泄漏完整 home 路径），由 CLI 层转成非零退出码。
 //   4. **Windows 零影响** —— Windows 的快捷方式由 Inno Setup 安装器负责，
 //      本模块在非 Linux 上只返回 `unsupported`，一个字节都不写。
-//
-// 事实依据（XDG 目录、WMClass 取值、图标尺寸映射）见 `dist/P4-facts.md`。
 
 import 'dart:io' show Platform;
 
@@ -212,7 +210,14 @@ class DesktopIntegrationException implements Exception {
   String toString() => cause == null ? message : '$message ($cause)';
 }
 
-/// 协调器：按平台选 Linux 真实实现 / 非 Linux 桩。
+/// 协调器：把调用**原样转给后端**。默认后端按平台选 Linux 真实实现 /
+/// 非 Linux 桩。
+///
+/// **本类不再自带 `Platform.isLinux` 闸门**：那个闸门与
+/// [OtherDesktopIntegration] 的返回值逐字相同（`…skipped(platform:
+/// Platform.operatingSystem)` / `DesktopStatus(checked: false, …)`），却让
+/// **注入的后端在非 Linux 上永远收不到调用** —— 委派契约因此没法在 Windows
+/// 上测，非 Linux 行为也有了第二条真理来源。默认后端本身就是那个桩。
 class DesktopIntegration {
   DesktopIntegration({DesktopIntegrationBackend? backend})
       : _backend = backend ?? _defaultBackend();
@@ -224,28 +229,9 @@ class DesktopIntegration {
     return other.OtherDesktopIntegration();
   }
 
-  Future<DesktopEntryInstallResult> install() async {
-    if (!Platform.isLinux) {
-      return DesktopEntryInstallResult.skipped(
-        platform: Platform.operatingSystem,
-      );
-    }
-    return _backend.install();
-  }
+  Future<DesktopEntryInstallResult> install() => _backend.install();
 
-  Future<DesktopEntryUninstallResult> uninstall() async {
-    if (!Platform.isLinux) {
-      return DesktopEntryUninstallResult.skipped(
-        platform: Platform.operatingSystem,
-      );
-    }
-    return _backend.uninstall();
-  }
+  Future<DesktopEntryUninstallResult> uninstall() => _backend.uninstall();
 
-  Future<DesktopStatus> status() async {
-    if (!Platform.isLinux) {
-      return DesktopStatus(checked: false, platform: Platform.operatingSystem);
-    }
-    return _backend.status();
-  }
+  Future<DesktopStatus> status() => _backend.status();
 }

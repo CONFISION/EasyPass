@@ -213,7 +213,7 @@ LazyDatabase _openConnection() {
     // writable XDG data directory and migrates a legacy adjacent file.
     final file = await AppPaths.prepareDatabaseFile();
     if (Platform.isLinux) {
-      // P1.4 审计 §⑥：fresh-install 路径上 `prepareDatabaseFile` 返回时 db
+      // fresh-install 路径上 `prepareDatabaseFile` 返回时 db
       // 还没被 drift 创建，所以即便它 chmod 了也拿不到正确的实体文件。
       // `setup` 回调在 drift 真正打开这个 SQLite 文件（**包括 onCreate
       // 的首次创建**）之后运行一次；在这里 chmod 一下，就能把"drift 用

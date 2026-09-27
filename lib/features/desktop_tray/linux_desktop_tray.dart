@@ -1,4 +1,4 @@
-// Linux 桌面体验对等（P3.1 / P4b）· 托盘 + 关窗最小化 —— **runner 原生实现**。
+// Linux 桌面体验对等 · 托盘 + 关窗最小化 —— **runner 原生实现**。
 //
 // 设计与 Windows 一致：托盘图标、菜单（`Open EasyPass` | 分隔 | `Exit`）和
 // "关窗最小化"全部由 runner 用 GTK / libayatana-appindicator 实现，见
@@ -19,6 +19,7 @@
 // 抽象仍服务于 Windows/macOS 桩与单测。
 
 import 'desktop_tray.dart';
+import 'linux_window_controller.dart';
 
 /// Linux：托盘与关窗最小化由 runner 原生层负责（见文件头注释）。
 ///
@@ -26,10 +27,21 @@ import 'desktop_tray.dart';
 /// `my_application.cc` 的 `delete-event` 处理器让 GTK 走默认行为 —— 关窗即
 /// 退出 —— 正好是"托盘不可用"的降级语义，所以这里可以无条件上报
 /// [DesktopTrayStatus.installed]。
+///
+/// 注意"有没有宿主"是**运行时**判断（`easypass_tray.cc` 问
+/// `org.kde.StatusNotifierWatcher` 的 `IsStatusNotifierHostRegistered`），
+/// 而本函数是同步的、在 `runApp` 之前调用，拿不到那个结果，因此这个
+/// [DesktopTrayStatus] 只是"runner 已接管"的意思，不代表图标此刻可见。
+/// 真正要紧的后果由原生层兜住：没有宿主时关窗不会把窗口藏起来。
 DesktopTrayResult installLinuxDesktopTray(DateTime clock) {
-  return const DesktopTrayResult(
+  return DesktopTrayResult(
     DesktopTrayStatus.installed,
     detail: 'Tray icon and close-to-hide are provided by the GTK runner '
         '(libayatana-appindicator).',
+    // 二次启动"唤起已有窗口"要用它：Dart 侧只能通过该控制器调原生
+    // `easypass_window_show()`（见 linux_window_controller.dart）。
+    // 少了这一项，`main.dart` 就不会 override
+    // `raiseWindowControllerProvider`，raise 会静默丢弃。
+    windowController: LinuxWindowController(),
   );
 }

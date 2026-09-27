@@ -171,7 +171,7 @@ void main() {
     expect(container2.read(authProvider).autoLockMinutes, 30);
   });
 
-  group('secure storage unavailable (P1.2 fix 1)', () {
+  group('secure storage unavailable (recovery path)', () {
     test(
         'boot probe publishes storageUnavailable and routes to lock, not first run',
         () async {
@@ -210,8 +210,7 @@ void main() {
 
       // User taps Unlock: must NOT wipe the banner, must NOT silently
       // move to loading. (Old `copyWith` erased errorMessage on every
-      // transition to AuthStatus.loading, which is the bug P1.2 fix 1
-      // closes.)
+      // transition to AuthStatus.loading, which is the bug this closes.)
       final tapped = await notifier.unlock('whatever');
       expect(tapped, isFalse);
       expect(

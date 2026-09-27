@@ -7,7 +7,7 @@ project(runner LANGUAGES C CXX)
 set(BINARY_NAME "easypass")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
-set(APPLICATION_ID "com.example.easypass")
+set(APPLICATION_ID "com.easypass.app")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
@@ -122,7 +122,7 @@ endforeach(bundled_library)
 # tree we re-compile from, and (c) still exposes the `${sqlite3_SOURCE_DIR}`
 # that the legacy install path depends on. A silent skip here would ship an
 # AppImage that fails on the first `dlopen("libsqlite3.so")` and only
-# crashes at runtime, which is exactly the regression audit §3.1 warned about.
+# crashes at runtime, which is exactly the regression described above.
 if(TARGET sqlite3_flutter_libs_plugin)
   # Keep the plugin's embedded SQLite private.  Otherwise its exported
   # sqlite3_* symbols can interpose the separately loaded system library.
@@ -147,16 +147,15 @@ if(TARGET sqlite3_flutter_libs_plugin)
   endif()
 
   add_library(easypass_sqlite3 SHARED "${sqlite3_SOURCE_DIR}/sqlite3.c")
-  # P3.5 §6 #7（AUDIT-P1 §3.2）—— 这里用 `add_dependencies` 而**不是**
-  # `target_link_libraries`，是有意为之：
+  # 这里用 `add_dependencies` 而**不是** `target_link_libraries`，是有意为之：
   #   - 本目标与插件是**两份独立 ELF**（各自持有 SQLite 互斥量/全局态，见上文），
   #     因此两者之间不存在链接依赖。让 `easypass_sqlite3` 去 link 插件会引入
   #     错误的符号解析与 rpath 期望。
   #   - 唯一真实需求是**构建顺序**：插件先被 FetchContent 取源并就绪
   #     （`${sqlite3_SOURCE_DIR}/sqlite3.c`），本目标才能编译。`add_dependencies`
   #     恰好只表达顺序，语义精确。
-  #   - 取证与结论见 `dist/P3.5-facts.md` §6 #7（`readelf -d`/`ldd` 无交叉链接）。
-  # 结论：**按需改并注释**中的「注释」分支 —— 不改动，写清依据。
+  #   - `readelf -d` / `ldd` 已确认两者之间没有交叉链接。
+  # 结论：不改动构建行为，只在此写清依据。
   set_target_properties(easypass_sqlite3 PROPERTIES
     OUTPUT_NAME sqlite3
     C_VISIBILITY_PRESET default
@@ -166,15 +165,15 @@ if(TARGET sqlite3_flutter_libs_plugin)
   target_compile_features(easypass_sqlite3 PRIVATE c_std_11)
   target_compile_options(easypass_sqlite3 PRIVATE
     "$<$<NOT:$<CONFIG:Debug>>:-O3>")
-  # P3.5 §6 #5（AUDIT-P1 §3.2）—— 与 `sqlite3_flutter_libs_plugin` 的
-  # `target_compile_definitions` 完全对齐。事实链见 `dist/P3.5-facts.md` §6 #5：
+  # 与 `sqlite3_flutter_libs_plugin` 的
+  # `target_compile_definitions` 完全对齐：
   #   - 仅差 `SQLITE_HAVE_LOCALTIME_S`（插件有，独立库原本没有）。
   #   - 本轮对齐：**安全**。`sqlite3.c:25777-25781` 里 `localtime_s(pTm, t)`
   #     分支在 `SQLITE_HAVE_LOCALTIME_R` 被定义后是死代码（preprocessor 把
   #     `#else` 抹掉）—— 即便 glibc 不提供 `localtime_s`，链接时也不会因未
-  #     定义符号报错；与插件二进制一致，build 时间戳稳定后审计跑 `objdump`
+  #     定义符号报错；与插件二进制一致，build 时间戳稳定后可用 `objdump`
   #     看符号表不再有漂移。
-  #   - 两份 CMake 现在**除名字外**完全相同；这是 P3.5 一次性目标，避免
+  #   - 两份 CMake 现在**除名字外**完全相同；这是一次性对齐，避免
   #     后续升级 sqlite3_flutter_libs 时两边宏分叉的隐患。
   target_compile_definitions(easypass_sqlite3 PRIVATE
     SQLITE_ENABLE_DBSTAT_VTAB

@@ -30,7 +30,7 @@ class EntryCard extends StatelessWidget {
     // 副标题统一用 item.subtitle（登录→用户名/网址，身份→姓名，SSH→指纹，
     // 笔记→正文摘要），UI 不再自己挑字段。
     final subtitle = item.subtitle;
-    // 复制按钮只在登录条目出现：其余类型没有"密码"可复制（契约 §4 列表）。
+    // 复制按钮只在登录条目出现：其余类型没有"密码"可复制。
     final showCopyButton = item.isAutofillable && onCopyPassword != null;
 
     return Card(
@@ -41,7 +41,7 @@ class EntryCard extends StatelessWidget {
           backgroundColor: accent.withValues(alpha: 0.14),
           child: Icon(EntryTypeBits.icon(item.type), color: accent, size: 24),
         ),
-        // 标题 + 类型徽章同一行：Expanded 让长名字走 ellipsis（§10.6），
+        // 标题 + 类型徽章同一行：Expanded 让长名字走 ellipsis，
         // 徽章是定宽小标签，拿固有宽度即可。
         title: Row(
           children: [

@@ -23,6 +23,18 @@ bool shouldShowBrowserHostPrompt({
 }) =>
     isLinux && !alreadyRegistered && !alreadyPrompted;
 
+/// 从磁盘状态推出"是否已经登记过"。
+///
+/// 判据是**有没有我们写下的文件**（wrapper / manifest），见
+/// [BrowserHostStatus.wroteRegistrationFiles]。
+///
+/// **不要**再把 `resolutionChainBroken` 当成"已登记"：从应用菜单启动的
+/// AppImage 在 `status()` 的环境里没有 `$APPIMAGE`，解析链必然报断 ——
+/// 那正是"从未登记过"的典型形态。旧逻辑据此判定"已注册"，一次性提示
+/// 于是**恰好在最需要的时候**不出现（用户永远不知道该跑哪条命令）。
+bool alreadyRegisteredFromStatus(BrowserHostStatus status) =>
+    status.checked && status.wroteRegistrationFiles;
+
 /// 给用户复制的那条命令：AppImage 优先用 `$APPIMAGE`（持久路径），
 /// 否则用当前可执行文件路径。
 String browserHostInstallCommand({
@@ -134,13 +146,9 @@ class _BrowserHostPromptHostState extends ConsumerState<BrowserHostPromptHost> {
     final prompted =
         await _storage.read(key: AppConstants.browserHostPromptKey) == 'true';
     final status = await BrowserHostInstaller().status(homeDir: home);
-    final registered = status.checked &&
-        (status.isFullyInstalled ||
-            status.isPartiallyInstalled ||
-            status.resolutionChainBroken);
     return shouldShowBrowserHostPrompt(
       isLinux: true,
-      alreadyRegistered: registered,
+      alreadyRegistered: alreadyRegisteredFromStatus(status),
       alreadyPrompted: prompted,
     );
   }

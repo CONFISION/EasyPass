@@ -296,7 +296,7 @@ void main() {
     expect(entry['password'], '');
     expect(entry['hasTotp'], false);
 
-    // 自动填充回退路径也不能把笔记塞进去（契约 §5）
+    // 自动填充回退路径也不能把笔记塞进去
     final fill = await ask(socket, reader,
         {'requestId': 'c2', 'action': 'getCredentials', 'url': ''});
     expect(fill['error'], isNull);
@@ -635,26 +635,26 @@ void main() {
     });
   });
 
-  // ─── P1.4 审计 §④~⑧：启动失败回滚 / pid 存活 / 错误信息脱敏 ────────────
+  // ─── 启动失败回滚 / pid 存活 / 错误信息脱敏 ────────────────────────────
   //
-  // 审计 §④：start() 中途失败时，绝不留 daemon.json 指向死端口。
-  // 审计 §⑦：probe 在 pid 已死时按 unreachable 处理（带 pid 校验）。
-  // 审计 §⑧：detail 不含绝对路径 / 用户名，仅暴露类型标签。
+  // start() 中途失败时，绝不留 daemon.json 指向死端口。
+  // probe 在 pid 已死时按 unreachable 处理（带 pid 校验）。
+  // detail 不含绝对路径 / 用户名，仅暴露类型标签。
 
-  group('start 失败回滚（审计 §④ / P1.5 F1）', () {
+  group('start 失败回滚（不留 daemon.json 残留）', () {
     late Directory failTempDir;
     late File failInfoFile;
     late int attemptedPort;
 
     /// 模拟"writeAsString 成功 + makePrivate 抛错"的 _persistInfo 钩子。
     ///
-    /// P1.5 审计 F1：原 P1.4 §④ 测试用"路径是一个目录"做冲突 → writeAsString
+    /// 原测试用"路径是一个目录"做冲突 → writeAsString
     /// 在文件层面就抛错，文件**永远**没被创建过，`existsSync() == false`
-    /// 是平凡的，对 §④ 的"清理掉已写入的 daemon.json"行为几乎没有判别力。
+    /// 是平凡的，对"清理掉已写入的 daemon.json"行为几乎没有判别力。
     ///
     /// 这里的实现：① 先按 `_persistInfo` 的方式真正写入 `daemon.json`（这样
     /// 异常路径触发**之后**磁盘上是有一份残留文件的）；② 再抛一个异常模拟
-    /// `AppPaths.makePrivate(file)` 失败（这是 P1.4 §④ 警告的精确场景）。
+    /// `AppPaths.makePrivate(file)` 失败（这是要覆盖的精确场景）。
     ///
     /// 不修改生产代码语义：catch 块必须既删文件又关端口。
     Future<void> Function(int port, String token) makeWriteThenThrowHook(
@@ -688,7 +688,7 @@ void main() {
 
     test('start() 抛错时不留 daemon.json 残留（即使文件已经被写入）', () async {
       // 把"makePrivate 抛错"翻译成 chmod 父目录被拒绝（firejail / 容器
-      // 只读场景），最贴合 §④ 警告原文。
+      // 只读场景）。
       final d = EasypassDaemon(
         db,
         crypto,
@@ -705,7 +705,7 @@ void main() {
       );
       await expectLater(d.start(), throwsA(isA<FileSystemException>()));
 
-      // §④ 验证 1：磁盘上**残留文件**已被 catch 块清理。
+      // 验证 1：磁盘上**残留文件**已被 catch 块清理。
       expect(
         failInfoFile.existsSync(),
         isFalse,
@@ -716,7 +716,7 @@ void main() {
 
     test('start() 抛错后，**失败实例自己 bind 的端口**已不再监听', () async {
       // 必须盯住**这个失败实例** bind 的端口（不是另一个刚 free 的端口）；
-      // 否则 P1.4 测试那样挑一个别的端口就退化成无关断言。
+      // 否则随便挑一个别的端口就退化成无关断言。
       final d = EasypassDaemon(
         db,
         crypto,
@@ -811,7 +811,7 @@ void main() {
     });
   });
 
-  group('probe 校验 pid 存活（审计 §⑦）', () {
+  group('probe 存活判定按 PID 校验', () {
     late Directory pidTempDir;
     late File pidInfoFile;
 
@@ -841,8 +841,8 @@ void main() {
       final result = await EasypassDaemon.probe(infoFile: pidInfoFile);
       expect(result.status, DaemonProbeStatus.unreachable);
       expect(result.needsCleanup, isTrue);
-      // P1.5 审计 F2：在 Linux 上 `_isPidAlive` 走 `kill -0`，能直接判定
-      // "pid 已不存活" → detail 含 'pid'；在 Windows 上 P1.5 重写了 tasklist
+      // 在 Linux 上 `_isPidAlive` 走 `kill -0`，能直接判定
+      // "pid 已不存活" → detail 含 'pid'；在 Windows 上改用了 tasklist
       // 解析，"未命中 CSV 行" → fallback 返回 false 与 Linux 走同款 'pid' 文案
       // —— 但若 CSV 解析抛 / 超时（极少见），会回落 true 再走 TCP 分支
       // 拿到 `SocketException`。所以这里既允许 'pid' 也允许 '探测失败' 兜底；
@@ -872,7 +872,7 @@ void main() {
     });
   });
 
-  group('错误信息脱敏（审计 §⑧）', () {
+  group('错误信息脱敏（不泄露绝对路径）', () {
     late Directory errTempDir;
     late File errInfoFile;
 
@@ -910,7 +910,12 @@ void main() {
           reason: 'detail 不得泄露 infoFile 的绝对路径');
       expect(result.detail, isNot(contains(errTempDir.path)),
           reason: 'detail 不得回显父目录路径');
-    });
+      // 本用例靠 `chmod 000` 造"文件存在但读不了"。Windows 没有这个语义
+      // （文件仍然可读），probe 会正常解析成"缺少 port/token"，与用例断言
+      // 的 FileSystemException 分支无关 → 显式 skip 而不是让它红。
+    }, skip: (Platform.isLinux || Platform.isMacOS)
+        ? null
+        : '需要 chmod 000 造出不可读文件（Windows 无此语义）');
 
     test('daemon.json JSON 损坏：detail 只给类型标签，不含路径', () async {
       errInfoFile.writeAsStringSync('{ not valid json');
@@ -924,14 +929,14 @@ void main() {
     });
   });
 
-  // ─── P1.5 审计 F2：Windows tasklist CSV 解析单元（跨平台可跑） ────────────
+  // ─── Windows tasklist CSV 解析单元（跨平台可跑） ─────────────────────
   //
   // 验证 [EasypassDaemon.parseCsvLine] 能正确切分 tasklist /FO CSV /NH
-  // 的常见输出。这是 P1.5 审计 F2 的核心修复 —— 旧实现靠
+  // 的常见输出。这里的核心修复 —— 旧实现靠
   // `exitCode == 0 && stdout.isNotEmpty` 恒返回 true，新实现必须正面
   // 解析每一行的 PID 字段。本测试调用真实的 `parseCsvLine`（库可见，
   // 用于可测性）断言。
-  group('Windows tasklist CSV 解析（审计 F2 单元）', () {
+  group('Windows tasklist CSV 解析（PID 列单元）', () {
     test('"1234"（普通 PID）→ 解析为 ["1234"]（拆掉引号）', () {
       expect(EasypassDaemon.parseCsvLine('"1234"'), ['1234']);
     });
@@ -939,7 +944,7 @@ void main() {
     test('"1,234"（千分位本地化格式）→ 解析时**不**在引号内 split', () {
       // tasklist 在带千分位的 locale 下可能把 1234 输出成 "1,234"，
       // 但因为逗号在引号内，最终拿到 ["1,234"] —— 去非数字时再
-      // 吃掉逗号。P1.5 修复的关键：保证引号感知拆分。
+      // 吃掉逗号。修复的关键：保证引号感知拆分。
       expect(EasypassDaemon.parseCsvLine('"1,234"'), ['1,234']);
     });
 
@@ -974,6 +979,43 @@ void main() {
       expect(EasypassDaemon.parseCsvLine(''), isEmpty);
       // 没有逗号的杂字符
       expect(EasypassDaemon.parseCsvLine('---'), ['---']);
+    });
+  });
+
+  // ─── PID 列号回归（probe 存活判定） ──────────────────────────────────────
+  //
+  // 上面那组只验证了 [EasypassDaemon.parseCsvLine] 的**切分**。真正决定
+  // "存活 / 不存活" 的是**取哪一列**，而旧实现取的是第一列（映像名）：
+  // `easypass.exe` 去掉非数字后是空串 → `int.tryParse` 拿不到数字 →
+  // **任何活着的 daemon 都被判成"已不存活"**，probe() 于是在 TCP 握手之前
+  // 就返回 unreachable，把它当作残留并删掉 `daemon.json`。
+  //
+  // 下面用**本机实测的真实 tasklist 行**锁住列号，跨平台可跑（不 spawn
+  // tasklist，因此 Windows / Linux / macOS 上都会执行）。
+  group('tasklist PID 列号（probe 存活判定回归）', () {
+    test('真实行：PID 在第二列，映像名不参与匹配', () {
+      // 实测 `tasklist /FI "PID eq 30476" /FO CSV /NH`（Windows）。
+      const liveRow = '"easypass.exe","30476","Console","1","65,924 K"';
+      expect(EasypassDaemon.csvLineReportsPid(liveRow, 30476), isTrue);
+      // 反向断言：别的 pid、以及"把映像名当 pid"的旧行为都不能命中。
+      expect(EasypassDaemon.csvLineReportsPid(liveRow, 0), isFalse);
+      expect(EasypassDaemon.csvLineReportsPid(liveRow, 3047), isFalse);
+    });
+
+    test('千分位 PID 命中；缺列 / 提示行 / 空行都不命中也不抛', () {
+      const thousands = '"easypass.exe","1,234","Console","1","65,924 K"';
+      expect(EasypassDaemon.csvLineReportsPid(thousands, 1234), isTrue);
+      // 本地化"没有匹配任务"提示行：tasklist 退出码仍是 0。
+      expect(
+        EasypassDaemon.csvLineReportsPid(
+          'INFO: No tasks are running which match the specified criteria.',
+          1234,
+        ),
+        isFalse,
+      );
+      expect(EasypassDaemon.csvLineReportsPid('', 1234), isFalse);
+      // 只有映像名（列数不足）→ 不命中，也不抛 RangeError。
+      expect(EasypassDaemon.csvLineReportsPid('"easypass.exe"', 30476), isFalse);
     });
   });
 }

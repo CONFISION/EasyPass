@@ -323,7 +323,7 @@ class VaultScreen extends ConsumerWidget {
                 return EntryCard(
                   item: item,
                   onTap: () => context.push('/vault/entry/${item.id}'),
-                  // 只有登录条目给"复制密码"（契约 §4 列表）。
+                  // 只有登录条目给"复制密码"。
                   onCopyPassword: item.isAutofillable
                       ? () => _copyPassword(context, item)
                       : null,
@@ -681,7 +681,7 @@ class VaultScreen extends ConsumerWidget {
   /// 文件夹的长按菜单：重命名 / 删除。
   ///
   /// 用 bottom sheet 而不是对话框：桌面窄窗下它天然不会溢出，条目也是
-  /// 定宽列表项（§10.7）。
+  /// 定宽列表项。
   void _showFolderActions(BuildContext context, WidgetRef ref, Folder folder) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
@@ -698,7 +698,7 @@ class VaultScreen extends ConsumerWidget {
                 children: [
                   Icon(_folderIconData(folder.icon), size: 20),
                   const SizedBox(width: 8),
-                  // 文件夹名是用户输入，必须 Expanded 才能走 ellipsis（§10.6）。
+                  // 文件夹名是用户输入，必须 Expanded 才能走 ellipsis。
                   Expanded(
                     child: Text(
                       folder.name,
@@ -854,7 +854,7 @@ class _VaultSearchDelegate extends SearchDelegate<String?> {
     }
 
     // 搜索走仓储的 searchItems：type: / folder: / url: 前缀 + 身份 / SSH /
-    // 自定义字段匹配（契约 §3），结果与列表用同一张卡片渲染。
+    // 自定义字段匹配，结果与列表用同一张卡片渲染。
     //
     // 用 [Consumer] 而不是外面传进来的 WidgetRef：搜索页是独立的 route，
     // 它的 build 不会被保险库页的重建带动 —— 如果在这里 `ref.watch` 保险库页的
@@ -907,7 +907,7 @@ class _VaultSearchDelegate extends SearchDelegate<String?> {
                 color: theme.colorScheme.onSurfaceVariant,
               ),
               const SizedBox(width: 8),
-              // Expanded：Row 里的 Text 不加就会撑破（§10.6）。
+              // Expanded：Row 里的 Text 不加就会撑破。
               Expanded(
                 child: Text(
                   l10n.searchPrefixesHint,

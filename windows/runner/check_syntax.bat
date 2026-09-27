@@ -10,6 +10,15 @@ REM broken edit is caught here instead of on the user's machine.
 REM
 REM Usage:  windows\runner\check_syntax.bat
 REM Exit:   0 = all sources parse cleanly; non-zero = compiler diagnostics above.
+REM
+REM NOTE: keep everything under windows\runner\ ASCII-only (English comments).
+REM There is no /utf-8 flag here or in the real build, so cl.exe decodes sources
+REM in the system ANSI codepage (936/GBK on a Chinese Windows). Multi-byte
+REM characters then derail the parse -- a UTF-8 comment can swallow the newline
+REM and the next declaration, and any leftover byte trips C4819 which /WX turns
+REM into an error. (The Linux runner sources live under linux\runner and are
+REM compiled by clang/gcc, which default to UTF-8; Chinese comments there are
+REM fine.)
 
 setlocal
 set "REPO_ROOT=%~dp0..\.."
@@ -43,5 +52,22 @@ if errorlevel 1 (
   echo [check_syntax] FAILED
   exit /b 1
 )
+
+REM Advisory only (never fails this script): a Low-labeled workspace breaks
+REM anything launched from build\ in ways that look like app bugs -- no tray
+REM icon, and writes to %TEMP% / %LOCALAPPDATA% / %APPDATA% fail silently.
+REM See check_integrity.bat. Printed right above the OK line so it still shows
+REM up when only the tail of this output is read.
+call "%~dp0check_integrity.bat" >nul 2>&1
+if errorlevel 1 (
+  echo.
+  echo [check_syntax] WARNING: this workspace carries a Low integrity label.
+  echo   Anything run from build\ has no tray icon and cannot write to
+  echo   %%TEMP%% / %%LOCALAPPDATA%% / %%APPDATA%%. Usual source: the DSH sandbox
+  echo   in workspace-write mode -- not an app bug.
+  echo   Fix: windows\runner\check_integrity.bat /fix
+  echo.
+)
+
 echo [check_syntax] OK - all runner sources parse cleanly
 endlocal

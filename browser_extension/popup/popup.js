@@ -5,7 +5,7 @@
  * forwards to the native host, and to the page only through
  * chrome.tabs.sendMessage({action:'fillCredentials'}).
  *
- * Entry types (bridge protocol v3, docs/entry-types.md §5): getAllCredentials /
+ * Entry types (bridge protocol v3): getAllCredentials /
  * searchCredentials return all four types (login / secure_note / identity /
  * ssh_key), each rendered with its own icon, badge, subtitle and copy actions.
  * Autofill stays login-only: only a login row carries data-action="fill".
@@ -1123,7 +1123,7 @@ function secretBlockHtml(copyAction, value) {
     '</div>';
 }
 
-/** Secure-note body: the note text *is* the entry (docs/entry-types.md §5). */
+/** Secure-note body: the note text *is* the entry (bridge protocol v3). */
 function noteBlockHtml(entry) {
   const body = typeof entry.notes === 'string' ? entry.notes : '';
   return '<div class="entry-extra entry-note">' +
@@ -1615,7 +1615,7 @@ async function toggleTotpRefresh(entry) {
 // ─── Fill ─────────────────────────────────────────────────
 
 async function fillEntry(entry) {
-  // Autofill is login-only (docs/entry-types.md §5): a note / identity / key —
+  // Autofill is login-only (bridge protocol v3): a note / identity / key —
   // e.g. one returned by a stale daemon — must never be pushed into a page.
   if (!entry || !isLoginEntry(entry)) return;
   let totp = null;

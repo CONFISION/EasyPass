@@ -168,7 +168,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
 /// form (it cannot succeed) and gives the user two concrete next steps:
 /// retry the probe, or give up and exit. Without this, a Linux user with a
 /// locked Secret Service is left with a working-looking form that silently
-/// no-ops — see the P1.2 audit §5.1.
+/// no-ops.
 class _StorageUnavailableScreen extends StatelessWidget {
   const _StorageUnavailableScreen({
     required this.l10n,

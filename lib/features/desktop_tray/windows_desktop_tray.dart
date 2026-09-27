@@ -1,9 +1,9 @@
-// Windows desktop-tray stub (P3.1).
+// Windows desktop-tray stub.
 //
 // Windows tray + close-to-hide are owned by the C++ runner
-// (`windows/runner/flutter_window.cpp:97-148`). Dart side never sees
-// WM_CLOSE and never has to draw a tray icon. We therefore return an
-// `inactive` result and leave the existing behaviour alone.
+// (`windows/runner/flutter_window.cpp`: CreateTrayIcon / WM_CLOSE /
+// TaskbarCreated). The Dart side never sees WM_CLOSE and never has to draw a
+// tray icon, so we return an `inactive` result and leave that behaviour alone.
 //
 // Keeping the file around (rather than `if (Platform.isWindows)` in the
 // public entrypoint) makes the platform matrix explicit at the source

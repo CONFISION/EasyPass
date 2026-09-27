@@ -20,8 +20,6 @@ import 'package:path/path.dart' as p;
 /// - **绝不向 stdout 写非协议内容**：所有诊断走 stderr 或本服务返回的 result。
 /// - Windows 路径下 `install/uninstall/status` 全部返回 `skippedOnPlatform`，由
 ///   调用方负责告知用户"Windows 用安装器"。
-///
-/// 来源（事实依据）：见 `dist/P2.1-facts.md`。
 class BrowserHostInstaller {
   /// 主机名（在扩展与原生主机之间标识），与 Windows 一致。
   static const String hostName = 'com.easypass.app';
@@ -495,9 +493,15 @@ class BrowserHostInstaller {
   /// 浏览器，只是不要 EasyPass 这条 manifest 而已）。
   ///
   /// 幂等：任何一份已不存在都返回 true，不抛错。
+  ///
+  /// [xdgConfigHome] 必须和 [install] / [status] 用**同一个**解析口径：不传
+  /// 时读 `Platform.environment['XDG_CONFIG_HOME']`。漏掉它会让设了该变量的
+  /// 用户执行 `--uninstall-browser-host` 时去 `~/.config` 找不到东西，于是
+  /// 打印"Already absent (no-op)" 并退 0，而 manifest 原封不动留在原处。
   Future<BrowserHostUninstallResult> uninstall({
     required String homeDir,
     String? xdgDataHome,
+    String? xdgConfigHome,
   }) async {
     if (!Platform.isLinux) {
       return BrowserHostUninstallResult.skipped(
@@ -505,7 +509,8 @@ class BrowserHostInstaller {
       );
     }
 
-    final paths = resolveVendorManifestPaths(homeDir);
+    final cfg = xdgConfigHome ?? _envPath('XDG_CONFIG_HOME');
+    final paths = resolveVendorManifestPaths(homeDir, xdgConfigHome: cfg);
     final removed = <BrowserVendor>[];
     final missing = <BrowserVendor>[];
     for (final entry in paths.entries) {
@@ -1037,6 +1042,21 @@ class BrowserHostStatus {
     // 这样 "uninstall 之后" 不会被误报为半成品。
     return vendorReports.values.any((r) => r.manifestExists);
   }
+
+  /// 磁盘上是否已经**有我们写下的登记文件**（wrapper 或任意一份 manifest）。
+  ///
+  /// 这是"用户是否已经跑过 `--install-browser-host`"的判据，
+  /// **不要**用 [resolutionChainBroken] 或 [isFullyInstalled] 代替：
+  ///
+  /// - 从未登记过的 AppImage（从应用菜单启动时环境里没有 `$APPIMAGE`）
+  ///   复算解析链时**任何候选都不可达** → `resolutionChainBroken` 为 true，
+  ///   于是"从未装过"和"装了但二进制没了"这两种形态在链上无法区分；
+  /// - [isFullyInstalled] 还要求链可用 + detected vendor 全部就绪，用作
+  ///   "是否登记过"会把"装了但需要修复"也判成没装。
+  ///
+  /// 链是否可用交给 `--browser-host-status`（[toExitCode]）去报。
+  bool get wroteRegistrationFiles =>
+      wrapperExists || vendorReports.values.any((r) => r.manifestExists);
 
   /// 给 CLI 用的："detected vendor 中哪些缺 manifest / wrapperUsable"。
   /// 用于打印人类可读的"半成品"清单。

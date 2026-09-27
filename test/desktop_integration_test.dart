@@ -11,7 +11,7 @@
 //   6. best-effort：缓存刷新命令缺失/非零退出 → warning，不影响结果。
 //   7. 非 Linux 桩：install/uninstall skipped、status !checked。
 //
-// 不可自动化的项（见 dist/PHASE4.md「手工未自动化项清单」）：真实 GNOME/KDE
+// 不可自动化的项（需手工确认）：真实 GNOME/KDE
 // 桌面里应用菜单出现条目、图标显示正确、点击能拉起应用；以及
 // `StartupWMClass` 与 `xprop WM_CLASS` 的实测对拍。
 
@@ -47,6 +47,16 @@ Uint8List fakePng(int width, int height) {
   bytes[23] = height & 0xFF;
   return bytes;
 }
+
+/// Linux 语义用例的 `skip` 参数：`chmod` 与文件 mode 的执行位是 POSIX 概念，
+/// 在 Windows 上 `Process.run('chmod', …)` 直接抛 `ProcessException`、
+/// `File.stat().mode` 也永远没有 x 位。
+///
+/// 用 `skip:` 而不是在用例里静默 `return` —— 跳过的用例必须出现在测试报告里，
+/// 否则"Windows 上绿"会被误读成"这些行为验证过了"。
+Object? get _needsPosixExecBits => Platform.isLinux
+    ? null
+    : '需要 POSIX 执行位 / chmod（Windows 不适用）';
 
 void main() {
   late Directory tmp;
@@ -177,7 +187,11 @@ void main() {
     });
 
     test('AppImage 形态：Exec 用 \$APPIMAGE（而非临时挂载路径）', () async {
-      final appImage = p.join(tmp.path, 'EasyPass-2.3.2-linux-x86_64.AppImage');
+      // 用**字面量 POSIX 路径**，不用 `p.join(tmp.path, …)`：真机上 AppImage
+      // 就是 `/…/EasyPass-x86_64.AppImage`，而 Windows 临时目录路径带反斜杠，
+      // 会被 [_escapeExecArgument] 合法地整体加引号。本用例要断言的是"写持久
+      // 路径而不是临时挂载点"，与路径形状无关。
+      const appImage = '/opt/apps/EasyPass-2.3.2-linux-x86_64.AppImage';
       final service = make(
         appImagePath: appImage,
         environment: const <String, String>{},
@@ -203,8 +217,10 @@ void main() {
       await Directory(p.join(binDir, 'assets', 'icons')).create(recursive: true);
       await File(p.join(binDir, 'assets', 'icons', 'Easypass.png'))
           .writeAsBytes(fakePng(256, 256));
-      final appImage = p.join(tmp.path, 'EasyPass-2.3.2-linux-x86_64.AppImage');
-      await File(appImage).writeAsString('#!/bin/sh\n');
+      final appImage = '/opt/apps/EasyPass-2.3.2-linux-x86_64.AppImage';
+      // AppImage 文件本身不需要存在：它只参与 Exec 字符串与"图标候选目录"的
+      // 推导，候选不存在就跳过。这样本用例在非 Linux 上也能跑（也避免去写
+      // `/opt`）。
 
       final service = LinuxDesktopIntegration(
         homeDirectory: home,
@@ -388,7 +404,7 @@ void main() {
       expect(status.iconAvailable, isTrue);
       expect(status.startupWmClass, LinuxDesktopIntegration.startupWmClass);
       expect(status.toExitCode(), 0);
-    });
+    }, skip: _needsPosixExecBits);
 
     test('入口在但指向失效（目标被删）→ exit 1', () async {
       final exe = p.join(tmp.path, 'easypass');
@@ -404,7 +420,7 @@ void main() {
       expect(status.execTargetExecutable, isFalse);
       expect(status.pointsAtBrokenTarget, isTrue);
       expect(status.toExitCode(), 1);
-    });
+    }, skip: _needsPosixExecBits);
 
     test('同名但不是我们写的文件 → 不算已安装（exit 1）', () async {
       final service = make();
@@ -434,11 +450,11 @@ void main() {
       final text = LinuxDesktopIntegration.renderDesktopEntry(
         execPath: '/opt/easypass/easypass',
         iconName: 'easypass',
-        wmClass: 'com.example.easypass',
+        wmClass: 'com.easypass.app',
         name: 'EasyPass',
       );
       expect(text, contains('Exec=/opt/easypass/easypass %U'));
-      expect(text, contains('StartupWMClass=com.example.easypass'));
+      expect(text, contains('StartupWMClass=com.easypass.app'));
       // 不写 StartupNotify（缺省 false 更稳，见实现注释）。
       expect(text.contains('StartupNotify'), isFalse);
     });

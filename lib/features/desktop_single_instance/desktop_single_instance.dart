@@ -1,4 +1,4 @@
-// Single-instance + secondary-launch "raise" for the desktop app (P3.2).
+// Single-instance + secondary-launch "raise" for the desktop app.
 //
 // 设计原则：
 //   1. 抽象层可注入、可单测 —— 真实桌面会话、Network namespace、真实 flock
@@ -6,7 +6,7 @@
 //   2. Windows 不受影响 —— 见 `windows_single_instance.dart`（no-op 桩）。
 //   3. 失败 = 可读 stderr + UI 可读提示，绝不静默卡死。
 //
-// 锁选型 / IPC 选型理由：`dist/P3.2-facts.md` §4.3 / §5。
+// 锁选型 / IPC 选型理由：
 //   - 进程内互斥用 `flock`（`dart:io` 的 [File.lock]），崩溃时内核自动释放，
 //     跨进程可见，无 pid 复用风险。
 //   - 二次启动唤起用 unix socket：socket 文件紧邻锁文件，由首个进程 bind/
@@ -84,7 +84,7 @@ SingleInstanceFactory _defaultSingleInstanceFactory() {
 ///   - `primary` → 继续走 UI 启动；保留 [SingleInstanceDecision.backend]，
 ///     待 `runApp` 之后立刻 `backend.startRaising(handler)`。
 ///   - `secondary` → 通过 [decision.detail] 把"已经在跑"的提示输出到 stderr，
-///     并 `exit(0)`（不允许 UI 启动；与任务书"二次启动唤起已有窗口"对齐）。
+///     并 `exit(0)`（不允许 UI 启动；二次启动只负责唤起已有窗口）。
 ///   - `notApplicable` → 不在 Linux 上，行为不变（Windows 由 C++ runner 守门）。
 ///
 /// [injectedBackend] / [injectedChannel] 是测试用 —— 只能在 `_factoryOverride`

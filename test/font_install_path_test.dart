@@ -1,6 +1,6 @@
-// P3.5 §6 #4：字体安装路径与加载器期望路径**两平台必须一致**。
+// 字体安装路径与加载器期望路径**两平台必须一致**。
 //
-// 审计 #14 的指责："`FONTS_SRC` 安装路径是 `${CMAKE_INSTALL_PREFIX}/assets/fonts`
+// 曾有断言称："`FONTS_SRC` 安装路径是 `${CMAKE_INSTALL_PREFIX}/assets/fonts`
 // 而 `windows/CMakeLists.txt` 是 `data/`" —— 事实核验发现这条断言**错误**：
 //   - `windows/CMakeLists.txt:89` 显式把 `assets/fonts/` 装到
 //     `${CMAKE_INSTALL_PREFIX}/assets/fonts`。
@@ -31,7 +31,7 @@ Directory _loaderExpectsBundledDir() {
 }
 
 void main() {
-  group('P3.5 §6 #4 — bundled font install path == loader expected path', () {
+  group('bundled font install path == loader expected path', () {
     test('the loader looks under <exedir>/assets/fonts (path-shape check)',
         () {
       final path = _loaderExpectsBundledDir().path;
@@ -49,8 +49,8 @@ void main() {
         () {
       // If somebody (accidentally) wires fonts to `<exe>/data/flutter_assets/...`
       // (which is where flutter's compiled assets live, but NOT fonts), the
-      // loader must still find them. The audit's §3.4 claim "Windows uses data/"
-      // is wrong — but if it ever becomes true, this test must catch it.
+      // loader must still find them. The claim that "Windows uses data/" is
+      // wrong — but if it ever becomes true, this test must catch it.
       //
       // Note: <exe>/data/ may legitimately contain flutter_assets (CMake does
       // install flutter_assets there on both platforms). What we forbid is the
@@ -76,10 +76,9 @@ void main() {
         'CMAKE_INSTALL_PREFIX/assets/fonts (textual contract test)', () {
       // Since this is a Dart-only test environment without invoking CMake,
       // we read both CMakeLists.txt files and assert the install pattern.
-      // The full build verification (`flutter build linux --release` produces
-      // `bundle/assets/fonts/MapleMono-NF-CN-Regular.ttf`) is captured
-      // separately in dist/P3.5-facts.md §6 #4 + the build evidence line
-      // of dist/DONE-P3D.txt.
+      // The full build verification (`flutter build linux --release` must
+      // produce `bundle/assets/fonts/MapleMono-NF-CN-Regular.ttf`) needs a
+      // real Flutter/CMake build and is therefore not run here.
       final repoRoot = _repoRoot();
       final linux = File(p.join(repoRoot, 'linux', 'CMakeLists.txt'));
       final windows = File(p.join(repoRoot, 'windows', 'CMakeLists.txt'));

@@ -52,7 +52,7 @@ class EntryFormKeys {
 /// 第一个文件夹"（用户报的 bug）。`foldersProvider` 是 drift 的流：谁写入都会
 /// 推到所有正在读它的地方，新增 / 改名 / 删除当场可见。
 ///
-/// 数据纪律（契约 §4）：
+/// 数据纪律：
 /// - 保存只走 `repo.saveItem(VaultItem)`，**不碰** `*_encrypted` 列；
 /// - 只提交当前类型对应的字段块，切换类型时先 `withoutTypeData()` 丢弃旧块；
 /// - 加密失败一律冒泡成错误提示，绝不退化成写明文。
@@ -110,7 +110,7 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
   final _sshBits = TextEditingController();
   final _sshComment = TextEditingController();
 
-  /// 用户手改过的推导字段：公钥再变也不覆盖（契约 §4"允许手改"）。
+  /// 用户手改过的推导字段：公钥再变也不覆盖（允许手改）。
   bool _sshFingerprintTouched = false;
   bool _sshKeyTypeTouched = false;
   bool _sshBitsTouched = false;
@@ -328,7 +328,7 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
     if (confirmed != true || !mounted) return;
 
     setState(() {
-      // 契约 §2：切换类型必须丢掉原类型的字段块，避免身份/SSH 数据
+      // 切换类型必须丢掉原类型的字段块，避免身份/SSH 数据
       // 混进别的类型。名称 / 备注 / 收藏 / 自定义字段保留。
       _baseItem = _baseItem?.withoutTypeData();
       _type = next;
@@ -450,7 +450,7 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
 
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    // SSH：公钥 / 私钥至少填一个（契约 §4）。
+    // SSH：公钥 / 私钥至少填一个。
     if (_type == EntryType.sshKey &&
         _sshPublicKey.text.trim().isEmpty &&
         _sshPrivateKey.text.trim().isEmpty) {
@@ -477,7 +477,7 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
       context.pop();
     } catch (e) {
       if (!mounted) return;
-      // 加密 / 写库失败就报错，绝不退化成写明文（契约 §2）。
+      // 加密 / 写库失败就报错，绝不退化成写明文。
       messenger.showSnackBar(
         SnackBar(
           content: Text(l10n.failedToSaveEntry(e.toString())),

@@ -40,7 +40,7 @@ void main() {
   const sshPublicKey = 'ssh-ed25519 FAKEFIXTUREPUBLICKEY user@host';
   const sshPrivateKeyFixture = 'FAKE-PRIVATE-KEY-MATERIAL-NOT-A-REAL-KEY';
 
-  /// 协议 3 条目 JSON 的**完整**键集合（契约 §5 冻结，扩展依赖它）。
+  /// 协议 3 条目 JSON 的**完整**键集合（已冻结，扩展依赖它）。
   const protocolEntryKeys = {
     'id',
     'type',
@@ -419,7 +419,7 @@ void main() {
     });
   });
 
-  group('getCredentials - 按域名匹配（契约 2.4）', () {
+  group('getCredentials - 按域名匹配', () {
     test('条目 URL 带路径也能命中同域的页面 URL', () async {
       await insertEntry(); // https://github.com/login
       await request('unlock', {'password': masterPassword});
@@ -495,7 +495,7 @@ void main() {
     });
   });
 
-  // ─── 协议 3：条目 JSON 形状（契约 §5）─────────────────────
+  // ─── 协议 3：条目 JSON 形状 ─────────────────────────────
 
   group('协议 3 条目 JSON（四种类型）', () {
     test('每种类型：type 判别 + 类型专属块 + 非登录字段为空串', () async {
@@ -513,7 +513,7 @@ void main() {
       // 键集合就是契约本身：多一个少一个都会让扩展解析出错。
       for (final entry in data) {
         expect(entry.keys.toSet(), protocolEntryKeys,
-            reason: '${entry['id']} 的条目 JSON 键集合必须与契约 §5 完全一致');
+            reason: '${entry['id']} 的条目 JSON 键集合必须与协议 3 完全一致');
         expect(entry['hasTotp'], isA<bool>());
       }
 
@@ -630,7 +630,7 @@ void main() {
     });
   });
 
-  // ─── 自动填充候选只认登录条目（契约 §5）───────────────────
+  // ─── 自动填充候选只认登录条目 ───────────────────────────
 
   group('getCredentials - 只返回登录条目', () {
     test('URL 匹配路径：四种类型都在库里，只回登录条目', () async {
@@ -648,7 +648,7 @@ void main() {
           'getCredentials', {'url': 'https://github.com/session'});
       expect(res['error'], isNull);
       expect((res['data'] as List).map((e) => e['id']), ['login-1'],
-          reason: '笔记 / 身份 / SSH 出现在填充列表里 = 契约 §5 的坑');
+          reason: '笔记 / 身份 / SSH 出现在填充列表里 = 填充候选只认登录条目');
     });
 
     test('回退路径（url 缺失 / 空 / 不可解析）同样只给登录条目', () async {
@@ -663,7 +663,7 @@ void main() {
         final res = await request('getCredentials', probe);
         expect(res['error'], isNull, reason: '$probe');
         expect((res['data'] as List).map((e) => e['id']), ['login-1'],
-            reason: '回退成"全部条目"时把非登录条目塞进来 = 契约 §5 的坑：$probe');
+            reason: '回退成"全部条目"时把非登录条目塞进来 = 填充候选只认登录条目：$probe');
       }
     });
 
@@ -684,7 +684,7 @@ void main() {
     });
   });
 
-  // ─── 搜索所有类型（契约 §5）──────────────────────────────
+  // ─── 搜索所有类型 ───────────────────────────────────────
 
   group('searchCredentials - 所有类型', () {
     test('按证件号搜到身份条目', () async {
@@ -997,7 +997,7 @@ void main() {
       expect(res['error'].toString().toLowerCase(), contains('lock'));
     });
 
-    test('返回契约 2.3 的统计结构，且不含任何明文密码', () async {
+    test('返回健康报告统计结构，且不含任何明文密码', () async {
       // h1 健康；h2/h3 共用弱密码 '123456'，无 TOTP；h2 还没有 URL
       await insertRow(
           id: 'h1',
@@ -1142,7 +1142,7 @@ void main() {
       expect(svc.isUnlocked, isTrue);
     });
 
-    // ── 只分析登录条目（契约 §5）────────────────────────────
+    // ── 只分析登录条目 ──────────────────────────────────────
 
     test('笔记 / 身份 / SSH 条目不计入 totalEntries，也不产生 noUrl / noTotp 问题',
         () async {

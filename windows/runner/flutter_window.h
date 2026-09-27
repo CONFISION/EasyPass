@@ -26,7 +26,10 @@ class FlutterWindow : public Win32Window {
   // Tray icon (system notification area). Closing the window hides the app
   // to the tray while the background daemon keeps serving the extension
   // (Bitwarden-style behavior).
-  void CreateTrayIcon();
+  //
+  // Returns true when the shell actually accepted the icon. A false return
+  // means "do not hide the window": see the WM_CLOSE handler.
+  bool CreateTrayIcon();
   void DestroyTrayIcon();
   void ShowTrayMenu();
   void RestoreWindow();
@@ -37,6 +40,12 @@ class FlutterWindow : public Win32Window {
   static constexpr UINT kTrayExitCommand = 1002;
 
   bool tray_icon_created_ = false;
+
+  // `RegisterWindowMessageW(L"TaskbarCreated")`, broadcast by the shell when
+  // Explorer (re)starts. Every tray icon is dropped at that moment, so an app
+  // that does not listen loses its icon for the rest of the session - with the
+  // window already hidden, the user has no way back.
+  UINT taskbar_created_message_ = 0;
 
   // The project to run.
   flutter::DartProject project_;

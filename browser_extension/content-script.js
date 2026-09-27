@@ -4,9 +4,10 @@
 //   1. 登录表单探测 / 字段识别（findLoginForms / identifyField）
 //   2. React/Vue/Angular 受控组件友好写入（原生 value setter + input/change 事件）
 //   3. 密码框内联 EasyPass 图标 + 自绘气泡 / 条目选择面板（DOM 与样式均以 easypass- 前缀作用域化）
-//   4. 响应 popup 的 fillCredentials / detectForms（契约 §3.2），按需向 background 取数（§3.3）
+//   4. 响应 popup 的 fillCredentials / detectForms，按需向 background 取数
 //
-// 契约真相：HANDOFF_V21_CONTRACT.md §2.3（entry 结构）§3.2（popup→content）§3.3（content→background）§4（i18n 键）
+// 消息契约：popup→content 的 fillCredentials / detectForms、content→background 的取数动作，
+// 以及条目 JSON 的 `type` + 类型专属字段块（桥接协议 3）。
 // 运行环境：manifest `all_frames: true`，每个 frame 各跑一份；取凭据只用本 frame 的 location.href。
 // 纪律：不打印任何凭据；用户可见文案一律 chrome.i18n.getMessage('字面量键')（扩展静态检查靠字面量校验键名）。
 
@@ -357,7 +358,7 @@
 
   /**
    * 填充入口：preferredPasswordInput 为图标点击路径锚定的那个密码框。
-   * 返回契约 §3.2 的 filled 结构。
+   * 返回填充结果结构（filled: { username, password, totp }）。
    */
   function fillCredentialsOnPage(credentials, preferredPasswordInput) {
     const filled = { username: false, password: false, totp: false };
@@ -682,7 +683,7 @@
     document.removeEventListener('keydown', onDocumentKeyDown, true);
   }
 
-  // ─── 消息（content → background，契约 §3.3）───────────────
+  // ─── 消息（content → background）────────────────────────
 
   function sendToBackground(action, payload) {
     return new Promise(function (resolve) {
@@ -720,7 +721,7 @@
     return typeof res.error === 'string' ? res.error : String(res.error);
   }
 
-  /** getCredentials 返回的是条目数组（契约 §2.1/§2.3），不是单个对象 */
+  /** getCredentials 返回的是条目数组，不是单个对象 */
   function normalizeEntries(res) {
     if (Array.isArray(res)) return { entries: res, error: '' };
     if (res && res.error) return { entries: [], error: errorDetail(res) };
@@ -728,7 +729,7 @@
   }
 
   /**
-   * 自动填充只认登录条目（契约 §5）。daemon 侧的 getCredentials 已经只返回登录条目，
+   * 自动填充只认登录条目。daemon 侧的 getCredentials 已经只返回登录条目，
    * 这里再挡一道：陈旧的 daemon（协议 2 及更早）或异常回退路径可能把安全笔记 /
    * 身份信息 / SSH 密钥塞回来，那些条目的 username/password 是空串，但绝不能
    * 出现在填充面板里，更不该被"填"进页面。
@@ -824,7 +825,7 @@
   }
 
   function fillEntry(entry, anchor, token) {
-    // 最后一道门槛：非登录条目绝不下发到页面（契约 §5）。
+    // 最后一道门槛：非登录条目绝不下发到页面。
     if (!isFillableEntry(entry)) {
       setPanelMessage(anchor, chrome.i18n.getMessage('contentNoMatch'), '');
       return;
@@ -833,7 +834,7 @@
       username: entry && entry.username ? entry.username : '',
       password: entry && entry.password ? entry.password : '',
     };
-    // 只有页面确实有 TOTP 输入框时才去取验证码（契约 §3.3，也避免无谓地唤醒本机宿主）
+    // 只有页面确实有 TOTP 输入框时才去取验证码（也避免无谓地唤醒本机宿主）
     const needsTotp = !!(entry && entry.hasTotp) && !!pickTotpFor(anchor);
     const ready = needsTotp
       ? fetchTotp(entry.id).then(function (code) {
@@ -1042,7 +1043,7 @@
     }
   }
 
-  // ─── 消息监听（popup → content，契约 §3.2）────────────────
+  // ─── 消息监听（popup → content）─────────────────────────
 
   function replyFillCredentials(request, sendResponse) {
     const credentials = (request && typeof request.credentials === 'object' && request.credentials) ? request.credentials : {};
@@ -1057,7 +1058,7 @@
     // 响应"交给 popup；空 frame（典型：含 iframe 的页面里没有登录框的子 frame）
     // 抢答会让 popup 误判为受限页面 —— 明明填好了却提示"不支持填充"并去复制
     // 密码。保持沉默，让真正有登录框的那个 frame 回答；所有 frame 都沉默时
-    // popup 侧收到 reject，才走受限页面回退（契约 §3.2）。
+    // popup 侧收到 reject，才走受限页面回退。
     if (!hasForm) return false;
 
     let filled = { username: false, password: false, totp: false };

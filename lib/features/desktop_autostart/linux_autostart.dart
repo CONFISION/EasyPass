@@ -1,7 +1,7 @@
 // Linux 真实实现：写 `~/.config/autostart/easypass.desktop`。
 //
 // `.desktop` 字段基于 freedesktop.org Desktop Entry Specification + autostart
-// 子规范。最小可用字段见 `dist/P3.2-facts.md` §4.2。
+// 子规范，只写桌面环境认账的最小字段集。
 //
 // 错误归一：所有 IO 失败 → `AutostartException`（带脱敏化的 basename，与
 // `AppPaths.makePrivate` 风格一致），由 UI 层捕获后 SnackBar。

@@ -5,7 +5,7 @@ import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
 import 'package:easypass/features/browser_bridge/url_matcher.dart';
 
-/// [UrlMatcher] 单测：契约 2.4 的 hostOf 规范化规则、三条匹配规则、
+/// [UrlMatcher] 单测：hostOf 规范化规则、三条匹配规则、
 /// 排序优先级，空/不可解析 URL 的处理，以及 2.3.0 的"只有登录条目参与匹配"。
 void main() {
   /// 造一个只关心 url/name 的**登录**条目（其余字段与匹配无关）。
@@ -218,7 +218,7 @@ void main() {
     });
   });
 
-  // ─── 2.3.0：只有登录条目参与匹配（契约 §5）─────────────────
+  // ─── 2.3.0：只有登录条目参与匹配 ─────────────────
 
   group('match - 只认登录条目', () {
     test('安全笔记 / 身份 / SSH 条目即使同域也不返回', () {

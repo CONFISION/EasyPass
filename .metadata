@@ -18,6 +18,13 @@ migration:
     - platform: linux
       create_revision: 6a19cca56475dbfba1478ee68d7bd0c2ef891da1
       base_revision: 6a19cca56475dbfba1478ee68d7bd0c2ef891da1
+    # Windows 条目必须保留：加入 linux 平台时被顶掉了，于是 `flutter create`
+    # 的 migrate 逻辑不再知道 windows/ 这个平台存在（本仓库 windows/runner
+    # 是入库源码，不是一次性脚手架）。revision 保持 windows/ 上次同步时的值，
+    # 这样 migrate 仍能看出它需要迁移。
+    - platform: windows
+      create_revision: f94f4fc76b4d74543ed9b085bbd75341ef65de22
+      base_revision: f94f4fc76b4d74543ed9b085bbd75341ef65de22
 
   # User provided section
 
