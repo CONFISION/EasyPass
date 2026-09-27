@@ -40,11 +40,7 @@ gchar* resolve_icon_path() {
 }
 
 void on_open_activate(GtkMenuItem* item, gpointer user_data) {
-  if (g_window == nullptr) {
-    return;
-  }
-  gtk_widget_show(GTK_WIDGET(g_window));
-  gtk_window_present(g_window);
+  easypass_window_show();
 }
 
 void on_exit_activate(GtkMenuItem* item, gpointer user_data) {
@@ -83,6 +79,14 @@ GtkWidget* build_menu() {
 gboolean easypass_tray_install(GtkWindow* window) {
   if (g_indicator != nullptr) {
     return TRUE;
+  }
+
+  // CI / smoke-test hook. The runner honours `EASYPASS_DEBUG_NO_TRAY` to
+  // simulate a desktop with no StatusNotifier host — used by the T4
+  // verification flow ("no tray host, close -> quit"). Off by default.
+  if (g_getenv("EASYPASS_DEBUG_NO_TRAY") != nullptr) {
+    g_warning("easypass tray: EASYPASS_DEBUG_NO_TRAY set; skipping install");
+    return FALSE;
   }
 
   g_autofree gchar* icon_path = resolve_icon_path();
@@ -129,4 +133,20 @@ gboolean easypass_tray_install(GtkWindow* window) {
 
 gboolean easypass_tray_is_active(void) {
   return g_indicator != nullptr && !g_quitting;
+}
+
+// CI / smoke-test hook only. Marks the tray state as quitting so the
+// `delete-event` handler does not try to hide the window during the headless
+// `EASYPASS_DEBUG_AUTO_EXIT_AFTER_MS` flow — which is just a CI helper, never
+// triggered in normal user paths.
+void g_quitting_set_for_test(void) {
+  g_quitting = TRUE;
+}
+
+void easypass_window_show(void) {
+  if (g_window == nullptr) {
+    return;
+  }
+  gtk_widget_show(GTK_WIDGET(g_window));
+  gtk_window_present(g_window);
 }

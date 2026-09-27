@@ -28,10 +28,74 @@ static void my_application_window_destroyed(GtkWidget* widget,
   g_application_quit(G_APPLICATION(user_data));
 }
 
-// Close-to-tray: mirrors `windows/runner/flutter_window.cpp`. When a tray icon
-// is live, closing the window hides it and the app keeps running; without a
-// tray host the default GTK behaviour (destroy → quit) is kept so the app
-// never becomes unreachable.
+// CI / smoke-test hook callback — see `EASYPASS_DEBUG_AUTO_CLOSE_MS` in
+// `my_application_activate`. `gtk_widget_event(widget, GDK_DELETE_event)`
+// is the exact dispatch path GTK uses when forwarding a window-manager close
+// request (Wayland `xdg_toplevel::close`, X11 `WM_DELETE_WINDOW`) — those
+// arrive as `GDK_DELETE` events through `gtk_main_do_event`. Without a real
+// graphical session we cannot click the close button, so the hook synthesises
+// the same GDK event and feeds it through `gtk_widget_event`, exercising the
+// close-to-tray path end-to-end.
+static gboolean debug_auto_close_cb(gpointer user_data) {
+  GtkWidget* window = GTK_WIDGET(user_data);
+  GdkEvent* event = gdk_event_new(GDK_DELETE);
+  event->any.window = gtk_widget_get_window(window);
+  if (event->any.window != nullptr) {
+    g_object_ref(event->any.window);
+  }
+  gtk_widget_event(window, event);
+  if (event->any.window != nullptr) {
+    g_object_unref(event->any.window);
+  }
+  gdk_event_free(event);
+  return G_SOURCE_REMOVE;
+}
+
+// CI / smoke-test hook callback — see `EASYPASS_DEBUG_AUTO_SHOW_AFTER_MS` in
+// `my_application_activate`. Mirrors the tray "Open EasyPass" code path so a
+// headless / unattended run can verify that the window can be restored after
+// being hidden.
+static gboolean debug_auto_show_cb(gpointer user_data) {
+  (void)user_data;
+  easypass_window_show();
+  return G_SOURCE_REMOVE;
+}
+
+// CI / smoke-test hook callback — see `EASYPASS_DEBUG_AUTO_EXIT_AFTER_MS` in
+// `my_application_activate`. Mirrors the tray "Exit" code path so a
+// headless / unattended run can verify that quit actually tears down the
+// process and the tray entry.
+static gboolean debug_auto_exit_cb(gpointer user_data) {
+  GtkWindow* window = GTK_WINDOW(user_data);
+  // Mark quitting first so `easypass_tray_is_active()` returns FALSE — this
+  // mirrors `on_exit_activate` in easypass_tray.cc.
+  g_quitting_set_for_test();
+  gtk_widget_destroy(GTK_WIDGET(window));
+  GApplication* app = g_application_get_default();
+  if (app != nullptr) {
+    g_application_release(app);
+    g_application_quit(app);
+  }
+  return G_SOURCE_REMOVE;
+}
+
+// Close-to-tray: mirrors `windows/runner/flutter_window.cpp`. When a tray
+// icon is live, closing the window hides it and the app keeps running;
+// without a tray host the default GTK behaviour (destroy → quit) is kept so
+// the app never becomes unreachable.
+//
+// The Flutter Linux embedder (engine 3.47+) registers its own `delete-event`
+// handler on the toplevel in `fl_view::realize_cb` and calls
+// `fl_engine_request_app_exit` → `System.requestAppExit` (CANCELABLE) on the
+// platform channel; Dart's `WidgetsBinding` answers it by default with
+// `SystemNavigator.pop`, which the embedder turns into `quit_application()`
+// → `g_application_quit` → process exit. Returning TRUE from this handler
+// only suppresses GTK's default destruction, not the other handlers on the
+// signal — so just returning TRUE here is not enough; the embedder's
+// `delete-event` handler must be disconnected at startup (see
+// `my_application_activate`). With that disconnect in place, this handler
+// becomes the only one observing the close and the window can be hidden
+// without the embedder noticing.
 static gboolean my_application_window_delete(GtkWidget* widget,
                                              GdkEvent* event,
                                              gpointer user_data) {
@@ -39,6 +103,10 @@ static gboolean my_application_window_delete(GtkWidget* widget,
     return FALSE;
   }
   gtk_widget_hide(widget);
+  // Returning TRUE also blocks GTK's default `gtk_widget_destroy` fallback for
+  // the same signal; both belts and braces. The Flutter embedder's
+  // `delete-event` handler was disconnected in `my_application_activate` so
+  // it never observes this close at all.
   return TRUE;
 }
 
@@ -111,6 +179,27 @@ static void my_application_activate(GApplication* application) {
                    G_CALLBACK(my_application_window_delete), nullptr);
   g_signal_connect(window, "destroy",
                    G_CALLBACK(my_application_window_destroyed), application);
+
+  // The Flutter Linux embedder registers its own `delete-event` handler on
+  // the toplevel in `fl_view::realize_cb` (which runs from
+  // `gtk_widget_realize(GTK_WIDGET(view))` above, before this point). It calls
+  // `fl_engine_request_app_exit` → `System.requestAppExit` (CANCELABLE) on
+  // the platform channel; Dart's `WidgetsBinding` answers it by default with
+  // `SystemNavigator.pop`, which the embedder turns into `quit_application()`
+  // → `g_application_quit` → process exit. The runner's hide-on-close handler
+  // is connected *after* the embedder's, so under FIFO emission the embedder
+  // runs first and the process dies before our handler sees the close. We
+  // disconnect the embedder's handler instead: its connection was made with
+  // `g_signal_connect_object(... G_CONNECT_SWAPPED, self=view, ...)` so its
+  // user-data is the FlView. `g_signal_handlers_disconnect_matched` keyed by
+  // user-data is the precise teardown — the only `delete-event` handler that
+  // captures the FlView is the embedder's. (The trampoline function is a
+  // private static symbol in libflutter_linux_gtk.so and not exported.)
+  g_signal_handlers_disconnect_matched(
+      window,
+      G_SIGNAL_MATCH_DATA,
+      0, 0, nullptr, nullptr, view);
+
   easypass_tray_install(window);
   if (easypass_tray_is_active()) {
     // A tray-style app must survive having no visible window: without this
@@ -118,6 +207,44 @@ static void my_application_activate(GApplication* application) {
     // and quits, taking the tray icon with it (measured: the process exited
     // right after `gtk_widget_hide` even though delete-event was handled).
     g_application_hold(application);
+  }
+
+  // CI / smoke-test hook. Without a real Wayland/X session to click the
+  // title-bar close button, an unattended run cannot trigger the delete-event
+  // path this code is meant to handle. Setting `EASYPASS_DEBUG_AUTO_CLOSE_MS`
+  // to a positive millisecond count schedules a `gtk_window_close` against the
+  // toplevel — which is the same code path the window manager uses (it emits
+  // `delete-event` on the window) — so headless / remote CI runs can verify
+  // "close to tray" end-to-end. Setting `EASYPASS_DEBUG_AUTO_SHOW_AFTER_MS`
+  // schedules a call into the tray's "Open EasyPass" path (`easypass_window_show`)
+  // at the given offset, used by the CI flow to verify the "restore window from
+  // tray" code path. Off by default; ignored when the variable is unset /
+  // non-positive / greater than five minutes.
+  {
+    const gchar* auto_close_ms = g_getenv("EASYPASS_DEBUG_AUTO_CLOSE_MS");
+    if (auto_close_ms != nullptr) {
+      gchar* end = nullptr;
+      glong ms = g_ascii_strtoll(auto_close_ms, &end, 10);
+      if (end != auto_close_ms && ms > 0 && ms <= 5 * 60 * 1000) {
+        g_timeout_add((guint)ms, debug_auto_close_cb, window);
+      }
+    }
+    const gchar* auto_show_ms = g_getenv("EASYPASS_DEBUG_AUTO_SHOW_AFTER_MS");
+    if (auto_show_ms != nullptr) {
+      gchar* end = nullptr;
+      glong ms = g_ascii_strtoll(auto_show_ms, &end, 10);
+      if (end != auto_show_ms && ms > 0 && ms <= 5 * 60 * 1000) {
+        g_timeout_add((guint)ms, debug_auto_show_cb, window);
+      }
+    }
+    const gchar* auto_exit_ms = g_getenv("EASYPASS_DEBUG_AUTO_EXIT_AFTER_MS");
+    if (auto_exit_ms != nullptr) {
+      gchar* end = nullptr;
+      glong ms = g_ascii_strtoll(auto_exit_ms, &end, 10);
+      if (end != auto_exit_ms && ms > 0 && ms <= 5 * 60 * 1000) {
+        g_timeout_add((guint)ms, debug_auto_exit_cb, window);
+      }
+    }
   }
 
 
