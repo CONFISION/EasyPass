@@ -3,9 +3,12 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../../core/constants/app_constants.dart';
 import '../../core/crypto/crypto_service.dart';
 import '../../core/crypto/totp_service.dart';
+import '../../core/platform/app_paths.dart';
 import '../../data/database/database.dart';
 import '../../data/repositories/vault_repository.dart';
 import 'native_messaging_service.dart';
@@ -64,7 +67,8 @@ class DaemonProbeResult {
       status == DaemonProbeStatus.unreachable;
 
   @override
-  String toString() => 'DaemonProbeResult(${status.name}'
+  String toString() =>
+      'DaemonProbeResult(${status.name}'
       '${port == null ? '' : ', port=$port'}'
       '${pid == null ? '' : ', pid=$pid'}'
       '${fileProtocolVersion == null ? '' : ', fileVersion=$fileProtocolVersion'}'
@@ -83,8 +87,8 @@ class DaemonProbeResult {
 /// extension work while the UI is closed.
 ///
 /// Security: the server binds to loopback only, and every connection must
-/// present the random token persisted in `%LOCALAPPDATA%\EasyPass\daemon.json`
-/// (a directory only the current user can write to).
+/// present the random token persisted in the platform user-data directory's
+/// `daemon.json` (a directory only the current user can write to).
 ///
 /// Unlock state (C 方案): the daemon owns a single [VaultSession] created at
 /// construction time and hands it to every connection, so unlocking once in
@@ -151,16 +155,29 @@ class EasypassDaemon {
   /// 空闲检查间隔（`--service` 模式下生效）。
   static const Duration idleCheckInterval = Duration(seconds: 30);
 
-  EasypassDaemon(this._db, this._cryptoService, this._totpService,
-      {this._infoFile,
-      VaultSession? session,
-      this.exitWhenIdle = false,
-      this.idleExitTimeout = const Duration(minutes: 10),
-      DateTime Function()? clock,
-      this.onIdleExit})
-      : session = session ?? VaultSession(),
-        _clock = clock ?? DateTime.now,
-        _lastActivityAt = (clock ?? DateTime.now)();
+  /// 测试钩子：在 `start()` 中**取代** [start] 里 `_persistInfo` 调用的整段
+  /// 落盘逻辑（写 daemon.json + makePrivate）。默认 = 走原 [_persistInfo]。
+  ///
+  /// P1.5 审计 F1：注入一个会在写完文件后抛错的钩子，覆盖"P1.4 审计 §④"警告
+  /// 但 §④ 测试未能真正验证的路径——"bind 成功、file 写入成功、makePrivate
+  /// 抛错 → 端口挂着、文件残留"。生产代码绝不允许这条路径出现，而默认实现
+  /// 也确实会兜底；只需让单测能可靠触发来验证兜底正确。
+  Future<void> Function(int port, String token)? onPersistInfo;
+
+  EasypassDaemon(
+    this._db,
+    this._cryptoService,
+    this._totpService, {
+    this._infoFile,
+    VaultSession? session,
+    this.exitWhenIdle = false,
+    this.idleExitTimeout = const Duration(minutes: 10),
+    DateTime Function()? clock,
+    this.onIdleExit,
+    this.onPersistInfo,
+  }) : session = session ?? VaultSession(),
+       _clock = clock ?? DateTime.now,
+       _lastActivityAt = (clock ?? DateTime.now)();
 
   /// 活跃连接数（诊断/测试用）。
   int get activeConnections => _activeConnections;
@@ -226,13 +243,17 @@ class EasypassDaemon {
       }
       final decoded = jsonDecode(await file.readAsString());
       if (decoded is! Map<String, dynamic>) {
-        return const DaemonProbeResult(DaemonProbeStatus.unreachable,
-            detail: 'daemon.json 不是 JSON 对象');
+        return const DaemonProbeResult(
+          DaemonProbeStatus.unreachable,
+          detail: 'daemon.json 不是 JSON 对象',
+        );
       }
       info = decoded;
     } catch (e) {
-      return DaemonProbeResult(DaemonProbeStatus.unreachable,
-          detail: 'daemon.json 读取失败（${e.runtimeType}）');
+      return DaemonProbeResult(
+        DaemonProbeStatus.unreachable,
+        detail: 'daemon.json 读取失败（${_safeErrorLabel(e)}）',
+      );
     }
 
     final port = info[AppConstants.daemonInfoPortKey];
@@ -242,65 +263,102 @@ class EasypassDaemon {
     final filePid = rawPid is int ? rawPid : null;
     final fileVersion = rawVersion is int ? rawVersion : null;
 
+    // P1.4 审计 §⑦：pid 写一次不刷新，但探测时**主动校验**它是否还存活。
+    // pid 已死（无论端口是否还应答）就当作 unreachable，由调用方 retire()
+    // 清文件；返回前不再尝试 TCP 连接，避免把"另一进程占用此端口"误认成
+    // 旧 daemon 的残留。
+    final pidAlive =
+        filePid == null ? null : await _isPidAlive(filePid);
+    if (pidAlive == false) {
+      return DaemonProbeResult(
+        DaemonProbeStatus.unreachable,
+        port: port is int ? port : null,
+        pid: filePid,
+        fileProtocolVersion: fileVersion,
+        detail: 'daemon.json 的 pid $filePid 已不存活，判定为残留',
+      );
+    }
+
     if (port is! int || token is! String || token.isEmpty) {
-      return DaemonProbeResult(DaemonProbeStatus.unreachable,
-          port: port is int ? port : null,
-          pid: filePid,
-          fileProtocolVersion: fileVersion,
-          detail: 'daemon.json 缺少 port/token');
+      return DaemonProbeResult(
+        DaemonProbeStatus.unreachable,
+        port: port is int ? port : null,
+        pid: filePid,
+        fileProtocolVersion: fileVersion,
+        detail: 'daemon.json 缺少 port/token',
+      );
     }
 
     Socket? socket;
     try {
-      socket = await Socket.connect(InternetAddress.loopbackIPv4, port,
-          timeout: timeout);
+      socket = await Socket.connect(
+        InternetAddress.loopbackIPv4,
+        port,
+        timeout: timeout,
+      );
       final reader = NativeMessageReader(StreamIterator(socket));
 
       // 握手帧：token 不对时 daemon 直接关闭连接（read() 返回 null）。
-      socket.add(NativeMessagingService.encodeMessage(
-          {AppConstants.daemonInfoTokenKey: token}));
+      socket.add(
+        NativeMessagingService.encodeMessage({
+          AppConstants.daemonInfoTokenKey: token,
+        }),
+      );
       await socket.flush();
-      socket.add(NativeMessagingService.encodeMessage(
-          {'requestId': 'probe', 'action': 'getStatus'}));
+      socket.add(
+        NativeMessagingService.encodeMessage({
+          'requestId': 'probe',
+          'action': 'getStatus',
+        }),
+      );
       await socket.flush();
 
       final response = await reader.read().timeout(timeout);
       if (response == null) {
-        return DaemonProbeResult(DaemonProbeStatus.unreachable,
-            port: port,
-            pid: filePid,
-            fileProtocolVersion: fileVersion,
-            detail: '握手后连接被关闭（token 不匹配或对端不是 EasyPass）');
+        return DaemonProbeResult(
+          DaemonProbeStatus.unreachable,
+          port: port,
+          pid: filePid,
+          fileProtocolVersion: fileVersion,
+          detail: '握手后连接被关闭（token 不匹配或对端不是 EasyPass）',
+        );
       }
 
       final data = response['data'];
-      final liveVersion = (data is Map &&
+      final liveVersion =
+          (data is Map &&
               data[AppConstants.daemonInfoProtocolVersionKey] is int)
           ? data[AppConstants.daemonInfoProtocolVersionKey] as int
           : null;
 
       if (liveVersion == AppConstants.bridgeProtocolVersion) {
-        return DaemonProbeResult(DaemonProbeStatus.ready,
-            port: port,
-            pid: filePid,
-            fileProtocolVersion: fileVersion,
-            liveProtocolVersion: liveVersion);
-      }
-      return DaemonProbeResult(DaemonProbeStatus.stale,
+        return DaemonProbeResult(
+          DaemonProbeStatus.ready,
           port: port,
           pid: filePid,
           fileProtocolVersion: fileVersion,
           liveProtocolVersion: liveVersion,
-          detail: liveVersion == null
-              ? '运行中的 daemon 未回报 protocolVersion（旧版本构建）'
-              : '运行中的 daemon 协议版本 $liveVersion，期望 '
-                  '${AppConstants.bridgeProtocolVersion}');
+        );
+      }
+      return DaemonProbeResult(
+        DaemonProbeStatus.stale,
+        port: port,
+        pid: filePid,
+        fileProtocolVersion: fileVersion,
+        liveProtocolVersion: liveVersion,
+        detail: liveVersion == null
+            ? '运行中的 daemon 未回报 protocolVersion（旧版本构建）'
+            : '运行中的 daemon 协议版本 $liveVersion，期望 '
+                  '${AppConstants.bridgeProtocolVersion}',
+      );
     } catch (e) {
-      return DaemonProbeResult(DaemonProbeStatus.unreachable,
-          port: port,
-          pid: filePid,
-          fileProtocolVersion: fileVersion,
-          detail: '探测失败（${e.runtimeType}）');
+      return DaemonProbeResult(
+        DaemonProbeStatus.unreachable,
+        port: port,
+        pid: filePid,
+        fileProtocolVersion: fileVersion,
+        detail: '探测失败（${_safeErrorLabel(e)}）',
+      );
     } finally {
       socket?.destroy();
     }
@@ -327,18 +385,80 @@ class EasypassDaemon {
     return terminated;
   }
 
+  /// SIGTERM 等待超时。依据：比 [probe] 的 1200ms 长（避免比探测还慢），
+  /// 又要给目标进程退出留余量；`2s = probe timeout × 1.7` 是任务书 §1.1
+  /// 指定的默认值。SIGKILL 兜底只用 1s（不可捕获的强制终止不需要缓冲期）。
+  static const Duration _sigtermWaitTimeout = Duration(seconds: 2);
+  static const Duration _sigkillWaitTimeout = Duration(seconds: 1);
+
+  /// 可注入的进程操作替身（kill / sleep）。默认 = 直接调 [Process.run] /
+  /// `Future.delayed`；测试在 `test/easypass_daemon_terminate_test.dart`
+  /// 里注入假实现覆盖，**不**真杀任何进程。
+  ///
+  /// 用 `@visibleForTesting` 暴露的 [debugSetTerminateIfOursRunner] 钩子
+  /// 在测试间切换，**不**改签名。
+  static TerminateIfOursRunner _terminateRunner =
+      const DefaultTerminateIfOursRunner();
+
+  @visibleForTesting
+  static void debugSetTerminateIfOursRunner(TerminateIfOursRunner runner) {
+    _terminateRunner = runner;
+  }
+
+  /// P3.3 测试钩子：直接调 [_terminateIfOurs]（不走 `retire()` 的 stale 门
+  /// 守卫）。生产代码请用 [retire]。命名沿用 [debugSetTerminateIfOursRunner]
+  /// 风格 —— 测试可见、生产不碰。
+  ///
+  /// 之所以需要这一个：测试要验证"kill -0 失败 → 保守保留"、"自身 pid → 拒
+  /// 绝"等纯函数性行为，绕开 `retire()` 整套 probe + fakeServer 编排。
+  @visibleForTesting
+  static Future<bool> debugTerminateIfOursForTesting(int target) =>
+      _terminateIfOurs(target);
+
+  /// 把抛出的异常归一到一类**不携带路径**的标签。
+  ///
+  /// P1.4 审计 §⑧：`OSError` / `FileSystemException` 的 `toString()` 会把
+  /// `path = '/home/<user>/.local/share/easypass/...'` 拼进去；`runtimeType`
+  /// 本身只有类名，但保险起见白名单化（`FileSystemException`、`OSError`、
+  /// `FormatException`、`SocketException`），其它一律记 `other`。
+  /// **绝不**写入绝对路径或 e.toString()。
+  static String _safeErrorLabel(Object error) {
+    if (error is FormatException) return 'FormatException';
+    if (error is SocketException) return 'SocketException';
+    if (error is FileSystemException) return 'FileSystemException';
+    if (error is OSError) return 'OSError';
+    return 'other';
+  }
+
   /// 只在能确认目标进程确实是本产品（`easypass.exe`）时才结束它。
   ///
   /// 为什么这么谨慎：旧版 `daemon.json` 没有 pid；即使有，pid 也可能被系统
-  /// 复用给别的进程。Windows 上用 tasklist 核对映像名，任何一步失败都静默
+  /// 复用给别的进程。Windows 上用 tasklist 核对映像名；任何一步失败都静默
   /// 返回 false（宁可让用户手动退出旧版，也不能杀错进程）。
   ///
   /// 注意：旧 daemon 可能就住在旧版 UI 进程里（UI 模式和 daemon 同进程），
   /// 所以这里结束的可能是"还开着的旧版 EasyPass"。这是刻意的：只有旧进程
   /// 退出，新构建才能接管那个端口。
+  ///
+  /// Linux 实现（P3.3）：
+  /// 1. `kill -0 <pid>` 校验存在（[Process.killPid] 是真发信号，必须绕开）
+  /// 2. `kill -TERM` 发出终止信号
+  /// 3. 最多等 [_sigtermWaitTimeout]（2s）让进程体面退出
+  /// 4. 二次 `kill -0` 校验；如果还活着，发 SIGKILL 兜底（最多再等 1s）
+  /// 5. 任何异常 / spawn 失败 → 保守保留（return false），由 `retire()`
+  ///    后续的 `clearStaleInfo` 兜底清 `daemon.json`
+  ///
+  /// **绝不**抛未捕获异常、**绝不**杀自己（pid 守卫在 `retire()` 与本函数
+  /// 双重防护）。
   static Future<bool> _terminateIfOurs(int target) async {
-    if (!Platform.isWindows) return false;
     if (target == pid) return false; // 绝不杀自己
+    if (Platform.isWindows) {
+      return _terminateIfOursWindows(target);
+    }
+    return _terminateIfOursLinux(target);
+  }
+
+  static Future<bool> _terminateIfOursWindows(int target) async {
     try {
       final result = await Process.run(
         'tasklist',
@@ -354,6 +474,132 @@ class EasypassDaemon {
     }
   }
 
+  static Future<bool> _terminateIfOursLinux(int target) async {
+    final runner = _terminateRunner;
+    // 1. kill -0 校验存在。不在 PATH / spawn 失败 / 权限拒绝 → 保守保留。
+    if (!await runner.pidAlive(target)) return false;
+
+    // 2. SIGTERM —— 让进程有机会跑 cleanup（关 socket、写 daemon.json 等）
+    final sigtermSent = await runner.sendSignal(target, ProcessSignal.sigterm);
+    if (!sigtermSent) {
+      // spawn 失败 / EPERM —— 同款保守保留
+      return false;
+    }
+
+    // 3. 等 2s 让目标进程体面退出。超时强制往下走（不等就死循环了）
+    await runner.wait(_sigtermWaitTimeout);
+
+    // 4. 二次确认
+    if (!await runner.pidAlive(target)) return true;
+
+    // 5. SIGKILL 兜底（不可捕获，不可阻挡）。再给 1s 等 pid 消失。
+    final sigkillSent = await runner.sendSignal(target, ProcessSignal.sigkill);
+    if (!sigkillSent) return false;
+    await runner.wait(_sigkillWaitTimeout);
+
+    // 最终态：进程要么已经消失（成功），要么还在（失败）。
+    // 返回值仅供日志；调用方依赖 retire() 的 clearStaleInfo 兜底。
+    return !(await runner.pidAlive(target));
+  }
+
+  /// 探测 [target] 是否对应一个当前存在的进程（**不发信号**）。
+  ///
+  /// - Linux：调 `kill -0 <pid>` —— POSIX 上 `kill(pid, 0)` 不投递信号，只做
+  ///   权限/存在性检查；进程不存在时 `kill` 退出码 = 1，stderr 含
+  ///   "No such process"。Dart 的 `Process.kill(pid, ProcessSignal.xxx)` 是真
+  ///   发信号，所以这里走 shell。
+  /// - Windows：`tasklist /FI "PID eq <target>" /FO CSV /NH` —— **CSV
+  ///   解析一行**，看 PID 字段是不是真的命中。
+  /// - 解析失败 / 超时 / 异常一律视为"未知"——返回 true 保留 pid 字段的诊断
+  ///   价值，不在探针阶段误杀。
+  ///
+  /// P1.4 审计 §⑦：探测时校验 pid 存活，避免"端口活着但 pid 是别人"
+  /// /"pid 死了但端口巧合还应答"两种诊断盲区。
+  ///
+  /// **P1.5 审计 F2**: Windows 上旧实现只看 `exitCode == 0 && stdout.isNotEmpty`
+  /// —但 `tasklist` 在"没有匹配"时退出码仍是 0，并且吐一行本地化的 INFO
+  /// 文本（"INFO: No tasks are running which match..."），导致
+  /// `stdout.isNotEmpty` 恒为真 → 在 Windows 上恒返回"存活"，校验形同空操作。
+  /// 改用**正面匹配**：解析 CSV 行（兼容 `"1,234"` 带千分位与引号的本地化格式）
+  /// 找到一行 PID == target 才算"存活"；任何"无匹配"或解析失败都判"不存活"，
+  /// 仍保留异常 / 超时回落 true 的旧行为。
+  static Future<bool> _isPidAlive(int target) async {
+    if (target == pid) return true;
+    if (Platform.isWindows) {
+      try {
+        final result = await Process.run(
+          'tasklist',
+          ['/FI', 'PID eq $target', '/FO', 'CSV', '/NH'],
+          stdoutEncoding: systemEncoding,
+          stderrEncoding: systemEncoding,
+        ).timeout(const Duration(milliseconds: 500));
+        if (result.exitCode != 0) return false;
+        final stdout = result.stdout.toString();
+        // P1.5 审计 F2：正面匹配。先尝试把 CSV 第一列解析成整数；命中
+        // target 才算"存活"。"1,234" 这类本地化千分位也会被吃掉逗号。
+        // 没有 CSV 行 / 没有任何一行 PID == target → 视为不存活。
+        for (final line in const LineSplitter().convert(stdout)) {
+          if (line.isEmpty) continue;
+          // 去引号、拆 , 拼回去，去掉首尾 " 与空白；本地化千分位
+          // （如 "1,234"）一并去除逗号。
+          final fields = parseCsvLine(line);
+          if (fields.isEmpty) continue;
+          final pidText = fields.first
+              .replaceAll(RegExp(r'[^0-9]'), '');
+          if (int.tryParse(pidText) == target) return true;
+        }
+        return false;
+      } catch (_) {
+        // 解析失败/超时/异常 —— 回落旧行为（在探针阶段不误杀）。
+        return true;
+      }
+    }
+    try {
+      final result = await Process.run(
+        'kill',
+        ['-0', target.toString()],
+      ).timeout(const Duration(milliseconds: 500));
+      return result.exitCode == 0;
+    } catch (_) {
+      // kill 不在 PATH（Windows 非开发机）/容器无 proc ——保守保留。
+      return true;
+    }
+  }
+
+  /// 极简 CSV 单行解析（仅用于 `tasklist /FO CSV` 第一列是 PID 的场景）。
+  ///
+  /// 兼容：
+  /// - `"Image Name","PID","Session Name",...`  → `["Image Name","PID",...]`
+  /// - `"System Idle Process","0","Services",...` （PID 可能带本地化千分位）
+  /// - 不规范的行（字段数 ≠ 列数）→ 返回原始去引号 token 列表，便于
+  ///   上层用首列兜底判断。
+  ///
+  /// 不引入外部依赖：内联实现，手测覆盖 `tasklist /FO CSV /NH` 的常见输出。
+  ///
+  /// **P1.5 审计 F2 注释**：这一段从单测视角保持库可见（去掉下划线），
+  /// 是为了让审计要求的 "F2 解析逻辑可被独立单测验证" 不需要改签名。
+  /// 仍是 package-private（不会暴露到产品 API）。
+  static List<String> parseCsvLine(String line) {
+    final fields = <String>[];
+    final buffer = StringBuffer();
+    var inQuotes = false;
+    for (var i = 0; i < line.length; i++) {
+      final ch = line[i];
+      if (ch == '"') {
+        inQuotes = !inQuotes;
+      } else if (ch == ',' && !inQuotes) {
+        fields.add(buffer.toString());
+        buffer.clear();
+      } else {
+        buffer.write(ch);
+      }
+    }
+    if (buffer.isNotEmpty || fields.isNotEmpty) {
+      fields.add(buffer.toString());
+    }
+    return fields;
+  }
+
   /// 是否已有一个**可用**的 daemon（协议版本一致且能应答）。
   ///
   /// 兼容旧调用点保留；新代码请用 [probe] / [retire]，它们能区分
@@ -362,8 +608,7 @@ class EasypassDaemon {
       (await probe(infoFile: infoFile)).isUsable;
 
   static File _defaultInfoFileStatic() {
-    final localAppData = Platform.environment['LOCALAPPDATA'];
-    return File('$localAppData\\EasyPass\\daemon.json');
+    return AppPaths.daemonInfoFile;
   }
 
   /// Removes a stale daemon.json (left behind when a previous daemon exited
@@ -385,14 +630,23 @@ class EasypassDaemon {
   /// connections. Returns once the listener is up; the daemon then serves
   /// until the process exits (tray Exit, task end, or -- for `--service` --
   /// the idle self-exit below).
+  ///
+  /// 写入顺序：先 bind → 生成 token → 开始 listen → 最后才落 `daemon.json`。
+  /// 这样 `_persistInfo`（含 `makePrivate` 的 chmod 600）哪怕抛错，桥接也不会
+  /// 看到一份"指向死端口"的残留文件。若 `start()` 整体失败，catch 块仍然按
+  /// pid/token 校验删除自己写过的注册信息（P1.4 审计 §④）。
+  ///
+  /// P1.5 审计 F1：`_persistInfo` 由 [onPersistInfo] 可替身；测试可以注入一个
+  /// "写完文件再抛错"的实现来真正覆盖 P1.4 §④ 的兜底路径。
   Future<void> start() async {
     try {
       final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
       _server = server;
       _token = _generateToken();
       _lastActivityAt = _clock();
-      await _persistInfo(server.port, _token);
       server.listen(_onConnection, onError: (_) {});
+      final persist = onPersistInfo ?? _persistInfo;
+      await persist(server.port, _token);
       // 只有 `--service` 进程才会空闲自退（UI 同进程模式下会踢掉用户）。
       if (exitWhenIdle && _idleTimer == null) {
         _idleTimer = Timer.periodic(idleCheckInterval, (_) {
@@ -401,10 +655,17 @@ class EasypassDaemon {
         });
       }
     } catch (e) {
+      // 兜底：哪怕异常发生在 `_persistInfo` 之后，也确保不会留下指向本进程
+      // 死端口的 daemon.json。校验 pid+token 是必须的，避免删掉后来接管
+      // 的 UI 模式 daemon 注册信息。同时关掉已 bind 的 server，避免端口
+      // 在没人应答的状态下挂着（否则下次 probe 会拿到一个"端口活着但
+      // daemon 没了"的假象）。
+      await _removeInfoIfOurs();
+      _server?.close();
+      _server = null;
       rethrow;
     }
   }
-
 
   void stop() {
     _idleTimer?.cancel();
@@ -465,8 +726,14 @@ class EasypassDaemon {
       // restarts. 仓库绑定共享会话 → 多类型条目（笔记 / 身份 / SSH）在每条
       // 连接上都能用同一个会话密钥解密。
       // onActivity 让每个请求都刷新空闲计时（只报事件，不带内容）。
-      final host = NativeMessagingService(_db, _cryptoService, _totpService,
-          session: session, onActivity: _touch, repository: _repository);
+      final host = NativeMessagingService(
+        _db,
+        _cryptoService,
+        _totpService,
+        session: session,
+        onActivity: _touch,
+        repository: _repository,
+      );
       await host.serve(reader, socket);
     } catch (_) {
       // Peer errors end the connection; the daemon keeps serving.
@@ -480,7 +747,9 @@ class EasypassDaemon {
   String _generateToken() {
     final rand = Random.secure();
     return List.generate(
-        32, (_) => rand.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+      32,
+      (_) => rand.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
   }
 
   /// 写入 `daemon.json`。
@@ -495,16 +764,91 @@ class EasypassDaemon {
   Future<void> _persistInfo(int port, String token) async {
     final file = _infoFile ?? _defaultInfoFile();
     await file.parent.create(recursive: true);
-    await file.writeAsString(jsonEncode({
-      AppConstants.daemonInfoPortKey: port,
-      AppConstants.daemonInfoTokenKey: token,
-      AppConstants.daemonInfoProtocolVersionKey:
-          AppConstants.bridgeProtocolVersion,
-      AppConstants.daemonInfoPidKey: pid,
-    }));
+    await file.writeAsString(
+      jsonEncode({
+        AppConstants.daemonInfoPortKey: port,
+        AppConstants.daemonInfoTokenKey: token,
+        AppConstants.daemonInfoProtocolVersionKey:
+            AppConstants.bridgeProtocolVersion,
+        AppConstants.daemonInfoPidKey: pid,
+      }),
+    );
+    await AppPaths.makePrivate(file);
   }
 
   File _defaultInfoFile() {
     return _defaultInfoFileStatic();
   }
+}
+
+/// P3.3：Linux 自愈路径可注入的进程操作抽象。
+///
+/// 把 `kill -0` 校验、发信号、等延迟这几件事做成可替身，测试就能在不真
+/// 杀任何进程的前提下验证整条 `_terminateIfOursLinux` 路径。**所有方法
+/// 都不可抛** —— 失败一律返回 false（语义同 `_isPidAlive` 的保守保留），
+/// 生产代码完全不用 try/catch。
+///
+/// `pidAlive(int)` 与 [_isPidAlive] 的实现一致：调 `kill -0`；spawn 失败
+/// 时返回 true（保守保留）。这里的 runner 复用同一接口签名让 [_isPidAlive]
+/// 在未来也方便接替身 —— 本轮**不**改 `_isPidAlive`，留给未来 P3.x。
+@visibleForTesting
+abstract class TerminateIfOursRunner {
+  /// `kill -0 <pid>` 校验（不发信号）。返回 true = 进程存在 / 我们没权限
+  /// 判断；返回 false = 进程已死。
+  Future<bool> pidAlive(int pid);
+
+  /// 给 [pid] 发 [signal]。返回 true = 已投递；返回 false = spawn 失败 /
+  /// 权限拒绝。
+  Future<bool> sendSignal(int pid, ProcessSignal signal);
+
+  /// 等待 [duration]（测试里通常替换成 0/很短，节省 CI 时间）。
+  Future<void> wait(Duration duration);
+}
+
+/// 默认实现：直接走 shell + `Future.delayed`。spawn 失败（容器无 `kill`）
+/// 一律返回 false。
+@visibleForTesting
+class DefaultTerminateIfOursRunner implements TerminateIfOursRunner {
+  const DefaultTerminateIfOursRunner();
+
+  @override
+  Future<bool> pidAlive(int pid) async {
+    try {
+      final result = await Process.run(
+        'kill',
+        ['-0', pid.toString()],
+      ).timeout(const Duration(milliseconds: 500));
+      return result.exitCode == 0;
+    } catch (_) {
+      // kill 不在 PATH / EACCES —— 保守保留。
+      return true;
+    }
+  }
+
+  @override
+  Future<bool> sendSignal(int pid, ProcessSignal signal) async {
+    // `kill -<signal> <pid>` 比 `Process.killPid` 走 shell 一致。
+    // Dart 的 `Process.killPid(pid, ProcessSignal.sigterm)` 直接调 `kill(2)`，
+    // 在我们的场景里和 shell `kill` 等价；这里统一走 shell 便于测试替身
+    // （`Process.killPid` 不能被替换）。
+    final name = _signalName(signal);
+    try {
+      final result = await Process.run(
+        'kill',
+        ['-$name', pid.toString()],
+      ).timeout(const Duration(milliseconds: 500));
+      return result.exitCode == 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> wait(Duration duration) => Future<void>.delayed(duration);
+}
+
+String _signalName(ProcessSignal signal) {
+  if (signal == ProcessSignal.sigterm) return 'TERM';
+  if (signal == ProcessSignal.sigkill) return 'KILL';
+  return signal.toString().toUpperCase().replaceFirst('SIG', '');
 }

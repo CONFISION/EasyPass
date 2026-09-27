@@ -2,7 +2,8 @@ import 'dart:io';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
-import 'package:path/path.dart' as p;
+
+import '../../core/platform/app_paths.dart';
 
 part 'database.g.dart';
 
@@ -24,20 +25,20 @@ class AppDatabase extends _$AppDatabase {
   /// "no such column"（1.x 的 `onUpgrade` 是空实现，没有先例可抄）。
   @override
   MigrationStrategy get migration => MigrationStrategy(
-        onCreate: (m) async {
-          await m.createAll();
-        },
-        onUpgrade: (m, from, to) async {
-          if (from < 2) {
-            await m.addColumn(passwordEntries, passwordEntries.type);
-            await m.addColumn(passwordEntries, passwordEntries.dataEncrypted);
-            await customStatement(
-              'CREATE INDEX IF NOT EXISTS idx_password_entries_type '
-              'ON password_entries(type)',
-            );
-          }
-        },
-      );
+    onCreate: (m) async {
+      await m.createAll();
+    },
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await m.addColumn(passwordEntries, passwordEntries.type);
+        await m.addColumn(passwordEntries, passwordEntries.dataEncrypted);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_password_entries_type '
+          'ON password_entries(type)',
+        );
+      }
+    },
+  );
 
   // ─── Folders ───────────────────────────────────────────
 
@@ -86,8 +87,12 @@ class AppDatabase extends _$AppDatabase {
 
   Future<List<PasswordEntry>> searchEntries(String query) {
     final lowerQuery = '%${query.toLowerCase()}%';
-    return (select(passwordEntries)
-          ..where((t) => t.name.lower().like(lowerQuery) | t.url.lower().like(lowerQuery) | t.username.lower().like(lowerQuery)))
+    return (select(passwordEntries)..where(
+          (t) =>
+              t.name.lower().like(lowerQuery) |
+              t.url.lower().like(lowerQuery) |
+              t.username.lower().like(lowerQuery),
+        ))
         .get();
   }
 
@@ -139,25 +144,29 @@ class AppDatabase extends _$AppDatabase {
   /// `ON DELETE SET NULL` 实际不会触发；若不显式清空，删掉文件夹后会留下
   /// 指向不存在文件夹的"幽灵条目"（在文件夹视图里消失、在全部条目里又出现）。
   Future<void> deleteFolderAndUnassign(String id) async {
-    await (update(passwordEntries)..where((t) => t.folderId.equals(id)))
-        .write(const PasswordEntriesCompanion(folderId: Value(null)));
+    await (update(passwordEntries)..where((t) => t.folderId.equals(id))).write(
+      const PasswordEntriesCompanion(folderId: Value(null)),
+    );
     await deleteFolder(id);
   }
 
   Stream<List<PasswordEntry>> watchFavoriteEntries() {
-    return (select(passwordEntries)..where((t) => t.isFavorite.equals(true)))
-        .watch();
+    return (select(
+      passwordEntries,
+    )..where((t) => t.isFavorite.equals(true))).watch();
   }
 
   Future<PasswordEntry?> getEntryById(String id) {
-    return (select(passwordEntries)..where((t) => t.id.equals(id)))
-        .getSingleOrNull();
+    return (select(
+      passwordEntries,
+    )..where((t) => t.id.equals(id))).getSingleOrNull();
   }
 
   /// 单条目的**监听版**：编辑弹回详情页后要立刻显示新内容（含新加的自定义字段）。
   Stream<PasswordEntry?> watchEntryById(String id) {
-    return (select(passwordEntries)..where((t) => t.id.equals(id)))
-        .watchSingleOrNull();
+    return (select(
+      passwordEntries,
+    )..where((t) => t.id.equals(id))).watchSingleOrNull();
   }
 
   Future<void> insertEntry(PasswordEntriesCompanion entry) {
@@ -165,7 +174,9 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<void> updateEntry(String id, PasswordEntriesCompanion entry) {
-    return (update(passwordEntries)..where((t) => t.id.equals(id))).write(entry);
+    return (update(
+      passwordEntries,
+    )..where((t) => t.id.equals(id))).write(entry);
   }
 
   Future<void> deleteEntry(String id) {
@@ -173,7 +184,8 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<int> getEntryCount() {
-    return (selectOnly(passwordEntries)..addColumns([passwordEntries.id.count()]))
+    return (selectOnly(passwordEntries)
+          ..addColumns([passwordEntries.id.count()]))
         .map((row) => row.read(passwordEntries.id.count()) ?? 0)
         .getSingle();
   }
@@ -197,10 +209,20 @@ class AppDatabase extends _$AppDatabase {
 
 LazyDatabase _openConnection() {
   return LazyDatabase(() async {
-    // Store the database next to the executable
-    final exeDir = p.dirname(Platform.resolvedExecutable);
-    final file = File(p.join(exeDir, 'easypass.db'));
-
+    // Windows keeps the database beside the executable. Linux uses the
+    // writable XDG data directory and migrates a legacy adjacent file.
+    final file = await AppPaths.prepareDatabaseFile();
+    if (Platform.isLinux) {
+      // P1.4 审计 §⑥：fresh-install 路径上 `prepareDatabaseFile` 返回时 db
+      // 还没被 drift 创建，所以即便它 chmod 了也拿不到正确的实体文件。
+      // `setup` 回调在 drift 真正打开这个 SQLite 文件（**包括 onCreate
+      // 的首次创建**）之后运行一次；在这里 chmod 一下，就能把"drift 用
+      // umask 默认 0644 创建的空 db"这一路径也收紧到 0600。
+      // 后续每次 lazy resolve 都会跑 setup，但 chmod 自身幂等。
+      return NativeDatabase.createInBackground(file, setup: (raw) async {
+        await AppPaths.enforceLinuxPrivacyFor(file);
+      });
+    }
     return NativeDatabase.createInBackground(file);
   });
 }

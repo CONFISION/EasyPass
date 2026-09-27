@@ -170,4 +170,77 @@ void main() {
     }
     expect(container2.read(authProvider).autoLockMinutes, 30);
   });
+
+  group('secure storage unavailable (P1.2 fix 1)', () {
+    test(
+        'boot probe publishes storageUnavailable and routes to lock, not first run',
+        () async {
+      // Simulate a Linux keyring that fails on the very first read. The
+      // boot probe must NOT silently mark this as a fresh install — the
+      // user must land on the lock screen with the recovery panel
+      // (Retry / Exit), not on the "create master password" flow.
+      storage.readFailure = StateError('keyring locked');
+      // Reading the notifier triggers AuthNotifier construction, which
+      // fires the boot probe in its constructor; we then poll until it
+      // settles so we can assert on the published state.
+      container.read(authProvider.notifier);
+      for (var i = 0; i < 50; i++) {
+        if (!container.read(authProvider).isLoading) break;
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      final state = container.read(authProvider);
+      expect(state.isLocked, isTrue,
+          reason: 'storage failure must not be misread as firstRun');
+      expect(state.errorMessage, AuthErrorCodes.storageUnavailable);
+    });
+
+    test(
+        'unlock() preserves storageUnavailable across a tap (banner stays put)',
+        () async {
+      storage.readFailure = StateError('keyring locked');
+      final notifier = container.read(authProvider.notifier);
+      for (var i = 0; i < 50; i++) {
+        if (!container.read(authProvider).isLoading) break;
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(
+        container.read(authProvider).errorMessage,
+        AuthErrorCodes.storageUnavailable,
+      );
+
+      // User taps Unlock: must NOT wipe the banner, must NOT silently
+      // move to loading. (Old `copyWith` erased errorMessage on every
+      // transition to AuthStatus.loading, which is the bug P1.2 fix 1
+      // closes.)
+      final tapped = await notifier.unlock('whatever');
+      expect(tapped, isFalse);
+      expect(
+        container.read(authProvider).errorMessage,
+        AuthErrorCodes.storageUnavailable,
+      );
+    });
+
+    test('retryInitialState clears storageUnavailable once the keyring recovers',
+        () async {
+      storage.readFailure = StateError('keyring locked');
+      final notifier = container.read(authProvider.notifier);
+      for (var i = 0; i < 50; i++) {
+        if (!container.read(authProvider).isLoading) break;
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(
+        container.read(authProvider).errorMessage,
+        AuthErrorCodes.storageUnavailable,
+      );
+
+      // Recover the keyring and ask the notifier to re-probe — the
+      // banner must disappear and firstRun must be detected (no master
+      // password stored).
+      storage.readFailure = null;
+      await notifier.retryInitialState();
+      final state = container.read(authProvider);
+      expect(state.errorMessage, isNull);
+      expect(state.isFirstRun, isTrue);
+    });
+  });
 }

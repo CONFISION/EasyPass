@@ -10,6 +10,12 @@ final availableFontsProvider = FutureProvider<FontList>((ref) {
   return FontDiscoveryService.discoverAvailableFonts();
 });
 
+/// Storage used by [FontSettingsNotifier]. Exposed as an override so tests
+/// can swap in [FakeSecureStorage] (mirrors `themeStorageProvider` pattern).
+final fontStorageProvider = Provider<FlutterSecureStorage>((ref) {
+  return const FlutterSecureStorage();
+});
+
 /// Selected UI font family setting.
 ///
 /// Values:
@@ -17,36 +23,48 @@ final availableFontsProvider = FutureProvider<FontList>((ref) {
 /// - `AppConstants.systemFontOption` — follow the platform default font
 /// - `AppConstants.monospaceFontOption` — use a monospace font
 /// - any other string — a custom font family name installed on the system
-class FontSettingsNotifier extends StateNotifier<String?> {
+class FontSettingsNotifier extends StateNotifier<AsyncValue<String?>> {
   final FlutterSecureStorage _storage;
 
-  FontSettingsNotifier()
-      : _storage = const FlutterSecureStorage(),
-        super(null) {
+  FontSettingsNotifier(FlutterSecureStorage storage)
+    : _storage = storage,
+      super(const AsyncLoading<String?>()) {
     _load();
   }
 
   Future<void> _load() async {
-    final value = await _storage.read(key: AppConstants.fontFamilyStorageKey);
-    if (value != null && value.isNotEmpty) {
-      state = value;
+    try {
+      final value = await _storage.read(key: AppConstants.fontFamilyStorageKey);
+      state = AsyncData<String?>(
+        value != null && value.isNotEmpty ? value : null,
+      );
+    } catch (error, stackTrace) {
+      // A keyring error is actionable.  Publish it instead of silently
+      // treating an unavailable setting as the bundled default.
+      state = AsyncError<String?>(error, stackTrace);
     }
   }
 
   Future<void> setFontFamily(String? value) async {
-    state = value;
-    if (value == null || value.isEmpty) {
-      await _storage.delete(key: AppConstants.fontFamilyStorageKey);
-    } else {
-      await _storage.write(
-        key: AppConstants.fontFamilyStorageKey,
-        value: value,
-      );
+    try {
+      if (value == null || value.isEmpty) {
+        await _storage.delete(key: AppConstants.fontFamilyStorageKey);
+      } else {
+        await _storage.write(
+          key: AppConstants.fontFamilyStorageKey,
+          value: value,
+        );
+      }
+      // Publish the value only after persistence succeeds.
+      state = AsyncData<String?>(value);
+    } catch (error, stackTrace) {
+      state = AsyncError<String?>(error, stackTrace);
+      Error.throwWithStackTrace(error, stackTrace);
     }
   }
 }
 
 final fontFamilyProvider =
-    StateNotifierProvider<FontSettingsNotifier, String?>((ref) {
-  return FontSettingsNotifier();
-});
+    StateNotifierProvider<FontSettingsNotifier, AsyncValue<String?>>((ref) {
+      return FontSettingsNotifier(ref.watch(fontStorageProvider));
+    });

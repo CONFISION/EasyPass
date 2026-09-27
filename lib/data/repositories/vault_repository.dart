@@ -9,6 +9,25 @@ import '../models/vault_item.dart';
 import '../models/vault_item_mapper.dart';
 import '../state/session_key.dart';
 
+/// 全局唯一的默认 [AppDatabase] 实例。Riverpod 容器里所有依赖此 provider
+/// 的对象（仓储、TOTP、UI 状态等）都会拿到**同一个** `AppDatabase` 实例，
+/// 这是 P1.1 修过的"AppDatabase created multiple times"警告的根因（多个
+/// provider 各自构造 → 每个一份 drift executor）。
+///
+/// P3.5 §6 #3（AUDIT-P1 #12）—— 配合 `main.dart:97-109` 的「只在不可用时
+/// override」读：
+///   - **本进程守护**（首次冷启 / 旧 daemon 已被收回）：`main.dart` 走
+///     `if (uiDatabase != null) databaseProvider.overrideWithValue(...)`，
+///     **这层 provider 不再构造** —— 这次构造是"主控"路径。
+///   - **复用别进程 daemon**：本进程的 `main.dart` 不传 override，
+///     `databaseProvider` 才被首次访问，作为 UI 端的读入口。
+///
+///   - 两种路径在本进程同一瞬时各持一份 `easypass.db` 的 SQLite 句柄
+///     —— SQLite 支持，但加重写锁竞争；不可调和（跨进程）。要解这个局
+///     得做 IPC（如 loopback query 转发），属 v3.0 路线图。
+///
+/// **本轮不做架构改造**：注释说明清楚现状、后果、不在本轮处置的理由。
+/// 不改行为，不加新代码路径。
 final databaseProvider = Provider<AppDatabase>((ref) {
   return AppDatabase();
 });

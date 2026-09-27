@@ -218,6 +218,42 @@ abstract class AppLocalizations {
   /// **'Error unlocking vault'**
   String get errorUnlockFailed;
 
+  /// No description provided for @errorStorageUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Unable to access secure storage; vault state is unavailable'**
+  String get errorStorageUnavailable;
+
+  /// No description provided for @errorFailedToSaveSettings.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to save setting'**
+  String get errorFailedToSaveSettings;
+
+  /// No description provided for @fontSettingsFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Unable to load or save the font setting'**
+  String get fontSettingsFailed;
+
+  /// No description provided for @storageUnavailableTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Secure storage unavailable'**
+  String get storageUnavailableTitle;
+
+  /// No description provided for @storageUnavailableBody.
+  ///
+  /// In en, this message translates to:
+  /// **'EasyPass cannot reach the system secret store (Linux Secret Service / GNOME Keyring / KDE Wallet). The master password cannot be created or verified until this is fixed.\n\nCheck that a Secret Service provider is installed and unlocked, then retry.'**
+  String get storageUnavailableBody;
+
+  /// No description provided for @exit.
+  ///
+  /// In en, this message translates to:
+  /// **'Exit'**
+  String get exit;
+
   /// No description provided for @favoritesTitle.
   ///
   /// In en, this message translates to:
@@ -1741,6 +1777,90 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Theme: {value}'**
   String themeApplied(String value);
+
+  /// No description provided for @browserBridgePromptTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable browser integration'**
+  String get browserBridgePromptTitle;
+
+  /// No description provided for @browserBridgePromptBody.
+  ///
+  /// In en, this message translates to:
+  /// **'The browser extension talks to EasyPass through a small host registered on your system. Run this command once (no root needed), then reload the extension:'**
+  String get browserBridgePromptBody;
+
+  /// No description provided for @browserBridgePromptCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy command'**
+  String get browserBridgePromptCopy;
+
+  /// No description provided for @browserBridgePromptCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Command copied'**
+  String get browserBridgePromptCopied;
+
+  /// No description provided for @browserBridgePromptOk.
+  ///
+  /// In en, this message translates to:
+  /// **'Got it'**
+  String get browserBridgePromptOk;
+
+  /// Shown on the Settings/About screen when the Linux tray could not be created (e.g. GNOME without an AppIndicator extension). The fallback is "close exits the app" instead of "close hides to tray".
+  ///
+  /// In en, this message translates to:
+  /// **'System tray unavailable — closing the window will quit the app. (GNOME usually needs the \"AppIndicator and KStatusNotifierItem Support\" extension; KDE Plasma supports trays out of the box.)'**
+  String get trayUnavailableNotice;
+
+  /// No description provided for @systemSection.
+  ///
+  /// In en, this message translates to:
+  /// **'System'**
+  String get systemSection;
+
+  /// No description provided for @autostartTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Start EasyPass when you log in'**
+  String get autostartTitle;
+
+  /// No description provided for @autostartSubtitleEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'EasyPass starts automatically when you log in.'**
+  String get autostartSubtitleEnabled;
+
+  /// No description provided for @autostartSubtitleDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'EasyPass does not start automatically. Toggle to launch it at login.'**
+  String get autostartSubtitleDisabled;
+
+  /// No description provided for @autostartUnsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'Managed by the OS installer on this platform.'**
+  String get autostartUnsupported;
+
+  /// No description provided for @autostartEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'EasyPass will start automatically at login.'**
+  String get autostartEnabled;
+
+  /// No description provided for @autostartDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'EasyPass will no longer start automatically at login.'**
+  String get autostartDisabled;
+
+  /// Shown when the user toggled the autostart switch and the write/delete of ~/.config/autostart/easypass.desktop failed (perm denied, disk full, etc.). {detail} is the diagnostic message.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not change autostart: {detail}'**
+  String autostartFailed(String detail);
 }
 
 class _AppLocalizationsDelegate

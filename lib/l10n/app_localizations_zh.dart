@@ -69,6 +69,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String get errorUnlockFailed => '解锁保险库时出错';
 
   @override
+  String get errorStorageUnavailable => '无法访问安全存储，保险库状态不可用';
+
+  @override
+  String get errorFailedToSaveSettings => '保存设置失败';
+
+  @override
+  String get fontSettingsFailed => '无法加载或保存字体设置';
+
+  @override
+  String get storageUnavailableTitle => '安全存储不可用';
+
+  @override
+  String get storageUnavailableBody =>
+      'EasyPass 无法访问系统密钥服务（Linux Secret Service / GNOME Keyring / KDE Wallet）。在恢复之前，既无法创建主密码，也无法解锁已存在的保险库。\n\n请确认系统已安装并解锁了一个密钥服务，然后重试。';
+
+  @override
+  String get exit => '退出';
+
+  @override
   String get favoritesTitle => '收藏';
 
   @override
@@ -877,5 +896,51 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String themeApplied(String value) {
     return '主题：$value';
+  }
+
+  @override
+  String get browserBridgePromptTitle => '启用浏览器集成';
+
+  @override
+  String get browserBridgePromptBody =>
+      '浏览器扩展需要通过系统里登记的一个小程序与 EasyPass 通信。请运行下面这条命令一次（不需要 root），然后在浏览器里重新加载扩展：';
+
+  @override
+  String get browserBridgePromptCopy => '复制命令';
+
+  @override
+  String get browserBridgePromptCopied => '命令已复制';
+
+  @override
+  String get browserBridgePromptOk => '知道了';
+
+  @override
+  String get trayUnavailableNotice =>
+      '系统托盘不可用 —— 关闭窗口将直接退出应用。GNOME 通常需要安装 “AppIndicator and KStatusNotifierItem Support” 扩展；KDE Plasma 默认支持托盘。';
+
+  @override
+  String get systemSection => '系统';
+
+  @override
+  String get autostartTitle => '登录时自动启动 EasyPass';
+
+  @override
+  String get autostartSubtitleEnabled => '登录后会自动启动 EasyPass。';
+
+  @override
+  String get autostartSubtitleDisabled => '登录后不会自动启动 EasyPass。打开开关即可在登录时启动。';
+
+  @override
+  String get autostartUnsupported => '本平台的自启由操作系统安装器管理。';
+
+  @override
+  String get autostartEnabled => 'EasyPass 将在下次登录时自动启动。';
+
+  @override
+  String get autostartDisabled => 'EasyPass 将不再随登录自动启动。';
+
+  @override
+  String autostartFailed(String detail) {
+    return '修改开机自启失败：$detail';
   }
 }

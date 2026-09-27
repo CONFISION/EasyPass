@@ -73,6 +73,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String get errorUnlockFailed => 'Error unlocking vault';
 
   @override
+  String get errorStorageUnavailable =>
+      'Unable to access secure storage; vault state is unavailable';
+
+  @override
+  String get errorFailedToSaveSettings => 'Failed to save setting';
+
+  @override
+  String get fontSettingsFailed => 'Unable to load or save the font setting';
+
+  @override
+  String get storageUnavailableTitle => 'Secure storage unavailable';
+
+  @override
+  String get storageUnavailableBody =>
+      'EasyPass cannot reach the system secret store (Linux Secret Service / GNOME Keyring / KDE Wallet). The master password cannot be created or verified until this is fixed.\n\nCheck that a Secret Service provider is installed and unlocked, then retry.';
+
+  @override
+  String get exit => 'Exit';
+
+  @override
   String get favoritesTitle => 'Favorites';
 
   @override
@@ -890,5 +910,55 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String themeApplied(String value) {
     return 'Theme: $value';
+  }
+
+  @override
+  String get browserBridgePromptTitle => 'Enable browser integration';
+
+  @override
+  String get browserBridgePromptBody =>
+      'The browser extension talks to EasyPass through a small host registered on your system. Run this command once (no root needed), then reload the extension:';
+
+  @override
+  String get browserBridgePromptCopy => 'Copy command';
+
+  @override
+  String get browserBridgePromptCopied => 'Command copied';
+
+  @override
+  String get browserBridgePromptOk => 'Got it';
+
+  @override
+  String get trayUnavailableNotice =>
+      'System tray unavailable — closing the window will quit the app. (GNOME usually needs the \"AppIndicator and KStatusNotifierItem Support\" extension; KDE Plasma supports trays out of the box.)';
+
+  @override
+  String get systemSection => 'System';
+
+  @override
+  String get autostartTitle => 'Start EasyPass when you log in';
+
+  @override
+  String get autostartSubtitleEnabled =>
+      'EasyPass starts automatically when you log in.';
+
+  @override
+  String get autostartSubtitleDisabled =>
+      'EasyPass does not start automatically. Toggle to launch it at login.';
+
+  @override
+  String get autostartUnsupported =>
+      'Managed by the OS installer on this platform.';
+
+  @override
+  String get autostartEnabled => 'EasyPass will start automatically at login.';
+
+  @override
+  String get autostartDisabled =>
+      'EasyPass will no longer start automatically at login.';
+
+  @override
+  String autostartFailed(String detail) {
+    return 'Could not change autostart: $detail';
   }
 }

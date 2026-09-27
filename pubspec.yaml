@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.3.2+12
+version: 2.3.3+13
 
 environment:
   sdk: ^3.12.2
@@ -56,6 +56,16 @@ dependencies:
   # Share/Export
   share_plus: ^10.1.4
   file_picker: ^8.1.7
+
+# Keep the existing system lookup name instead of downloading a prebuilt
+# sqlite3 native asset from github.com (unavailable in this environment).
+# On Linux, linux/CMakeLists.txt builds a separate SQLite shared object from
+# sqlite3_flutter_libs' sqlite.org source and installs it as `libsqlite3.so`,
+# which is the name this hook requests.
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
 
 dev_dependencies:
   flutter_test:

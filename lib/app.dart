@@ -6,11 +6,15 @@ import 'core/constants/app_constants.dart';
 import 'features/auth/screens/lock_screen.dart';
 import 'features/auth/screens/set_master_password_screen.dart';
 import 'features/auth/providers/auth_provider.dart';
+import 'features/desktop_autostart/desktop_autostart.dart';
+import 'features/desktop_single_instance/single_instance_backend.dart';
+import 'features/desktop_single_instance/single_instance_raise_host.dart';
 import 'features/generator/screens/generator_screen.dart';
 import 'features/health/screens/health_screen.dart';
 import 'features/settings/providers/font_settings_provider.dart';
 import 'features/settings/providers/theme_provider.dart';
 import 'features/settings/screens/settings_screen.dart';
+import 'features/browser_bridge/browser_host_prompt.dart';
 import 'features/vault/screens/add_edit_entry_screen.dart';
 import 'features/vault/screens/entry_detail_screen.dart';
 import 'features/vault/screens/vault_screen.dart';
@@ -18,6 +22,16 @@ import 'l10n/app_localizations.dart';
 
 /// Selected UI locale; `null` follows the system language.
 final localeProvider = StateProvider<Locale?>((ref) => null);
+
+/// P3.2 single-instance backend: `null` on non-Linux platforms (or when the
+/// primary instance check failed and the process should exit, but `main.dart`
+/// already `exit(0)`s in that branch before reaching `runApp`).
+final singleInstanceBackendProvider = Provider<SingleInstanceBackend?>((ref) => null);
+
+/// P3.2 autostart coordinator (Linux only).
+final autostartCoordinatorProvider = Provider<LinuxAutostartCoordinator>(
+  (ref) => LinuxAutostartCoordinator(),
+);
 
 final _routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(authProvider);
@@ -49,18 +63,12 @@ final _routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      GoRoute(
-        path: '/lock',
-        builder: (context, state) => const LockScreen(),
-      ),
+      GoRoute(path: '/lock', builder: (context, state) => const LockScreen()),
       GoRoute(
         path: '/set-master-password',
         builder: (context, state) => const SetMasterPasswordScreen(),
       ),
-      GoRoute(
-        path: '/vault',
-        builder: (context, state) => const VaultScreen(),
-      ),
+      GoRoute(path: '/vault', builder: (context, state) => const VaultScreen()),
       GoRoute(
         path: '/vault/add',
         builder: (context, state) => const AddEditEntryScreen(),
@@ -102,7 +110,8 @@ class EasyPassApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(_routerProvider);
     final locale = ref.watch(localeProvider);
-    final fontFamily = _resolveFontFamily(ref.watch(fontFamilyProvider));
+    final fontSetting = ref.watch(fontFamilyProvider);
+    final fontFamily = _resolveFontFamily(fontSetting.valueOrNull);
     final themeMode = ref.watch(themeModeProvider);
 
     return MaterialApp.router(
@@ -129,6 +138,13 @@ class EasyPassApp extends ConsumerWidget {
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       routerConfig: router,
+      // 首次启动的浏览器集成提示（方案 B：不做设置页 UI，只提示一次）。
+      builder: (context, child) => BrowserHostPromptHost(
+        // P3.2 单实例：UI 准备好后启动 raise 监听，让二次启动的进程能把窗口
+        // 唤到前台。该 Host 是 ConsumerStatefulWidget，只在主实例上挂 handler
+        // （backend 非 null）；非 Linux / 没有 backend 时是空操作。
+        child: SingleInstanceRaiseHost(child: child ?? const SizedBox.shrink()),
+      ),
     );
   }
 

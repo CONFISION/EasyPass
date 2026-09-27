@@ -2,7 +2,6 @@
   "@@locale": "en",
   "appTitle": "EasyPass",
   "none": "None",
-
   "masterPasswordLabel": "Master Password",
   "masterPasswordHint": "At least 8 characters",
   "confirmMasterPasswordLabel": "Confirm Master Password",
@@ -12,7 +11,6 @@
   "setPasswordSubtitle": "Set your master password to get started.\nThis password will encrypt all your data.",
   "setMasterPassword": "Set Master Password",
   "securityNote": "Important: Your master password cannot be recovered if forgotten. Store it safely!",
-
   "errorPasswordsDoNotMatch": "Passwords do not match",
   "errorPasswordTooShort": "Master password must be at least 8 characters",
   "errorNoMasterPassword": "No master password configured",
@@ -22,7 +20,12 @@
   "errorFailedToChange": "Failed to change master password",
   "errorCurrentPasswordIncorrect": "Current master password is incorrect",
   "errorUnlockFailed": "Error unlocking vault",
-
+  "errorStorageUnavailable": "Unable to access secure storage; vault state is unavailable",
+  "errorFailedToSaveSettings": "Failed to save setting",
+  "fontSettingsFailed": "Unable to load or save the font setting",
+  "storageUnavailableTitle": "Secure storage unavailable",
+  "storageUnavailableBody": "EasyPass cannot reach the system secret store (Linux Secret Service / GNOME Keyring / KDE Wallet). The master password cannot be created or verified until this is fixed.\n\nCheck that a Secret Service provider is installed and unlocked, then retry.",
+  "exit": "Exit",
   "favoritesTitle": "Favorites",
   "folderTitle": "Folder",
   "searchTooltip": "Search",
@@ -33,7 +36,9 @@
   "failedToLoadVault": "Failed to load vault: {error}",
   "@failedToLoadVault": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "retry": "Retry",
@@ -53,28 +58,35 @@
   "deleteFolderMessage": "Delete \"{name}\"? Entries inside will be moved to \"No Folder\". This cannot be undone.",
   "@deleteFolderMessage": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "folderDeleted": "Folder \"{name}\" deleted",
   "@folderDeleted": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "folderActions": "Folder actions",
   "deleteFolderNotEmptyMessage": "Delete \"{name}\"? It still contains {count} entries. They will NOT be deleted — they move to \"No Folder\". This cannot be undone.",
   "@deleteFolderNotEmptyMessage": {
     "placeholders": {
-      "name": {"type": "String"},
-      "count": {"type": "int"}
+      "name": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
     }
   },
   "deleteFolderKeepEntries": "Delete folder, keep entries",
   "delete": "Delete",
   "searchFailed": "Search failed",
   "noResultsFound": "No results found",
-
   "editEntryTitle": "Edit Entry",
   "addEntryTitle": "Add Entry",
   "nameLabel": "Name *",
@@ -100,13 +112,14 @@
   "failedToSaveEntry": "Failed to save: {error}",
   "@failedToSaveEntry": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "deleteEntryTitle": "Delete Entry",
   "deleteEntryMessage": "Are you sure? This cannot be undone.",
   "deleteEntryDetailMessage": "Are you sure you want to delete this entry? This action cannot be undone.",
-
   "entryDetailsTitle": "Entry Details",
   "failedToLoadEntry": "Failed to load entry",
   "entryNotFound": "Entry not found",
@@ -122,18 +135,21 @@
   "copyFieldTooltip": "Copy {label}",
   "@copyFieldTooltip": {
     "placeholders": {
-      "label": {"type": "String"}
+      "label": {
+        "type": "String"
+      }
     }
   },
   "verifyMasterPasswordTitle": "Verify Master Password",
   "verify": "Verify",
   "noMasterPasswordConfigured": "No master password configured",
-
   "selectOptionsBelow": "Select options below",
   "charactersCount": "{count} characters",
   "@charactersCount": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
   "copy": "Copy",
@@ -143,7 +159,9 @@
   "lengthLabel": "Length: {length}",
   "@lengthLabel": {
     "placeholders": {
-      "length": {"type": "int"}
+      "length": {
+        "type": "int"
+      }
     }
   },
   "uppercase": "Uppercase (A-Z)",
@@ -154,7 +172,6 @@
   "numbersSubtitle": "Include numbers",
   "symbols": "Symbols (!@#$...)",
   "symbolsSubtitle": "Include special characters",
-
   "settingsTitle": "Settings",
   "securitySection": "Security",
   "changeMasterPassword": "Change Master Password",
@@ -163,7 +180,9 @@
   "autoLockMinutesValue": "{minutes} minutes",
   "@autoLockMinutesValue": {
     "placeholders": {
-      "minutes": {"type": "int"}
+      "minutes": {
+        "type": "int"
+      }
     }
   },
   "biometricUnlock": "Biometric Unlock",
@@ -208,13 +227,17 @@
   "vaultExportedTo": "Vault exported to {path}",
   "@vaultExportedTo": {
     "placeholders": {
-      "path": {"type": "String"}
+      "path": {
+        "type": "String"
+      }
     }
   },
   "exportFailed": "Export failed: {error}",
   "@exportFailed": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "importDialogTitle": "Import Vault",
@@ -223,14 +246,20 @@
   "importedCounts": "Imported {entries} entries and {folders} folders",
   "@importedCounts": {
     "placeholders": {
-      "entries": {"type": "int"},
-      "folders": {"type": "int"}
+      "entries": {
+        "type": "int"
+      },
+      "folders": {
+        "type": "int"
+      }
     }
   },
   "importFailed": "Import failed: {error}",
   "@importFailed": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "currentMasterPasswordLabel": "Current Master Password",
@@ -241,20 +270,23 @@
   "failedWithError": "Failed: {error}",
   "@failedWithError": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
   "autoLockSet": "Auto-lock set to {value}",
   "@autoLockSet": {
     "placeholders": {
-      "value": {"type": "String"}
+      "value": {
+        "type": "String"
+      }
     }
   },
   "deleteAllDataTitle": "Delete All Data?",
   "deleteAllDataMessage": "This will permanently delete all your saved passwords and data. This action cannot be undone.",
   "deleteAll": "Delete All",
   "allDataDeleted": "All data deleted",
-
   "healthReport": "Password Health Report",
   "healthScore": "Health Score",
   "healthGood": "Good",
@@ -273,7 +305,9 @@
   "healthReusedShared": "Shared by {count} entries",
   "@healthReusedShared": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
   "healthNoTotpReason": "2-step verification is not enabled",
@@ -281,10 +315,11 @@
   "healthLoadFailed": "Failed to load health report: {error}",
   "@healthLoadFailed": {
     "placeholders": {
-      "error": {"type": "String"}
+      "error": {
+        "type": "String"
+      }
     }
   },
-
   "entryTypeLabel": "Type",
   "entryTypeLogin": "Login",
   "entryTypeSecureNote": "Secure note",
@@ -300,17 +335,20 @@
   "entryTypeSwitchMessage": "Fields that belong to \"{from}\" will be discarded. The name, notes and custom fields are kept.",
   "@entryTypeSwitchMessage": {
     "placeholders": {
-      "from": {"type": "String"}
+      "from": {
+        "type": "String"
+      }
     }
   },
   "entryTypeSwitchConfirm": "Switch",
   "entryTypeEmptyForType": "No {type} entries yet",
   "@entryTypeEmptyForType": {
     "placeholders": {
-      "type": {"type": "String"}
+      "type": {
+        "type": "String"
+      }
     }
   },
-
   "customFieldsSection": "Custom fields",
   "customFieldAdd": "Add field",
   "customFieldLabelHint": "Label",
@@ -320,10 +358,8 @@
   "customFieldTypeBoolean": "Checkbox",
   "customFieldRemove": "Remove field",
   "customFieldNoFields": "No custom fields",
-
   "secureNoteBodyLabel": "Note",
   "secureNoteBodyHint": "Anything you want to keep encrypted",
-
   "identityPersonalSection": "Personal",
   "identityContactSection": "Contact",
   "identityDocumentSection": "Documents",
@@ -348,7 +384,6 @@
   "identityBirthdayLabel": "Birthday",
   "identityBirthdayHint": "YYYY-MM-DD",
   "identitySexLabel": "Gender",
-
   "sshKeySection": "Key material",
   "sshPublicKeyLabel": "Public key",
   "sshPublicKeyHint": "ssh-ed25519 AAAA… user@host",
@@ -362,7 +397,9 @@
   "sshBitsValue": "{bits} bits",
   "@sshBitsValue": {
     "placeholders": {
-      "bits": {"type": "int"}
+      "bits": {
+        "type": "int"
+      }
     }
   },
   "sshCommentLabel": "Comment",
@@ -372,38 +409,39 @@
   "sshPrivateKeyFormatValue": "Detected format: {format}",
   "@sshPrivateKeyFormatValue": {
     "placeholders": {
-      "format": {"type": "String"}
+      "format": {
+        "type": "String"
+      }
     }
   },
   "sshNoPrivateKey": "No private key stored",
   "sshRevealPrivateKey": "Reveal private key",
-
   "totpCodeLabel": "One-time code",
   "totpCopyTooltip": "Copy code",
   "totpRefreshesIn": "Refreshes in {seconds}s",
   "@totpRefreshesIn": {
     "placeholders": {
-      "seconds": {"type": "int"}
+      "seconds": {
+        "type": "int"
+      }
     }
   },
   "totpNotSet": "Not configured",
-
   "searchHint": "Search the vault",
   "searchPrefixesHint": "Prefixes: type: login · folder: Work · url: example.com",
-
   "folderIconLabel": "Icon",
   "folderEditTitle": "Edit folder",
   "folderRenamed": "Folder updated",
   "renameFolder": "Rename",
-
   "healthOnlyLogins": "Health is scored on login entries only",
   "healthLoginCount": "{count} login entries analysed",
   "@healthLoginCount": {
     "placeholders": {
-      "count": {"type": "int"}
+      "count": {
+        "type": "int"
+      }
     }
   },
-
   "fieldCopied": "Copied to clipboard",
   "detailsSection": "Details",
   "themeLight": "Light",
@@ -411,7 +449,32 @@
   "themeApplied": "Theme: {value}",
   "@themeApplied": {
     "placeholders": {
-      "value": {"type": "String"}
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "browserBridgePromptTitle": "Enable browser integration",
+  "browserBridgePromptBody": "The browser extension talks to EasyPass through a small host registered on your system. Run this command once (no root needed), then reload the extension:",
+  "browserBridgePromptCopy": "Copy command",
+  "browserBridgePromptCopied": "Command copied",
+  "browserBridgePromptOk": "Got it",
+  "trayUnavailableNotice": "System tray unavailable — closing the window will quit the app. (GNOME usually needs the \"AppIndicator and KStatusNotifierItem Support\" extension; KDE Plasma supports trays out of the box.)",
+  "@trayUnavailableNotice": {
+    "description": "Shown on the Settings/About screen when the Linux tray could not be created (e.g. GNOME without an AppIndicator extension). The fallback is \"close exits the app\" instead of \"close hides to tray\"."
+  },
+  "systemSection": "System",
+  "autostartTitle": "Start EasyPass when you log in",
+  "autostartSubtitleEnabled": "EasyPass starts automatically when you log in.",
+  "autostartSubtitleDisabled": "EasyPass does not start automatically. Toggle to launch it at login.",
+  "autostartUnsupported": "Managed by the OS installer on this platform.",
+  "autostartEnabled": "EasyPass will start automatically at login.",
+  "autostartDisabled": "EasyPass will no longer start automatically at login.",
+  "autostartFailed": "Could not change autostart: {detail}",
+  "@autostartFailed": {
+    "description": "Shown when the user toggled the autostart switch and the write/delete of ~/.config/autostart/easypass.desktop failed (perm denied, disk full, etc.). {detail} is the diagnostic message.",
+    "placeholders": {
+      "detail": { "type": "String" }
     }
   }
 }
