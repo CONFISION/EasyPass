@@ -65,3 +65,14 @@ log/
 # Development roadmap (local only, not published)
 /Plan.md
 .vscode
+
+# MSVC intermediate files from browser_extension/native_host/build_bridge.bat.
+# That script invokes cl.exe with its CWD set to the repository root (the
+# POST_BUILD step passes only the output dir), so the .obj — and the .pdb / .exe
+# cl writes next to it — land in the working tree rather than under build/.
+# Without these patterns a "git add -A" happily commits compiler output.
+*.obj
+*.pdb
+*.ilk
+/easypass_native_host.exe
+
