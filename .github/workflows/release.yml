@@ -1,0 +1,342 @@
+name: Release
+
+# ─── 触发条件 ─────────────────────────────────────────────────────────────
+# 只由 `v*` 形式的 tag 推送触发（例如 `v2.3.3`）。tag 名去掉前缀 v 之后必须与
+# pubspec.yaml 的 version 完全一致，否则 verify 任务直接失败、不产出任何发布物。
+# 说明见 .github/workflows/README.md。
+on:
+  push:
+    tags:
+      - 'v*'
+
+# 默认只读；只有最后的 release 任务需要写权限（创建 Release + 上传资产）。
+permissions:
+  contents: read
+
+env:
+  # 与 ci.yml 保持一致：见那里的注释（Dart ^3.12.2 / .metadata revision / owner 本机）。
+  FLUTTER_VERSION: 3.47.5
+  # appimagetool 1.9.1 x86_64 —— 官方 release 资产，URL 已验证存在。
+  # 刻意不用 `continuous` 那个滚动 tag：它是每天重建的，无法复现。
+  APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+
+jobs:
+  # ─── 门禁：版本号四方契约 + tag 一致性 ───────────────────────────────────
+  verify:
+    name: Verify tag / version contract
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.22.0
+
+      # tag（v2.3.3）↔ pubspec.yaml（version: 2.3.3+13）必须一致。
+      - name: Tag matches pubspec.yaml version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          pubspec="$(awk -F': ' '/^version:[[:space:]]*/ {print $2; exit}' pubspec.yaml)"
+          pubspec="${pubspec%%+*}"
+          echo "tag=${tag} pubspec=${pubspec}"
+          if [[ "${version}" != "${pubspec}" ]]; then
+            echo "::error::tag ${tag} 与 pubspec.yaml 的 ${pubspec} 不一致：先改版本号（含 settings_screen.dart / manifest.json / easypass_setup.iss）再打 tag"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      # check_extension.mjs 校验四处版本号一致：
+      # pubspec.yaml ↔ browser_extension/manifest.json ↔ settings_screen.dart ↔ easypass_setup.iss
+      - name: Version contract (pubspec / manifest / settings / installer)
+        run: node browser_extension/tools/check_extension.mjs
+
+  # ─── Windows：flutter build windows + Inno Setup 安装包 ──────────────────
+  windows:
+    name: Windows installer (EasypassSetup.exe)
+    runs-on: windows-latest
+    needs: verify
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      # Windows 构建命令固定为 `flutter build windows`（AGENTS.md）。
+      # 这一步同时产出安装包需要的全部东西：
+      #   · easypass.exe + flutter_windows.dll + 插件 DLL（Flutter 自己的 install 步骤）
+      #   · easypass_native_host.exe —— 原生消息桥，由 windows/runner/CMakeLists.txt 的
+      #     POST_BUILD 调 browser_extension/native_host/build_bridge.bat 生成（cl.exe，x86）
+      #   · msvcp140.dll / vcruntime140.dll / vcruntime140_1.dll —— 由另一个 POST_BUILD
+      #     调 installer/copy_vc_runtime.bat 拷进 Release 目录（.iss 需要它们）
+      - name: flutter build windows
+        run: flutter build windows
+
+      - name: Verify build output
+        shell: pwsh
+        run: |
+          $release = 'build\windows\x64\runner\Release'
+          $required = @('easypass.exe', 'easypass_native_host.exe', 'flutter_windows.dll', 'sqlite3.dll')
+          $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $release $_)) })
+          if ($missing.Count -gt 0) {
+            throw "缺少构建产物：$($missing -join ', ')（目录 $release）"
+          }
+          Write-Host "OK: $release"
+          Get-ChildItem $release -File | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
+
+      # Chocolatey 的 innosetup 包目前是 Inno Setup 6.7.1（装到
+      # "C:\Program Files (x86)\Inno Setup 6"）。.iss 里用到的
+      # `compiler:Languages\ChineseSimplified.isl` 自 6.5.0 起是官方翻译、随 Inno Setup
+      # 一起安装，因此 6.7.1 也能编过；owner 本机的 Inno Setup 7 对 6 的脚本向后兼容。
+      # 想换成和本机完全一致的 7.1.0：把这一步换成下面两行之一，其余不用改 ——
+      #   winget install --id JRSoftware.InnoSetup.7 -e -s winget --silent --accept-package-agreements --accept-source-agreements
+      #   curl.exe -fsSL -o is7.exe https://github.com/jrsoftware/issrc/releases/download/is-7_1_0/innosetup-7.1.0-x64.exe ; .\is7.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Compile installer (ISCC)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # ISCC.exe 的位置随版本与安装方式而变，按优先级找：
+          #   1) Inno Setup 7 / 6 的默认目录（7 优先 = owner 本机的版本）
+          #   2) Program Files 下任何 "Inno Setup*" 目录（版本号降序）
+          #   3) PATH 上的 ISCC.exe（choco 会 shim 一个）
+          #   4) 注册表 Uninstall 项的 InstallLocation（choco 自己也这么找）
+          $candidates = [System.Collections.Generic.List[string]]::new()
+          $programDirs = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
+          foreach ($pf in $programDirs) {
+            foreach ($v in @('Inno Setup 7', 'Inno Setup 6')) {
+              $candidates.Add((Join-Path $pf "$v\ISCC.exe"))
+            }
+            Get-ChildItem -Path $pf -Directory -Filter 'Inno Setup*' -ErrorAction SilentlyContinue |
+              Sort-Object Name -Descending |
+              ForEach-Object { $candidates.Add((Join-Path $_.FullName 'ISCC.exe')) }
+          }
+          $onPath = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+          if ($onPath) { $candidates.Add($onPath.Source) }
+          $uninstallKeys = @(
+            'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
+            'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'
+          )
+          foreach ($key in $uninstallKeys) {
+            Get-ChildItem $key -ErrorAction SilentlyContinue | ForEach-Object {
+              $p = Get-ItemProperty $_.PSPath -ErrorAction SilentlyContinue
+              if ($p.DisplayName -like 'Inno Setup*' -and $p.InstallLocation) {
+                $candidates.Add((Join-Path $p.InstallLocation 'ISCC.exe'))
+              }
+            }
+          }
+
+          $iscc = $null
+          foreach ($c in $candidates) {
+            if ($c -and (Test-Path -LiteralPath $c)) { $iscc = $c; break }
+          }
+          if (-not $iscc) {
+            Write-Host 'ISCC.exe not found; candidates tried:'
+            $candidates | ForEach-Object { Write-Host "  $_" }
+            throw '找不到 Inno Setup 编译器 ISCC.exe'
+          }
+          Write-Host "ISCC: $iscc (file version $((Get-Item -LiteralPath $iscc).VersionInfo.FileVersion))"
+
+          # 产物：build\installer\EasypassSetup.exe（见 installer/easypass_setup.iss 的 OutputDir/OutputBaseFilename）
+          & $iscc 'installer\easypass_setup.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC 失败，exit=$LASTEXITCODE" }
+          if (-not (Test-Path -LiteralPath 'build\installer\EasypassSetup.exe')) {
+            throw 'ISCC 报成功但 build\installer\EasypassSetup.exe 不存在'
+          }
+          Write-Host "installer: $((Get-Item 'build\installer\EasypassSetup.exe').Length) bytes"
+
+      # 发布资产用带版本号的文件名（EasypassSetup.exe 这个名字不体现版本，
+      # 同一个 Release 页面上多次下载容易混）。
+      - name: Stage installer asset
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item 'build\installer\EasypassSetup.exe' "dist\EasyPass-${{ needs.verify.outputs.version }}-windows-x64-setup.exe"
+          Get-ChildItem dist | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-installer
+          path: dist/*.exe
+          if-no-files-found: error
+
+  # ─── Linux：flutter build linux --release + AppImage ────────────────────
+  linux:
+    name: Linux AppImage
+    runs-on: ubuntu-latest
+    needs: verify
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # GTK 3 + libayatana-appindicator3-dev 是 linux/runner 的依赖（AGENTS.md）。
+      # 刻意不写 libstdc++-12-dev 这种带版本号的包名：ubuntu-latest 的默认 GCC
+      # 版本会随镜像升级而变，写死版本号会让 apt 在镜像升级后直接失败；
+      # build-essential 一定存在，且会把当前默认的 libstdc++-dev 一起装上。
+      - name: Install Linux build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libayatana-appindicator3-dev
+          # appimagetool 自己就是个 AppImage，正常跑需要 FUSE2（24.04 起包名是
+          # libfuse2t64）。装得上最好；装不上也不影响打包 —— 打包步骤用
+          # APPIMAGE_EXTRACT_AND_RUN=1 让运行时解包后直接执行，完全绕开 FUSE。
+          sudo apt-get install -y --no-install-recommends libfuse2t64 \
+            || sudo apt-get install -y --no-install-recommends libfuse2 \
+            || echo 'no FUSE2 package available; packaging will use APPIMAGE_EXTRACT_AND_RUN=1'
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      # linux/CMakeLists.txt 会用 sqlite3_flutter_libs 里的 sqlite.org 源码
+      # 现编一份 libsqlite3.so（pubspec.yaml 的 linux-scoped `source: system` 钩子
+      # 要求这个名字），所以配置阶段需要联网拉源码 —— runner 上有网。
+      - name: flutter build linux --release
+        run: flutter build linux --release
+
+      - name: Verify bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle=build/linux/x64/release/bundle
+          test -x "$bundle/easypass" || { echo "::error::$bundle/easypass 不存在"; exit 1; }
+          test -f "$bundle/assets/icons/Easypass.png" || echo "::warning::缺少 $bundle/assets/icons/Easypass.png（AppImage 将不带图标）"
+          ls -l "$bundle"
+
+      - name: Download appimagetool
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tools"
+          tool="$RUNNER_TEMP/tools/appimagetool.AppImage"
+          curl -fsSL -o "$tool" "$APPIMAGETOOL_URL"
+          chmod +x "$tool"
+          # 只做一次"能不能跑"的自检；--version 不受支持也不致命，真正的失败会在
+          # 打包步骤里以明确的错误暴露出来。
+          APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --version 2>&1 | head -n 2 || true
+
+      # build_appimage.sh <bundle_dir> <output .AppImage>：
+      # 版本号由脚本自己从 pubspec.yaml 读，appimagetool 的路径走 $APPIMAGETOOL。
+      - name: Package AppImage
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          APPIMAGETOOL="$RUNNER_TEMP/tools/appimagetool.AppImage" \
+            bash installer/appimage/build_appimage.sh \
+              build/linux/x64/release/bundle \
+              "dist/EasyPass-${{ needs.verify.outputs.version }}-linux-x86_64.AppImage"
+          ls -l dist
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+  # ─── 汇总：SHA256SUMS.txt + GitHub Release ──────────────────────────────
+  release:
+    name: GitHub Release (SHA256SUMS + assets)
+    runs-on: ubuntu-latest
+    needs: [verify, windows, linux]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.22.0
+
+      - name: Download Windows installer
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-installer
+          path: incoming
+
+      - name: Download Linux AppImage
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-appimage
+          path: incoming
+
+      # 校验和与发布清单交给 installer/release/collect_artifacts.mjs —— 仓库里
+      # 唯一一份 SHA256SUMS.txt 实现，本地发布走的也是它（见 installer/release/README.md），
+      # 所以 CI 产物与手工发布的格式完全一致：
+      #   · <hex>  <文件名>（两空格）、按文件名排序、LF、无注释行 → Linux 上 sha256sum -c 直接可用
+      #   · 顺带写出 release-manifest.json（发布说明由 generate_release_notes.mjs 读它渲染）
+      #   · 缺产物就失败且一个文件都不写，不会产出"半份"校验和
+      # --skip extension：这个工作流不出扩展商店包。要一起发，就在 linux 任务里加
+      # `node browser_extension/tools/build_extension_zip.mjs` 并删掉这里的 --skip。
+      - name: Collect artifacts + SHA256SUMS.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          node installer/release/collect_artifacts.mjs \
+            --installer "incoming/EasyPass-${{ needs.verify.outputs.version }}-windows-x64-setup.exe" \
+            --appimage "incoming/EasyPass-${{ needs.verify.outputs.version }}-linux-x86_64.AppImage" \
+            --skip extension
+          out="dist/release/${{ needs.verify.outputs.version }}"
+          ls -l "$out"
+          # 独立复核一遍（脚本自己也会在拷贝后重新哈希）
+          ( cd "$out" && sha256sum -c SHA256SUMS.txt )
+
+      # 用预装的 gh CLI 而不是第三方 action：发布这个仓库的资产值得只依赖
+      # GitHub 自己的工具链。同一个 tag 重跑工作流时走 upload --clobber。
+      # 上传整个 dist/release/<version>/ 目录（产物 + SHA256SUMS.txt + release-manifest.json）。
+      - name: Create or update the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          out="dist/release/${{ needs.verify.outputs.version }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag 已存在 —— 覆盖上传资产"
+            gh release upload "$tag" "$out"/* --clobber
+          else
+            gh release create "$tag" "$out"/* \
+              --title "EasyPass ${tag}" \
+              --generate-notes \
+              --verify-tag
+          fi
+          gh release view "$tag" --json url,assets --jq '.url, (.assets[].name)'

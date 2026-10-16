@@ -1,0 +1,118 @@
+name: CI
+
+# ─── 触发条件 ─────────────────────────────────────────────────────────────
+# · push 到 master
+# · 任何 pull_request（GitHub 默认的 opened / synchronize / reopened）
+# 说明见 .github/workflows/README.md。
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# 同一分支/PR 再推一次时取消上一次运行：CI 只关心最新一次提交。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# 本工作流只需要读仓库。
+permissions:
+  contents: read
+
+env:
+  # Flutter 3.47.5（channel stable，自带 Dart 3.13.4）。三条依据：
+  #   1) pubspec.yaml 要求 Dart ^3.12.2 —— 3.13.4 满足；
+  #   2) .metadata 记录的 revision 6a19cca56475dbfba1478ee68d7bd0c2ef891da1 就是 3.47.5；
+  #   3) owner 本机 `flutter --version` 同样是 3.47.5，CI 与本机的工具链因此一致。
+  # subosito/flutter-action 会按这个精确版本去官方归档下载
+  # （flutter_windows_3.47.5-stable.zip 已验证存在）。升级 Flutter 时只改这一处。
+  FLUTTER_VERSION: 3.47.5
+  # jsdom 30.1.3（根 package.json 里精确锁定）的 engines 要求
+  # node ^22.22.2 || ^24.15.0 || >=26.0.0；24.22.0 是当前 LTS。
+  NODE_VERSION: 24.22.0
+
+jobs:
+  windows:
+    name: Windows — analyze / test / extension / runner syntax
+    # Windows 是仓库的基准平台：545 个用例在这里跑全，Linux-only 的用例在
+    # Windows 上不注册用例（见 AGENTS.md），所以门禁放在 Windows 上。
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # ─── 1. 依赖 ──────────────────────────────────────────────────────
+      # pubspec.yaml 里 `flutter: generate: true` + l10n.yaml，pub get 会顺带
+      # 重新生成 lib/l10n/app_localizations*.dart（这些文件是入库的，生成结果
+      # 与本机 3.47.5 一致时工作区不会有 diff）。
+      - name: flutter pub get
+        run: flutter pub get
+
+      # ─── 2. lint ─────────────────────────────────────────────────────
+      # --no-pub：依赖已装好，pub 在 CI 上重复跑只会多一次网络往返。
+      - name: flutter analyze
+        run: flutter analyze --no-pub
+
+      # ─── 3. 全量测试 ──────────────────────────────────────────────────
+      # 注意：`flutter test` 之间会抢 build\native_assets\windows\sqlite3.dll，
+      # 所以这个工作流里只跑一次、且不与其他 Flutter 任务并行。
+      - name: flutter test
+        run: flutter test --no-pub
+
+      # ─── 4. 浏览器扩展：静态检查 + jsdom 冒烟测试 ─────────────────────
+      # jsdom 来自仓库根目录的 package.json（精确锁 30.1.3），`npm ci` 按
+      # 入库的 package-lock.json 安装到 <repo>/node_modules。三个 smoke 脚本里的
+      # `require('jsdom')` 是从 browser_extension/tools/ 逐级向上解析的，因此
+      # 直接命中仓库根的 node_modules —— 不需要往 %TEMP%\easypass-smoke 里装东西
+      # （那条旧路径仍作为本地兜底保留在脚本里，脚本本身一行未改）。
+      - name: npm ci
+        run: npm ci --no-audit --no-fund
+
+      - name: Extension static check (check_extension.mjs)
+        run: node browser_extension/tools/check_extension.mjs
+
+      - name: Content-script smoke (jsdom)
+        run: node browser_extension/tools/smoke_content.mjs
+
+      - name: Popup smoke (jsdom)
+        run: node browser_extension/tools/smoke_popup.mjs
+
+      - name: Popup extra smoke (jsdom)
+        run: node browser_extension/tools/smoke_popup_extra.mjs
+
+      # ─── 5. windows/runner 语法检查（不调用 MSBuild）──────────────────
+      # check_syntax.bat 用 cl /Zs /W4 /WX 解析 runner 源码，但它的 /I 里列了
+      # windows\flutter\ephemeral：flutter_windows.h 与
+      # cpp_client_wrapper\include\flutter\*.h 都在那里。这些文件平时是 CMake
+      # 构建中的 flutter_assemble 目标拷进去的，而 CI 不跑 `flutter build windows`，
+      # 所以这里显式做同一件事：
+      #   · `flutter precache --windows` 先把引擎产物拉到 SDK 缓存；
+      #   · 再跑 debug bundle 目标（= `flutter build windows --debug` 在调 MSBuild
+      #     之前的那一步：只解包引擎产物 + 编译 Dart kernel，不编译任何 C++）。
+      # 两个坑（都已实测）：defines 必须加引号，否则 PowerShell/批处理会把
+      # `lib/main.dart` 传成 `lib/main`；不能直接跑 `unpack_windows` —— 这个名字在
+      # flutter_tools 里同时注册了 x64 与 arm64 两个 target，后注册的 arm64 会覆盖
+      # x64，于是去找 windows-arm64-release 的产物并失败。
+      - name: Prepare windows/flutter/ephemeral for check_syntax
+        shell: pwsh
+        run: |
+          flutter precache --windows
+          flutter assemble --no-version-check --output=build `
+            "-dTargetPlatform=windows-x64" "-dBuildMode=debug" "-dTargetFile=lib/main.dart" `
+            debug_bundle_windows-x64_assets
+
+      - name: Runner syntax check (check_syntax.bat)
+        run: cmd /c windows\runner\check_syntax.bat

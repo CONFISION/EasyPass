@@ -1,0 +1,19 @@
+{
+  "name": "easypass-dev-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Root-level dev-only dependencies for the EasyPass tooling that is written in Node.js (the jsdom browser-extension smoke tests). The Flutter app itself has no Node.js dependency; `flutter pub get` remains the only install step it needs.",
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
+  "scripts": {
+    "check:extension": "node browser_extension/tools/check_extension.mjs",
+    "smoke:content": "node browser_extension/tools/smoke_content.mjs",
+    "smoke:popup": "node browser_extension/tools/smoke_popup.mjs",
+    "smoke:popup-extra": "node browser_extension/tools/smoke_popup_extra.mjs",
+    "test:extension": "npm run check:extension && npm run smoke:content && npm run smoke:popup && npm run smoke:popup-extra"
+  },
+  "devDependencies": {
+    "jsdom": "30.1.3"
+  }
+}

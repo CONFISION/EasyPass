@@ -13,6 +13,7 @@
 migrate_working_dir/
 docs/
 dist/
+.codegraph/
 
 # IntelliJ related
 *.iml
@@ -49,6 +50,11 @@ app.*.map.json
 !**/.codewhale/constitution.json
 .deepseek/
 HANDOFF.md
+
+# Node.js dev dependencies (root package.json: pinned jsdom for
+# browser_extension/tools/smoke_*.mjs). The lockfile IS committed — see
+# .github/workflows/README.md.
+node_modules/
 
 # Browser extension signing key (determines the fixed extension ID)
 keys/
