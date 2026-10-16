@@ -75,6 +75,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get errorFailedToSaveSettings => '保存设置失败';
 
   @override
+  String get errorUseNewMasterPassword => '主密码已经修改过了，请用**新**主密码解锁。';
+
+  @override
   String get fontSettingsFailed => '无法加载或保存字体设置';
 
   @override
@@ -496,6 +499,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get plainJsonDesc => '解密文本 — 请妥善保管';
 
   @override
+  String get bitwardenJson => 'Bitwarden 兼容 JSON';
+
+  @override
+  String get bitwardenJsonDesc => '用于迁移到 Bitwarden / Vaultwarden（明文）';
+
+  @override
+  String get saveBitwardenExportDialog => '保存 Bitwarden 兼容导出';
+
+  @override
   String get saveEncryptedBackupDialog => '保存加密备份';
 
   @override
@@ -519,6 +531,48 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get import => '导入';
+
+  @override
+  String get importSourceTitle => '导入来源';
+
+  @override
+  String get importFromBitwardenJson => 'Bitwarden / Vaultwarden（.json）';
+
+  @override
+  String get importFromBitwardenJsonDesc => '请用 Bitwarden 导出的**未加密** .json 文件';
+
+  @override
+  String get importFromBitwardenCsv => 'Bitwarden / Vaultwarden（.csv）';
+
+  @override
+  String get importFromBitwardenCsvDesc => '银行卡会变成安全笔记；Bitwarden 不导出 SSH 密钥';
+
+  @override
+  String get pickImportFileTitle => '选择要导入的文件';
+
+  @override
+  String get bitwardenEncryptedHint =>
+      '这是 Bitwarden 的**加密**导出，无法解开。请重新导出并选择「.json」（未加密）。';
+
+  @override
+  String importedSummary(int entries, int folders) {
+    return '已导入 $entries 个条目，新建 $folders 个文件夹';
+  }
+
+  @override
+  String importedSkipped(int count) {
+    return '有 $count 个条目被跳过（详情见下）';
+  }
+
+  @override
+  String importedSkippedDetails(String details) {
+    return '跳过：$details';
+  }
+
+  @override
+  String importedLossyNotes(int cards, int uris) {
+    return '$cards 张银行卡已导入为安全笔记；$uris 个额外网址已存为自定义字段';
+  }
 
   @override
   String importedCounts(int entries, int folders) {

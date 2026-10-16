@@ -22,6 +22,7 @@
   "errorUnlockFailed": "解锁保险库时出错",
   "errorStorageUnavailable": "无法访问安全存储，保险库状态不可用",
   "errorFailedToSaveSettings": "保存设置失败",
+  "errorUseNewMasterPassword": "主密码已经修改过了，请用**新**主密码解锁。",
   "fontSettingsFailed": "无法加载或保存字体设置",
   "storageUnavailableTitle": "安全存储不可用",
   "storageUnavailableBody": "EasyPass 无法访问系统密钥服务（Linux Secret Service / GNOME Keyring / KDE Wallet）。在恢复之前，既无法创建主密码，也无法解锁已存在的保险库。\n\n请确认系统已安装并解锁了一个密钥服务，然后重试。",
@@ -222,6 +223,9 @@
   "encryptedBackupDesc": "由主密钥加密保护",
   "plainJson": "纯 JSON",
   "plainJsonDesc": "解密文本 — 请妥善保管",
+  "bitwardenJson": "Bitwarden 兼容 JSON",
+  "bitwardenJsonDesc": "用于迁移到 Bitwarden / Vaultwarden（明文）",
+  "saveBitwardenExportDialog": "保存 Bitwarden 兼容导出",
   "saveEncryptedBackupDialog": "保存加密备份",
   "savePlainExportDialog": "保存明文导出",
   "vaultExportedTo": "保险库已导出至 {path}",
@@ -243,6 +247,51 @@
   "importDialogTitle": "导入保险库",
   "importDialogMessage": "导入会将备份文件中的所有条目添加到当前保险库。现有条目不会被覆盖。是否继续？",
   "import": "导入",
+  "importSourceTitle": "导入来源",
+  "importFromBitwardenJson": "Bitwarden / Vaultwarden（.json）",
+  "importFromBitwardenJsonDesc": "请用 Bitwarden 导出的**未加密** .json 文件",
+  "importFromBitwardenCsv": "Bitwarden / Vaultwarden（.csv）",
+  "importFromBitwardenCsvDesc": "银行卡会变成安全笔记；Bitwarden 不导出 SSH 密钥",
+  "pickImportFileTitle": "选择要导入的文件",
+  "bitwardenEncryptedHint": "这是 Bitwarden 的**加密**导出，无法解开。请重新导出并选择「.json」（未加密）。",
+  "importedSummary": "已导入 {entries} 个条目，新建 {folders} 个文件夹",
+  "@importedSummary": {
+    "placeholders": {
+      "entries": {
+        "type": "int"
+      },
+      "folders": {
+        "type": "int"
+      }
+    }
+  },
+  "importedSkipped": "有 {count} 个条目被跳过（详情见下）",
+  "@importedSkipped": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "importedSkippedDetails": "跳过：{details}",
+  "@importedSkippedDetails": {
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "importedLossyNotes": "{cards} 张银行卡已导入为安全笔记；{uris} 个额外网址已存为自定义字段",
+  "@importedLossyNotes": {
+    "placeholders": {
+      "cards": {
+        "type": "int"
+      },
+      "uris": {
+        "type": "int"
+      }
+    }
+  },
   "importedCounts": "已导入 {entries} 个条目和 {folders} 个文件夹",
   "@importedCounts": {
     "placeholders": {

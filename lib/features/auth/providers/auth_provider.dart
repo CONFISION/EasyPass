@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../core/crypto/crypto_service.dart';
 import '../../../data/repositories/vault_repository.dart';
+import '../../../data/services/master_password_rotation.dart';
 import '../../../data/state/session_key.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../browser_bridge/browser_session_registry.dart';
@@ -27,6 +28,10 @@ abstract final class AuthErrorCodes {
   static const failedToChange = 'failedToChange';
   static const storageUnavailable = 'storageUnavailable';
   static const failedToSaveSettings = 'failedToSaveSettings';
+
+  /// 上一次改主密码已经生效（整库已换钥匙），但校验材料没写进钥匙串；
+  /// 用户输入的是旧密码，无法派生新钥匙 —— 必须改用新密码。
+  static const useNewMasterPassword = 'useNewMasterPassword';
 }
 
 enum AuthStatus { loading, locked, unlocked, firstRun }
@@ -155,7 +160,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  /// Unlock the vault with the master password
+  /// Unlock the vault with the master password.
+  ///
+  /// 这里同时是**被打断的轮换的恢复入口**：如果库上挂着未完成的轮换
+  /// （见 [MasterPasswordRotation]），无论用户输入新旧哪个密码，都会先把
+  /// 轮换补完 / 收尾，再决定用哪把钥匙继续。没有这一步，用户就会卡在
+  /// "两个密码都开不了库"。
   Future<bool> unlock(String password) async {
     // Only switch to loading if storage is actually usable: if the boot
     // probe already published `storageUnavailable`, tapping Unlock would
@@ -168,37 +178,36 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = state.copyWith(status: AuthStatus.loading);
 
     try {
-      final storedSalt = await _cryptoService.getStoredSalt();
-      final storedHash = await _cryptoService.getStoredPasswordHash();
+      final rotation = _ref.read(masterPasswordRotationProvider);
+      final check = await rotation.verifyCredentials(password);
 
-      if (storedSalt == null || storedHash == null) {
-        state = state.copyWith(
-          status: AuthStatus.locked,
-          errorMessage: AuthErrorCodes.noMasterPassword,
-        );
-        return false;
-      }
-
-      final computedHash = _cryptoService.hashMasterPassword(
-        password,
-        storedSalt,
-      );
-
-      if (computedHash == storedHash) {
-        // Derive and store session key
-        final derivedKey = _cryptoService.deriveKey(password, storedSalt);
-        _ref.read(encryptionKeyProvider.notifier).state = derivedKey;
-
-        state = state.copyWith(status: AuthStatus.unlocked, errorMessage: null);
-        _startAutoLockTimer();
-        return true;
-      } else {
+      if (check == null) {
         state = state.copyWith(
           status: AuthStatus.locked,
           errorMessage: AuthErrorCodes.incorrectMasterPassword,
         );
         return false;
       }
+
+      // 挂着轮换时先把它收尾；拿回来的钥匙保证能解开当前整库。
+      final key = await rotation.recoverPendingRotation(
+        check: check,
+        providedKey: check.key,
+      );
+      if (key == null) {
+        // 轮换其实已经生效（整库已是新钥匙的密文），但用户输入的是旧密码。
+        // 目标钥匙无法由旧密码推出 —— 只能明确告诉他改用新密码。
+        state = state.copyWith(
+          status: AuthStatus.locked,
+          errorMessage: AuthErrorCodes.useNewMasterPassword,
+        );
+        return false;
+      }
+
+      _ref.read(encryptionKeyProvider.notifier).state = key;
+      state = state.copyWith(status: AuthStatus.unlocked, errorMessage: null);
+      _startAutoLockTimer();
+      return true;
     } catch (_) {
       state = state.copyWith(
         status: AuthStatus.locked,
@@ -226,25 +235,51 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     try {
-      final storedSalt = await _cryptoService.getStoredSalt();
-      final storedHash = await _cryptoService.getStoredPasswordHash();
+      final rotation = _ref.read(masterPasswordRotationProvider);
 
-      if (storedSalt == null || storedHash == null) {
-        state = state.copyWith(errorMessage: AuthErrorCodes.noMasterPassword);
-        return false;
-      }
-
-      if (_cryptoService.hashMasterPassword(currentPassword, storedSalt) !=
-          storedHash) {
+      // 校验当前密码 —— 走轮换服务，它会同时看 secure storage 与未完成的轮换
+      // 日志（不能只看 secure storage：打断过的库里，那儿的材料和实际密文可能
+      // 不一致）。
+      final check = await rotation.verifyCredentials(currentPassword);
+      if (check == null) {
+        final stored = await _cryptoService.getStoredPasswordHash();
         state = state.copyWith(
-          errorMessage: AuthErrorCodes.currentPasswordIncorrect,
+          errorMessage: stored == null
+              ? AuthErrorCodes.noMasterPassword
+              : AuthErrorCodes.currentPasswordIncorrect,
         );
         return false;
       }
 
-      final oldKey = _ref.read(encryptionKeyProvider);
-      if (oldKey == null) {
-        state = state.copyWith(errorMessage: AuthErrorCodes.vaultLocked);
+      var oldKey = check.key;
+      if (check.hasPendingRotation) {
+        // 上一次轮换没走完。先按日志把它收尾 / 回退，拿到真正能开库的钥匙，
+        // 再在此基础上开始这一次。不收尾就直接轮换，会把库留在
+        // "日志是旧的、密文是新的"这种自相矛盾的状态里。
+        final resolved = await rotation.recoverPendingRotation(
+          check: check,
+          providedKey: check.key,
+        );
+        if (resolved == null) {
+          // 走到这里意味着库已在新钥匙上、而当前密码是旧的 —— 但
+          // verifyCredentials 刚刚认了它，所以理论上不可达。防御性处理：
+          // 不改密码，避免把库搅坏。
+          state = state.copyWith(
+            errorMessage: AuthErrorCodes.useNewMasterPassword,
+          );
+          return false;
+        }
+        oldKey = resolved;
+      }
+
+      if (!await _ref
+          .read(vaultRepositoryProvider)
+          .encryptionProbeWorks(oldKey)) {
+        // 兜底：用户给的当前密码不是当前整库的钥匙（例如上面刚被判为旧密码、
+        // 而库其实已经在新钥匙上）。继续轮换只会把数据搅坏。
+        state = state.copyWith(
+          errorMessage: AuthErrorCodes.currentPasswordIncorrect,
+        );
         return false;
       }
 
@@ -253,17 +288,24 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final newKey = _cryptoService.deriveKey(newPassword, newSalt);
       final newHash = _cryptoService.hashMasterPassword(newPassword, newSalt);
 
-      final repo = _ref.read(vaultRepositoryProvider);
+      // 整库重加密 + 轮换日志写进**同一个事务**（见 MasterPasswordRotation）。
+      // 全库重加密走 repository → VaultItemMapper，**新加的密文列自动包含
+      // 在内**；任何一行解不开都会抛异常并整段回滚。
+      await rotation.startRotation(
+        oldKey: oldKey,
+        newSalt: newSalt,
+        newPasswordHash: newHash,
+        newKey: newKey,
+      );
 
-      // 全库重新加密交给 repository：它走 VaultItemMapper，**新加的密文列
-      // 自动包含在内**。旧实现在这里手写字段清单（password/notes/totp），
-      // 2.3.0 新增 data_encrypted 后那样写必然漏列 —— 换完主密码就会有一列
-      // 只能用旧密钥解开。任何一行解不开都会抛异常并向上冒泡为"修改失败"。
-      await repo.reencryptAll(oldKey: oldKey, newKey: newKey);
+      // 最后一步：把新的校验材料写进 secure storage 并清掉日志。这一步失败
+      // **不再会锁死库** —— 日志还在，条目密文已经在新钥匙上，下次解锁时
+      // 用新密码即可由 recoverPendingRotation 自动补完。
+      await rotation.completeRotation(
+        PendingRotation(salt: newSalt, passwordHash: newHash),
+      );
 
-      await _cryptoService.storeKeyMaterial(newSalt, newHash);
       _ref.read(encryptionKeyProvider.notifier).state = newKey;
-
       state = state.copyWith(errorMessage: null);
       _startAutoLockTimer();
       return true;
@@ -357,6 +399,8 @@ String authErrorMessage(AppLocalizations l10n, String? code) {
       return l10n.errorStorageUnavailable;
     case AuthErrorCodes.failedToSaveSettings:
       return l10n.errorFailedToSaveSettings;
+    case AuthErrorCodes.useNewMasterPassword:
+      return l10n.errorUseNewMasterPassword;
     default:
       return code ?? '';
   }

@@ -22,6 +22,7 @@
   "errorUnlockFailed": "Error unlocking vault",
   "errorStorageUnavailable": "Unable to access secure storage; vault state is unavailable",
   "errorFailedToSaveSettings": "Failed to save setting",
+  "errorUseNewMasterPassword": "Your master password was changed already. Unlock with the NEW password.",
   "fontSettingsFailed": "Unable to load or save the font setting",
   "storageUnavailableTitle": "Secure storage unavailable",
   "storageUnavailableBody": "EasyPass cannot reach the system secret store (Linux Secret Service / GNOME Keyring / KDE Wallet). The master password cannot be created or verified until this is fixed.\n\nCheck that a Secret Service provider is installed and unlocked, then retry.",
@@ -222,6 +223,9 @@
   "encryptedBackupDesc": "Password-protected by your master key",
   "plainJson": "Plain JSON",
   "plainJsonDesc": "Decrypted text — keep it safe",
+  "bitwardenJson": "Bitwarden-compatible JSON",
+  "bitwardenJsonDesc": "For switching to Bitwarden or Vaultwarden (plain text)",
+  "saveBitwardenExportDialog": "Save Bitwarden-Compatible Export",
   "saveEncryptedBackupDialog": "Save Encrypted Backup",
   "savePlainExportDialog": "Save Plain Export",
   "vaultExportedTo": "Vault exported to {path}",
@@ -243,6 +247,51 @@
   "importDialogTitle": "Import Vault",
   "importDialogMessage": "Importing will add all entries from the backup file to your current vault. Existing entries will not be overwritten. Continue?",
   "import": "Import",
+  "importSourceTitle": "Import From",
+  "importFromBitwardenJson": "Bitwarden / Vaultwarden (.json)",
+  "importFromBitwardenJsonDesc": "Use the UNENCRYPTED .json export from Bitwarden",
+  "importFromBitwardenCsv": "Bitwarden / Vaultwarden (.csv)",
+  "importFromBitwardenCsvDesc": "Cards become secure notes; SSH keys are not exported by Bitwarden",
+  "pickImportFileTitle": "Choose the file to import",
+  "bitwardenEncryptedHint": "That is Bitwarden's encrypted export. Re-export and choose “.json” (unencrypted).",
+  "importedSummary": "Imported {entries} entries, created {folders} folders",
+  "@importedSummary": {
+    "placeholders": {
+      "entries": {
+        "type": "int"
+      },
+      "folders": {
+        "type": "int"
+      }
+    }
+  },
+  "importedSkipped": "{count} entries were skipped (see details below)",
+  "@importedSkipped": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "importedSkippedDetails": "Skipped: {details}",
+  "@importedSkippedDetails": {
+    "placeholders": {
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "importedLossyNotes": "{cards} cards were imported as secure notes; {uris} extra URLs were kept as custom fields",
+  "@importedLossyNotes": {
+    "placeholders": {
+      "cards": {
+        "type": "int"
+      },
+      "uris": {
+        "type": "int"
+      }
+    }
+  },
   "importedCounts": "Imported {entries} entries and {folders} folders",
   "@importedCounts": {
     "placeholders": {

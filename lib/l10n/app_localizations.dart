@@ -230,6 +230,12 @@ abstract class AppLocalizations {
   /// **'Failed to save setting'**
   String get errorFailedToSaveSettings;
 
+  /// No description provided for @errorUseNewMasterPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Your master password was changed already. Unlock with the NEW password.'**
+  String get errorUseNewMasterPassword;
+
   /// No description provided for @fontSettingsFailed.
   ///
   /// In en, this message translates to:
@@ -1034,6 +1040,24 @@ abstract class AppLocalizations {
   /// **'Decrypted text — keep it safe'**
   String get plainJsonDesc;
 
+  /// No description provided for @bitwardenJson.
+  ///
+  /// In en, this message translates to:
+  /// **'Bitwarden-compatible JSON'**
+  String get bitwardenJson;
+
+  /// No description provided for @bitwardenJsonDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'For switching to Bitwarden or Vaultwarden (plain text)'**
+  String get bitwardenJsonDesc;
+
+  /// No description provided for @saveBitwardenExportDialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Save Bitwarden-Compatible Export'**
+  String get saveBitwardenExportDialog;
+
   /// No description provided for @saveEncryptedBackupDialog.
   ///
   /// In en, this message translates to:
@@ -1075,6 +1099,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Import'**
   String get import;
+
+  /// No description provided for @importSourceTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Import From'**
+  String get importSourceTitle;
+
+  /// No description provided for @importFromBitwardenJson.
+  ///
+  /// In en, this message translates to:
+  /// **'Bitwarden / Vaultwarden (.json)'**
+  String get importFromBitwardenJson;
+
+  /// No description provided for @importFromBitwardenJsonDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Use the UNENCRYPTED .json export from Bitwarden'**
+  String get importFromBitwardenJsonDesc;
+
+  /// No description provided for @importFromBitwardenCsv.
+  ///
+  /// In en, this message translates to:
+  /// **'Bitwarden / Vaultwarden (.csv)'**
+  String get importFromBitwardenCsv;
+
+  /// No description provided for @importFromBitwardenCsvDesc.
+  ///
+  /// In en, this message translates to:
+  /// **'Cards become secure notes; SSH keys are not exported by Bitwarden'**
+  String get importFromBitwardenCsvDesc;
+
+  /// No description provided for @pickImportFileTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose the file to import'**
+  String get pickImportFileTitle;
+
+  /// No description provided for @bitwardenEncryptedHint.
+  ///
+  /// In en, this message translates to:
+  /// **'That is Bitwarden\'s encrypted export. Re-export and choose “.json” (unencrypted).'**
+  String get bitwardenEncryptedHint;
+
+  /// No description provided for @importedSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Imported {entries} entries, created {folders} folders'**
+  String importedSummary(int entries, int folders);
+
+  /// No description provided for @importedSkipped.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} entries were skipped (see details below)'**
+  String importedSkipped(int count);
+
+  /// No description provided for @importedSkippedDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'Skipped: {details}'**
+  String importedSkippedDetails(String details);
+
+  /// No description provided for @importedLossyNotes.
+  ///
+  /// In en, this message translates to:
+  /// **'{cards} cards were imported as secure notes; {uris} extra URLs were kept as custom fields'**
+  String importedLossyNotes(int cards, int uris);
 
   /// No description provided for @importedCounts.
   ///

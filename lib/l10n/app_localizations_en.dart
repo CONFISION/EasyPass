@@ -80,6 +80,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get errorFailedToSaveSettings => 'Failed to save setting';
 
   @override
+  String get errorUseNewMasterPassword =>
+      'Your master password was changed already. Unlock with the NEW password.';
+
+  @override
   String get fontSettingsFailed => 'Unable to load or save the font setting';
 
   @override
@@ -505,6 +509,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get plainJsonDesc => 'Decrypted text — keep it safe';
 
   @override
+  String get bitwardenJson => 'Bitwarden-compatible JSON';
+
+  @override
+  String get bitwardenJsonDesc =>
+      'For switching to Bitwarden or Vaultwarden (plain text)';
+
+  @override
+  String get saveBitwardenExportDialog => 'Save Bitwarden-Compatible Export';
+
+  @override
   String get saveEncryptedBackupDialog => 'Save Encrypted Backup';
 
   @override
@@ -529,6 +543,50 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get import => 'Import';
+
+  @override
+  String get importSourceTitle => 'Import From';
+
+  @override
+  String get importFromBitwardenJson => 'Bitwarden / Vaultwarden (.json)';
+
+  @override
+  String get importFromBitwardenJsonDesc =>
+      'Use the UNENCRYPTED .json export from Bitwarden';
+
+  @override
+  String get importFromBitwardenCsv => 'Bitwarden / Vaultwarden (.csv)';
+
+  @override
+  String get importFromBitwardenCsvDesc =>
+      'Cards become secure notes; SSH keys are not exported by Bitwarden';
+
+  @override
+  String get pickImportFileTitle => 'Choose the file to import';
+
+  @override
+  String get bitwardenEncryptedHint =>
+      'That is Bitwarden\'s encrypted export. Re-export and choose “.json” (unencrypted).';
+
+  @override
+  String importedSummary(int entries, int folders) {
+    return 'Imported $entries entries, created $folders folders';
+  }
+
+  @override
+  String importedSkipped(int count) {
+    return '$count entries were skipped (see details below)';
+  }
+
+  @override
+  String importedSkippedDetails(String details) {
+    return 'Skipped: $details';
+  }
+
+  @override
+  String importedLossyNotes(int cards, int uris) {
+    return '$cards cards were imported as secure notes; $uris extra URLs were kept as custom fields';
+  }
 
   @override
   String importedCounts(int entries, int folders) {
