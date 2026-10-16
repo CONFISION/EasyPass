@@ -8,19 +8,23 @@ that keeps it available, and one-click auto-fill in the browser. The long-term g
 is a **self-hostable Bitwarden alternative** — same convenience, no cloud you don't
 control.
 
-![release](https://img.shields.io/badge/release-2.3.3-blue)
+![release](https://img.shields.io/badge/release-2.4.0-blue)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D6)
-![tests](https://img.shields.io/badge/tests-536%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-562%20passing-brightgreen)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-> **Current release: 2.3.3 — the Linux desktop port.** 2.3.3 adds a native Linux
-> build (AppImage): tray icon and close-to-tray, single instance with "raise the
-> existing window", XDG autostart, desktop-entry CLI and browser-host registration,
-> with the vault moved to `$XDG_DATA_HOME/easypass/` under `0700`/`0600` POSIX
-> permissions. It also hardens the Windows runner's tray handling. The vault itself
-> keeps the 2.3.0 feature set: **four entry types** (login, secure note, identity,
-> SSH key) with custom fields, live TOTP codes, folder management, and instant UI
-> updates after every edit.
+> **Current release: 2.4.0 — migration and distribution.** This release adds
+> **Bitwarden / Vaultwarden import** (JSON and CSV) and a **Bitwarden-compatible
+> export**, so migrating in is not a one-way door; closes a **data-loss path where a
+> failed master-password change could lock the vault permanently** (the rotation
+> journal and the whole-vault re-encryption now commit in one SQLite transaction, so a
+> keychain failure is no longer fatal); and introduces **CI** (analyze, tests, the
+> extension self-checks and the runner syntax check, plus tagged releases) with
+> **release engineering** (`SHA256SUMS.txt` and a generated artifact manifest).
+>
+> The vault keeps the 2.3.x feature set: **four entry types** (login, secure note,
+> identity, SSH key) with custom fields, live TOTP codes, and folder management, on
+> Windows and Linux desktop.
 
 ---
 
@@ -80,6 +84,18 @@ control.
 - **Export / import** — plain JSON for review, encrypted JSON for backups (no
   plaintext inside). Format 2.0.0 carries types and custom fields; 1.x exports still
   import as logins.
+- **Migrate from Bitwarden / Vaultwarden** — read Bitwarden's **unencrypted JSON** or
+  **CSV** export directly. Folders are recreated by name (and reused on re-import,
+  instead of piling up duplicates); the four login fields (URL, username, password,
+  TOTP), notes, favourites and custom fields (including hidden and boolean types)
+  survive. **Lossy mappings are stated, not hidden**: cards import as secure notes with
+  the card data kept in custom fields, extra URLs on a login, password history, and any
+  fields Bitwarden has but EasyPass does not are all preserved rather than dropped, and
+  every skipped entry is reported with its reason — never a silent partial import.
+- **Bitwarden-compatible export** — the other direction works too: export the
+  `{encrypted:false, folders, items}` shape Bitwarden expects, so you can switch back
+  at any time. SSH keys (a type Bitwarden lacks) are exported as secure notes with a
+  note explaining the downgrade.
 
 ### Browser extension (Chrome MV3 / Edge)
 
@@ -179,9 +195,9 @@ the `windows/` sources are untouched by it.
 ### Install in three steps
 
 ```bash
-chmod +x EasyPass-2.3.3-linux-x86_64.AppImage    # 1. make it executable
-./EasyPass-2.3.3-linux-x86_64.AppImage           # 2. run it once (creates the vault)
-./EasyPass-2.3.3-linux-x86_64.AppImage --install # 3. add it to the application menu
+chmod +x EasyPass-2.4.0-linux-x86_64.AppImage    # 1. make it executable
+./EasyPass-2.4.0-linux-x86_64.AppImage           # 2. run it once (creates the vault)
+./EasyPass-2.4.0-linux-x86_64.AppImage --install # 3. add it to the application menu
 ```
 
 > **Ubuntu / AppImage without FUSE 2.** If the AppImage refuses to start because
@@ -190,8 +206,8 @@ chmod +x EasyPass-2.3.3-linux-x86_64.AppImage    # 1. make it executable
 > place, which needs no FUSE at all:
 >
 > ```bash
-> ./EasyPass-2.3.3-linux-x86_64.AppImage --appimage-extract-and-run
-> ./EasyPass-2.3.3-linux-x86_64.AppImage --appimage-extract-and-run --install
+> ./EasyPass-2.4.0-linux-x86_64.AppImage --appimage-extract-and-run
+> ./EasyPass-2.4.0-linux-x86_64.AppImage --appimage-extract-and-run --install
 > ```
 
 Build it yourself with `installer/appimage/build_appimage.sh <bundle_dir>
@@ -221,9 +237,9 @@ never move or delete), so nothing is lost if you go back to the old build.
 ### Desktop integration
 
 ```bash
-./EasyPass-2.3.3-linux-x86_64.AppImage --install         # desktop entry + icon (idempotent)
-./EasyPass-2.3.3-linux-x86_64.AppImage --desktop-status  # exit 0 = installed, 1 = points at a dead target, 2 = not installed
-./EasyPass-2.3.3-linux-x86_64.AppImage --uninstall       # removes only what it wrote, then empty directories
+./EasyPass-2.4.0-linux-x86_64.AppImage --install         # desktop entry + icon (idempotent)
+./EasyPass-2.4.0-linux-x86_64.AppImage --desktop-status  # exit 0 = installed, 1 = points at a dead target, 2 = not installed
+./EasyPass-2.4.0-linux-x86_64.AppImage --uninstall       # removes only what it wrote, then empty directories
 ```
 
 `--install` bakes the AppImage's real path (`$APPIMAGE`) into `Exec=`, so moving
@@ -238,7 +254,7 @@ old class.
 ### Browser extension on Linux
 
 1. Run the host installer once:
-   `./EasyPass-2.3.3-linux-x86_64.AppImage --install-browser-host` (writes the
+   `./EasyPass-2.4.0-linux-x86_64.AppImage --install-browser-host` (writes the
    Chrome/Chromium/Brave/Edge and Firefox native-messaging manifests;
    `--browser-host-status` reports each browser). Then load the unpacked extension.
 2. **Chrome / Chromium / Brave / Edge** — open `chrome://extensions` (or the
@@ -298,6 +314,10 @@ node browser_extension/tools/check_extension.mjs   # syntax, i18n parity, protoc
 node browser_extension/tools/smoke_content.mjs     # 19 assertions: autofill behaviour
 node browser_extension/tools/smoke_popup.mjs       # 71 assertions: popup rendering/actions
 node browser_extension/tools/smoke_popup_extra.mjs # 58 assertions: failure paths, a11y, DOM contract
+
+# store upload package (whitelist: no tools/, no native_host/)
+node browser_extension/tools/build_extension_zip.mjs --dry-run   # validate + list what would ship
+node browser_extension/tools/build_extension_zip.mjs             # → dist/easypass-extension-<version>.zip
 ```
 
 Live debugging helpers: `node browser_extension/tools/probe_daemon.mjs` (talk to a
@@ -355,6 +375,41 @@ payment cards, Steam Guard TOTP, breach checks (opt-in), a CLI, Android-first mo
 app, macOS, Firefox extension.
 
 ## Release notes
+
+### 2.4.0 — migration and distribution
+
+**Leaving is as easy as arriving.** Bitwarden / Vaultwarden users can bring their
+vault across: the app reads Bitwarden's unencrypted JSON export and its CSV export.
+Folders are recreated by name (and reused, not duplicated, if you import twice); the
+four login fields, notes, favourites and custom fields — including hidden and boolean
+types — come across intact. **Lossy mappings are stated rather than hidden**: cards
+become secure notes with the card data in custom fields, extra URLs on a login become
+custom fields, password history and any Bitwarden-only fields are appended to the
+notes, and every skipped entry is reported with its reason. There is also a
+**Bitwarden-compatible export**, so the door swings both ways.
+
+**A data-loss path is closed.** Changing the master password used to write the new
+salt and verifier to the OS keychain *after* re-encrypting the vault, and
+`storeKeyMaterial` itself writes two values (salt, then hash). A failure between them
+— reachable on Linux when the Secret Service is unavailable or locked, and on Windows
+when the process has been demoted to Low integrity — left the ciphertext on the new
+key while the stored verifier belonged to the old one. **Neither password could open
+the vault**, and entries decrypted to empty strings. The rotation now writes its
+target material into a journal in the vault database, in the *same transaction* as
+the re-encryption: if the keychain write fails, the journal carries the new verifier
+until the keychain recovers, and the next successful unlock clears it. Rotation is
+all-or-nothing, and a broken keychain can no longer lock you out.
+
+**Engineering.** The project now has CI — `flutter analyze`, `flutter test`, the
+browser-extension self-checks and the native-runner syntax check on every push, plus
+tagged releases that build the installer and the AppImage. Release artifacts and
+their `SHA256SUMS.txt` are generated by `installer/release/collect_artifacts.mjs`
+instead of being recalled by hand, and `CONTRIBUTING.md` / `SECURITY.md` /
+`CHANGELOG.md` now exist.
+
+**Upgrade note:** the database schema moves to **3** (a new `vault_meta` table for the
+rotation journal). Opening an upgraded vault with an older build will not work — back
+up `easypass.db` before upgrading, as always.
 
 ### 2.3.3 — Linux desktop support
 

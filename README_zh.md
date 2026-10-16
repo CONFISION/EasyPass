@@ -6,17 +6,19 @@
 机器上，常驻的后台服务让它随时可用，浏览器里一键自动填充。长期目标是做一个**可自部署的
 Bitwarden 替代品** —— 同样的便利，但不把数据交给别人的云。
 
-![release](https://img.shields.io/badge/release-2.3.3-blue)
+![release](https://img.shields.io/badge/release-2.4.0-blue)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D6)
-![tests](https://img.shields.io/badge/tests-536%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-562%20passing-brightgreen)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-> **当前版本 2.3.3 —— Linux 桌面端移植。** 2.3.3 新增原生 Linux 构建（AppImage）：托盘图标与
-> 关闭到托盘、单实例（再次启动会把已有窗口抬到前台）、XDG 开机自启、桌面项命令行
-> （`--install` 等）以及浏览器宿主注册；保险库迁移到 `$XDG_DATA_HOME/easypass/`，并施加
-> `0700`/`0600` 的 POSIX 权限。同一版本还加固了 Windows runner 的托盘处理。保险库本身沿用
-> 2.3.0 的功能集：**四种条目类型**（登录 / 安全笔记 / 身份信息 / SSH 密钥）+ 自定义字段、
-> 实时 TOTP 验证码、文件夹管理，以及编辑后立即刷新的界面。
+> **当前版本 2.4.0 —— 迁移与分发。** 本版新增 **Bitwarden / Vaultwarden 导入**（JSON 与 CSV）与
+> **Bitwarden 兼容导出**，让迁移不再是单程票；修掉了**改主密码可能永久锁死保险库**的数据丢失路径
+> （轮换日志与整库重加密现在同一个 SQLite 事务提交，钥匙串写失败不再致命）；补上 **CI**
+> （analyze / test / 扩展自检四连 / runner 语法检查，tag 触发发布）与**发布工程化**
+> （`SHA256SUMS.txt` + 产物清单）。
+>
+> 保险库功能沿用 2.3.x：**四种条目类型**（登录 / 安全笔记 / 身份信息 / SSH 密钥）+ 自定义字段、
+> 实时 TOTP、文件夹管理；平台支持 Windows 与 Linux 桌面端。
 
 ---
 
@@ -59,6 +61,13 @@ Bitwarden 替代品** —— 同样的便利，但不把数据交给别人的云
   URL，附带 0–100 评分，**只统计登录类型条目**。
 - **导出 / 导入** —— 明文 JSON 便于检查，加密 JSON 用于备份（内部无明文）。2.0.0 格式携带类型与
   自定义字段；1.x 的导出仍可作为登录条目导入。
+- **从 Bitwarden / Vaultwarden 迁移** —— 直接读入 Bitwarden 的**未加密 JSON** 或 **CSV** 导出：
+  文件夹按名字重建（重复导入会复用，不会建一堆同名文件夹），登录的 URL / 用户名 / 密码 / TOTP
+  四要素、备注、收藏、自定义字段（含隐藏与勾选类型）都保留。**降级映射会明确告知**：银行卡
+  导入为安全笔记（卡面信息进自定义字段），登录的额外 URL、密码历史、以及 Bitwarden 有而
+  EasyPass 没有的字段都会保留下来；跳过的条目逐条给出原因，绝不做"静默少导入"。
+- **Bitwarden 兼容导出** —— 反过来也能走：导出成 Bitwarden 的 `{encrypted:false, folders, items}`
+  形状，随时可以切回去。SSH 密钥（Bitwarden 没有该类型）导出为安全笔记并在备注里注明。
 
 ### 浏览器扩展（Chrome MV3 / Edge）
 
@@ -145,9 +154,9 @@ Windows 安装包与 `windows/` 源码不受影响。
 ### 三步安装
 
 ```bash
-chmod +x EasyPass-2.3.3-linux-x86_64.AppImage    # 1. 赋予可执行权限
-./EasyPass-2.3.3-linux-x86_64.AppImage           # 2. 先运行一次（创建保险库）
-./EasyPass-2.3.3-linux-x86_64.AppImage --install # 3. 加入应用菜单
+chmod +x EasyPass-2.4.0-linux-x86_64.AppImage    # 1. 赋予可执行权限
+./EasyPass-2.4.0-linux-x86_64.AppImage           # 2. 先运行一次（创建保险库）
+./EasyPass-2.4.0-linux-x86_64.AppImage --install # 3. 加入应用菜单
 ```
 
 > **Ubuntu / 没有 FUSE 2 时的兜底。** 若 AppImage 因缺 `libfuse2` 起不来：要么自行安装
@@ -155,8 +164,8 @@ chmod +x EasyPass-2.3.3-linux-x86_64.AppImage    # 1. 赋予可执行权限
 > 完全不需要 FUSE：
 >
 > ```bash
-> ./EasyPass-2.3.3-linux-x86_64.AppImage --appimage-extract-and-run
-> ./EasyPass-2.3.3-linux-x86_64.AppImage --appimage-extract-and-run --install
+> ./EasyPass-2.4.0-linux-x86_64.AppImage --appimage-extract-and-run
+> ./EasyPass-2.4.0-linux-x86_64.AppImage --appimage-extract-and-run --install
 > ```
 
 自行构建：先 `flutter build linux --release`，再执行
@@ -184,9 +193,9 @@ chmod +x EasyPass-2.3.3-linux-x86_64.AppImage    # 1. 赋予可执行权限
 ### 桌面集成
 
 ```bash
-./EasyPass-2.3.3-linux-x86_64.AppImage --install         # 桌面项 + 图标（幂等）
-./EasyPass-2.3.3-linux-x86_64.AppImage --desktop-status  # 退出码 0 = 已安装，1 = 指向失效目标，2 = 未安装
-./EasyPass-2.3.3-linux-x86_64.AppImage --uninstall       # 只删自己写过的东西，再清理空目录
+./EasyPass-2.4.0-linux-x86_64.AppImage --install         # 桌面项 + 图标（幂等）
+./EasyPass-2.4.0-linux-x86_64.AppImage --desktop-status  # 退出码 0 = 已安装，1 = 指向失效目标，2 = 未安装
+./EasyPass-2.4.0-linux-x86_64.AppImage --uninstall       # 只删自己写过的东西，再清理空目录
 ```
 
 `--install` 会把 AppImage 的真实路径（`$APPIMAGE`）写进 `Exec=`，因此移动 AppImage 之后需要重新安装。
@@ -197,7 +206,7 @@ GTK 应用 id 是 `com.easypass.app`（2.3.3 起；更早的构建用的是 Flut
 
 ### Linux 上的浏览器扩展
 
-1. 先跑一次宿主安装：`./EasyPass-2.3.3-linux-x86_64.AppImage --install-browser-host`
+1. 先跑一次宿主安装：`./EasyPass-2.4.0-linux-x86_64.AppImage --install-browser-host`
    （会写 Chrome/Chromium/Brave/Edge 与 Firefox 的 native messaging 清单；`--browser-host-status`
    可查看各浏览器的状态）。然后加载未打包扩展。
 2. **Chrome / Chromium / Brave / Edge** —— 打开 `chrome://extensions`（或对应浏览器的等价页面），
@@ -247,6 +256,10 @@ node browser_extension/tools/check_extension.mjs   # 语法、i18n 键对齐、�
 node browser_extension/tools/smoke_content.mjs     # 19 项：自动填充行为
 node browser_extension/tools/smoke_popup.mjs       # 71 项：弹窗渲染与动作
 node browser_extension/tools/smoke_popup_extra.mjs # 58 项：失败路径、可访问性、DOM 契约
+
+# 商店上传包（白名单打包：不含 tools/ 与 native_host/）
+node browser_extension/tools/build_extension_zip.mjs --dry-run   # 只校验并列出进包文件
+node browser_extension/tools/build_extension_zip.mjs             # → dist/easypass-extension-<version>.zip
 ```
 
 真机排障：`node browser_extension/tools/probe_daemon.mjs`（直连运行中的服务）与
@@ -293,6 +306,29 @@ GitHub Actions CI、校验值与代码签名。
 （可选）泄露检测、命令行工具、以 Android 为先的移动端、macOS、Firefox 扩展。
 
 ## 发布说明
+
+### 2.4.0 —— 迁移与分发
+
+**进得来，也出得去。** Bitwarden / Vaultwarden 用户可以把保险库整个搬过来：直接读 Bitwarden 的
+未加密 JSON 导出与 CSV 导出。文件夹按名字重建（重复导入会复用，不会堆一堆同名文件夹）；登录的
+四个字段、备注、收藏、自定义字段（含隐藏与勾选类型）都原样保留。**有损映射会明说而不是藏起来**：
+银行卡变成安全笔记（卡面信息进自定义字段），登录的额外网址变成自定义字段，密码历史与 Bitwarden
+独有的字段追加到备注里，被跳过的条目**逐条给出原因**。另有 **Bitwarden 兼容导出**，随时可以切回去。
+
+**一条丢数据的路径被封掉了。** 旧实现改主密码时，是先整库重加密、再把新的 salt 与校验哈希写进
+系统钥匙串；而 `storeKeyMaterial` 内部还要写两次（先 salt、后哈希）。中途失败就会留下"密文是新钥匙的、
+校验材料还是旧的"这种状态 —— Linux 上 Secret Service 不可用/上锁、Windows 上进程被降为低完整性时
+都能触发。结果是**新旧主密码都开不了库**，条目解出来全是空串。现在轮换把目标校验材料写进保险库数据库里的
+**轮换日志**，与整库重加密放在**同一个事务**：钥匙串写失败时日志继续承载新校验材料，钥匙串恢复后
+下次解锁自动清掉。轮换是全有或全无，钥匙串坏掉也不会再把人锁在外面。
+
+**工程化。** 项目现在有 CI —— 每次 push 跑 `flutter analyze`、`flutter test`、扩展自检与原生 runner
+语法检查；打 tag 会构建安装包与 AppImage 并发布。发布产物与 `SHA256SUMS.txt` 由
+`installer/release/collect_artifacts.mjs` 生成，不再靠人回忆；新增 `CONTRIBUTING.md` / `SECURITY.md` /
+`CHANGELOG.md`。
+
+**升级须知：** 数据库 schema 升到 **3**（新增 `vault_meta` 表承载轮换日志）。用旧版本打开升级后的库
+会失败 —— 升级前请照例备份 `easypass.db`。
 
 ### 2.3.3 —— 新增 Linux 桌面支持
 

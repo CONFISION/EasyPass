@@ -14,9 +14,12 @@ guarded delete), type filtering and `type:`/`folder:`/`url:` search prefixes.
 runner, single instance with a unix-socket wake-up, XDG autostart, the desktop-entry
 CLI (`--install` / `--uninstall` / `--desktop-status`) and browser-host registration
 (`--install-browser-host` / `--uninstall-browser-host` / `--browser-host-status`),
-with the vault moved to `$XDG_DATA_HOME/easypass/`. **Supported desktops are Windows
-and Linux;** Phase 3 (cloud sync, sharing, emergency access, mobile/macOS) is still
-planned.
+with the vault moved to `$XDG_DATA_HOME/easypass/`. **2.4.0** adds
+**Bitwarden / Vaultwarden import** (JSON + CSV) and a **Bitwarden-compatible export**,
+makes **master-password rotation atomic** (a rotation journal in the vault database,
+schema **3**), and adds **CI** plus scripted release engineering. **Supported desktops
+are Windows and Linux;** Phase 3 (cloud sync, sharing, emergency access, mobile/macOS)
+is still planned.
 
 > **Local-only docs (NOT in a fresh clone — `.gitignore` excludes them):** the
 > roadmap `Plan.md`, the working agreement/pitfalls `HANDOFF.md`, the 2.3.x
@@ -40,7 +43,7 @@ flutter pub get          # install deps
 dart run build_runner build --delete-conflicting-outputs   # regenerate database.g.dart (drift)
 flutter gen-l10n        # regenerate app_localizations.dart after editing lib/l10n/*.arb
 flutter analyze         # lint (flutter_lints)
-flutter test            # 545 cases on Windows (536 pass / 9 Linux-only skipped); ~568 declarations in total
+flutter test            # 562 cases on Windows (553 pass / 9 Linux-only skipped)
 flutter run -d windows  # run desktop app
 flutter build windows   # release build → build\windows\x64\runner\Release\easypass.exe
 flutter build linux --release   # Linux bundle → build/linux/x64/release/bundle/
@@ -114,7 +117,7 @@ lib/app.dart                   MaterialApp.router; go_router routes + auth redir
 │                                       permission tightening (0700/0600), legacy-DB migration
 ├── data/
 │   ├── database/
-│   │   ├── tables.drift                Schema: folders, password_entries (schemaVersion 2)
+│   │   ├── tables.drift                Schema: folders, password_entries, vault_meta (schemaVersion 3)
 │   │   ├── database.dart               AppDatabase: DAO queries + streams + migrations
 │   │   └── database.g.dart             GENERATED — do not edit
 │   ├── models/                         Entry types + payload models (2.3.0)
@@ -124,7 +127,9 @@ lib/app.dart                   MaterialApp.router; go_router routes + auth redir
 │   │   └── vault_item_mapper.dart      VaultItem ↔ DB row: the ONLY place that encrypts/decrypts entry fields
 │   ├── repositories/vault_repository.dart  Item API (watchItems/saveItem/searchItems/reencryptAll) + legacy row API
 │   ├── state/session_key.dart          encryptionKeyProvider (data layer so the repo can read the key)
-│   └── services/export_import_service.dart  JSON + encrypted export/import (export_import_provider.dart)
+│   └── services/                       export_import_service.dart (JSON + encrypted export/import),
+│                                       bitwarden_importer.dart (Bitwarden JSON/CSV import),
+│                                       master_password_rotation.dart (atomic rotation journal)
 └── features/                           Feature-first UI layer
     ├── auth/     auth_provider.dart (AuthState/AuthNotifier), lock/set-master-password screens
     ├── vault/    vault_provider.dart (stream/future providers), vault CRUD screens,
@@ -282,12 +287,25 @@ Rule of thumb: 功能变更 → `y`，纯优化/修复 → `z`，架构/安全�
 
 ## CI/CD
 
-No CI configuration exists (no `.github/` or equivalent). Tests are not run by
-any pipeline. The manual gates, all run by the agent before handing a build to the
-user: `flutter analyze --no-pub`, `flutter test --no-pub`,
+CI exists as of v2.4.0. `.github/workflows/ci.yml` runs on every push and pull
+request; `.github/workflows/release.yml` runs on tags matching `v*` to build the
+installer and the AppImage and publish them with `SHA256SUMS.txt`. Triggers and the
+Flutter version pinning decision are documented in `.github/workflows/README.md`.
+
+The same gates are still run by hand by the agent before handing a build to the user
+(a green CI run does not cover a local change that has not been pushed):
+`flutter analyze --no-pub`, `flutter test --no-pub`,
 `node browser_extension/tools/check_extension.mjs` (+ the three jsdom smoke
-scripts), `cmd /c windows\runner\check_syntax.bat` and
+scripts), `node browser_extension/tools/build_extension_zip.mjs --dry-run` when the
+extension package is due, `cmd /c windows\runner\check_syntax.bat` and
 `cmd /c windows\runner\check_integrity.bat`.
+
+Release artifacts and their checksums are **generated, not recalled by hand**:
+`node installer/release/collect_artifacts.mjs` writes `SHA256SUMS.txt` +
+`release-manifest.json` and copies the artifacts into `dist/release/<version>/`
+(so the whole directory can be uploaded); `node installer/release/generate_release_notes.mjs`
+fills the artifact table in `docs/release-<version>.md` while preserving hand-written
+prose. The version comes from `pubspec.yaml` only. Runbook: `installer/release/README.md`.
 
 ## Tips for AI Agents
 
@@ -297,12 +315,21 @@ scripts), `cmd /c windows\runner\check_syntax.bat` and
   and **writes nothing** (while `--delete-conflicting-outputs` has already deleted the old
   file, leaving the repo uncompilable). If that happens, bump `drift`/`drift_dev`/
   `build_runner` together (see `pubspec.yaml`) before touching the schema.
-- **Schema changes need a migration, not just a column.** `schemaVersion` is 2 and
-  `AppDatabase.migration.onUpgrade` implements 1→2 for real; every new column must be added
-  there too, or existing installs fail to open with "no such column". `test/migration_test.dart`
-  builds a v1 database by hand and asserts the upgrade — extend it when you add a column.
+- **Schema changes need a migration, not just a column.** `schemaVersion` is **3** and
+  `AppDatabase.migration.onUpgrade` implements 1→2 and 2→3 for real; every new column/table
+  must be added there too, or existing installs fail to open with "no such column" / "no such
+  table". `test/migration_test.dart` hand-builds v1 and v2 databases and asserts both upgrade
+  paths — extend it whenever you add a column or a table.
   Also: drift does **not** enable SQLite foreign keys, so `ON DELETE SET NULL` never fires —
   `deleteFolderAndUnassign()` clears `folder_id` explicitly.
+- **Master-password rotation is atomic via a journal, and that is load-bearing.** The target
+  salt + verifier live in `vault_meta` and are written in the **same transaction** as the
+  whole-vault re-encryption (`MasterPasswordRotation`). The invariant is "no journal ⇒ the
+  vault is on the old key; journal present ⇒ the vault is on the new key", and
+  `unlock()` must keep routing through `verifyCredentials` / `recoverPendingRotation`. Do not
+  go back to "re-encrypt, then write the key material": that ordering is what could leave
+  neither password able to open the vault. Regression net:
+  `test/master_password_rotation_atomicity_test.dart`.
 - **SQLite file location gotcha:** the DB opens through `app_paths.dart`
   (exe dir on Windows, `$XDG_DATA_HOME/easypass/` on Linux). Widget/unit tests that
   construct `AppDatabase()` will hit the real file — use `AppDatabase.forTesting()`
@@ -331,9 +358,11 @@ scripts), `cmd /c windows\runner\check_syntax.bat` and
   desktop session that lacks a tray. The CLI surface for scripted checks is
   `--install`, `--uninstall`, `--desktop-status`, `--install-browser-host`,
   `--uninstall-browser-host`, `--browser-host-status`.
-- **Plan.md** (local-only) holds the roadmap: v2.4 = extension store listing + Bitwarden import + CI +
-  release engineering; v3.0 = key-hierarchy rework + self-hosted sync. Sync is **not** implemented, and the
-  health report is (login entries only).
+- **Plan.md** (local-only) holds the roadmap: v2.4 = master-password rotation atomicity (the only
+  data-losing item) + extension store listing + Bitwarden import + CI + release engineering;
+  v3.0 = key-hierarchy rework + self-hosted sync. Sync is **not** implemented, and the
+  health report is (login entries only). 2.3.3 has shipped and passed the Linux hardware
+  acceptance run.
 - **Protocol versioning (2.2.1+):** the daemon stamps `protocolVersion` + `pid` into
   `daemon.json` and returns `protocolVersion` from `getStatus`.
   `AppConstants.bridgeProtocolVersion` (`lib/core/constants/app_constants.dart`) and
@@ -346,12 +375,34 @@ scripts), `cmd /c windows\runner\check_syntax.bat` and
   `node browser_extension/tools/probe_daemon.mjs` (talks to an already-running daemon)
   tell you whether the bridge, the daemon or the extension is at fault. The jsdom smoke
   scripts plus `check_extension.mjs` are the regression net for extension changes.
+- **Store upload package:** `node browser_extension/tools/build_extension_zip.mjs`
+  (`--dry-run` validates and lists what would ship; without it writes
+  `dist/easypass-extension-<version>.zip`). It packs a **whitelist** (manifest,
+  background/content scripts, `popup/`, `icons/`, `_locales/` — never `tools/` or
+  `native_host/`), is dependency-free and reproducible, and fails the build unless the
+  extension ID derived from `manifest.key` matches the Dart constant, the `.iss` and
+  `native_host/com.easypass.app.json`.
 
 ## Pitfalls we already paid for
 
 Each of these cost real debugging time — do not re-introduce them. The Chinese long-form
 version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
 
+- **The extension's permission set is deliberately minimal: `clipboardWrite` +
+  `nativeMessaging` + host `<all_urls>`.** `storage`, `scripting` and `activeTab` were
+  removed before store submission because no code path uses them (there is no
+  `chrome.storage` call anywhere — the unlocked session lives in the desktop app — and the
+  declarative content script needs neither `activeTab` nor `scripting`). Re-adding an unused
+  permission is what makes store reviewers ask questions, and `build_extension_zip.mjs`
+  warns about it; if a change really needs one, add it *and* update the permission
+  justifications in `docs/store-listing.md`.
+- **The extension ID is a four-way contract.** `manifest.json`'s `key` fixes the ID
+  (`hlkbbdlgaocmnjlgpafkimobnkfniike`), and it must match `BrowserHostInstaller.extensionId`,
+  `installer/easypass_setup.iss` and `native_host/com.easypass.app.json` — that ID is the
+  native-messaging allowlist, so changing it silently disconnects every existing install.
+  The packaging script enforces this; after publishing to a store, verify the ID the store
+  actually assigned (Edge especially) and extend the allowlist via
+  `EASYPASS_BROWSER_HOST_EXTENSION_ID` instead of editing the old one away.
 - **A Low mandatory integrity label on the workspace breaks the app in ways that look like
   code bugs.** Windows gives a process the integrity level of its image's mandatory label;
   a process started from a Low-labelled exe runs at **Low integrity**, and a Low process
