@@ -58,11 +58,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
   commit together, a keychain failure leaves the new password usable via the
   journal, and the journal is retried and cleared on the next successful unlock.
   See `test/master_password_rotation_atomicity_test.dart`.
+- **The old master password kept working after a change** (found on the first real
+  hardware run, after the fix above had already landed). "Verify the master password"
+  had **three** separate implementations (`AuthNotifier.unlock`,
+  `NativeMessagingService._unlock` for the browser extension, and
+  `EntryDetailScreen._verify` for the reveal-private-key prompt), and only the first
+  knew about the rotation journal. Whenever a rotation did not get its verifier into
+  the OS keychain, the other two kept accepting the old password — its hash still
+  matched the stale keychain copy — and rejected the new one. All three now go
+  through a single `MasterPasswordVerifier`, whose rule is: **a rotation journal
+  exists ⇒ only the journal's target password is valid; the keychain copy is stale.**
+- **Changing the master password left the vault unlocked**, returning straight to the
+  vault instead of to the lock screen. That made a broken rotation undetectable —
+  nothing forced the user to prove the new password worked. The app now clears the
+  session key, locks the browser-bridge session too, and returns to `/lock`.
+- A failed keychain write during rotation now says so on the lock screen instead of
+  leaving the user at an unexplained prompt (the new password is still valid; the
+  verifier is served from the in-vault journal).
+- `encryptionProbeWorks` only inspected the first row, so one corrupt row made a
+  working key look wrong — which broke the deliberate "a single undecryptable entry
+  must not affect the whole report" property.
 
 ### Changed
 
-- Unlock now runs through `MasterPasswordRotation.verifyCredentials`, which consults
-  the rotation journal as well as secure storage.
+- Unlock consults the rotation journal as well as secure storage.
 - The browser extension no longer requests the `storage`, `scripting` or `activeTab`
   permissions — no code path used them.
 

@@ -90,8 +90,28 @@ Being precise here is more useful than a reassuring sentence, so:
   failure, not as an authentication error. This is a known weakness of the current
   format and is on the roadmap for the key-hierarchy rework; it is why the rotation
   path refuses to proceed when any row fails to decrypt.
+- **Master-password rotation keeps a journal inside the vault database.** Changing the
+  master password must update two stores that have no common transaction: the entry
+  ciphertext (SQLite) and the salt + verifier (`flutter_secure_storage`). To make that
+  all-or-nothing, the *target* salt and verifier are written into a `vault_meta` row in
+  the **same transaction** as the re-encryption. The deliberate consequence: while a
+  rotation is incomplete — i.e. when the OS keychain cannot be written (Linux Secret
+  Service unavailable or locked) — that verifier lives in `easypass.db` rather than in
+  the keychain, and it is served from there until the keychain writes succeed. It is
+  still `SHA-256(PBKDF2(masterPassword, salt, 100_000))`, so guessing the password
+  offline costs the full PBKDF2 work per attempt, but it is not protected by the OS
+  keychain during that window. Removing this trade-off requires the key-hierarchy
+  rework (v3.0). The journal is deleted as soon as the keychain write succeeds, and it
+  never contains the password, the derived key, or any entry plaintext.
+- **Password verification has a single implementation** (`MasterPasswordVerifier`) and
+  its rule is "a rotation journal exists ⇒ only the journal's target password is
+  valid". Any code path that compared stored salt/hash on its own would disagree with
+  the vault's actual key during that window — that was a real bug in 2.4.0, where the
+  browser bridge kept accepting the old master password.
 - **The derived key lives in memory** for the session (a Riverpod `StateProvider`) and
-  is cleared on lock. Auto-lock defaults to 5 minutes.
+  is cleared on lock. Auto-lock defaults to 5 minutes. Changing the master password
+  ends the session (the vault returns to the lock screen), so no session outlives the
+  key it was opened with.
 - **The browser bridge** listens on `127.0.0.1` only, and the daemon writes a token
   plus a protocol version into `daemon.json`. The extension's native-messaging
   allowlist is pinned to a single extension ID.

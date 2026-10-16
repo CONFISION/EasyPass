@@ -31,7 +31,9 @@ Run these before opening a pull request. All of them are read-only and safe:
 flutter analyze --no-pub
 flutter test --no-pub
 
-# browser extension (jsdom must be installed — see browser_extension/tools/)
+# browser extension (jsdom comes from `npm ci` via the committed lockfile)
+npm ci && npm run test:extension   # = check_extension + the three jsdom smokes
+# or individually:
 node browser_extension/tools/check_extension.mjs
 node browser_extension/tools/smoke_content.mjs
 node browser_extension/tools/smoke_popup.mjs
@@ -43,11 +45,23 @@ cmd /c windows\runner\check_syntax.bat
 
 CI runs the same set on every push, so a green local run means a green PR.
 
+**Reading the test count.** A Windows run reports **570 passing / 9 skipped**. The tree
+declares more cases than that (~602), and the difference is deliberate: several files
+guard on the platform and register nothing on Windows (`browser_host_installer_test.dart`
+is entirely Linux-only; others skip individual cases). So a Windows run reports *fewer
+cases*, not failures — do not "fix" the numbers by forcing platform-specific tests to
+run everywhere. `AGENTS.md` lists the known Linux-only files.
+
 If something behaves strangely only when launched from `build\` — no tray icon,
 settings that do not stick — run `cmd /c windows\runner\check_integrity.bat` before
 suspecting the code. A Low mandatory integrity label on the workspace silently
 demotes the process; the script detects it and `/fix` repairs it. Details in
 `AGENTS.md`.
+
+**Building on Windows: stop a running EasyPass first.** `flutter build windows` fails
+with `MSB3073` when an instance launched from `build\windows\x64\runner\Release` is
+still alive, because a POST_BUILD step cannot overwrite the MSVC runtime DLLs it has
+mapped. One-line fix in `AGENTS.md`.
 
 ## Two rules that are easy to get wrong
 

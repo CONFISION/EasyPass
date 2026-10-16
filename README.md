@@ -10,7 +10,7 @@ control.
 
 ![release](https://img.shields.io/badge/release-2.4.0-blue)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D6)
-![tests](https://img.shields.io/badge/tests-562%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-570%20passing-brightgreen)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 > **Current release: 2.4.0 — migration and distribution.** This release adds
@@ -399,6 +399,17 @@ target material into a journal in the vault database, in the *same transaction* 
 the re-encryption: if the keychain write fails, the journal carries the new verifier
 until the keychain recovers, and the next successful unlock clears it. Rotation is
 all-or-nothing, and a broken keychain can no longer lock you out.
+
+**Two follow-on bugs, found on the first real-hardware run and fixed in the same
+release.** "Verify the master password" had grown **three** separate implementations
+(the app's unlock, the browser bridge's unlock, and the reveal-private-key prompt) and
+only the app's own knew about the rotation journal — so after a rotation whose
+keychain write had failed, the bridge and the prompt still **accepted the old password
+and rejected the new one**. All three now share one verifier, whose rule is: a
+rotation journal exists ⇒ only the journal's target password is valid. Separately,
+changing the master password used to leave the vault **unlocked** and return straight
+to the vault; it now returns to the lock screen, so you always prove the new password
+works. (`vault` → `lock` → unlock with the new one.)
 
 **Engineering.** The project now has CI — `flutter analyze`, `flutter test`, the
 browser-extension self-checks and the native-runner syntax check on every push, plus

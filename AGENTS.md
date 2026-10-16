@@ -43,7 +43,9 @@ flutter pub get          # install deps
 dart run build_runner build --delete-conflicting-outputs   # regenerate database.g.dart (drift)
 flutter gen-l10n        # regenerate app_localizations.dart after editing lib/l10n/*.arb
 flutter analyze         # lint (flutter_lints)
-flutter test            # 570 cases on Windows (561 pass / 9 Linux-only skipped)
+flutter test            # 570 passing / 9 skipped on Windows (the tree declares ~602
+                        # cases; Linux-only files register none here, so a Windows run
+                        # reports FEWER CASES, not failures — see CONTRIBUTING.md)
 flutter run -d windows  # run desktop app
 flutter build windows   # release build → build\windows\x64\runner\Release\easypass.exe
 flutter build linux --release   # Linux bundle → build/linux/x64/release/bundle/
@@ -325,11 +327,11 @@ prose. The version comes from `pubspec.yaml` only. Runbook: `installer/release/R
 - **Master-password rotation is atomic via a journal, and that is load-bearing.** The target
   salt + verifier live in `vault_meta` and are written in the **same transaction** as the
   whole-vault re-encryption (`MasterPasswordRotation`). The invariant is "no journal ⇒ the
-  vault is on the old key; journal present ⇒ the vault is on the new key", and
-  `unlock()` must keep routing through `verifyCredentials` / `recoverPendingRotation`. Do not
-  go back to "re-encrypt, then write the key material": that ordering is what could leave
-  neither password able to open the vault. Regression net:
-  `test/master_password_rotation_atomicity_test.dart`.
+  vault is on the old key; journal present ⇒ the vault is on the new key", so the journal's
+  existence is the authority on which password is valid. Do not go back to "re-encrypt, then
+  write the key material": that ordering is what could leave neither password able to open
+  the vault. Regression net: `test/master_password_rotation_atomicity_test.dart` and
+  `test/change_password_then_lock_test.dart`.
 - **Password verification has exactly ONE implementation: `MasterPasswordVerifier`.** It used
   to exist three times (`AuthNotifier.unlock`, `NativeMessagingService._unlock`,
   `EntryDetailScreen._verify`), and only one copy knew about the rotation journal — which is

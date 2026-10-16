@@ -8,7 +8,7 @@ Bitwarden 替代品** —— 同样的便利，但不把数据交给别人的云
 
 ![release](https://img.shields.io/badge/release-2.4.0-blue)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D6)
-![tests](https://img.shields.io/badge/tests-562%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-570%20passing-brightgreen)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 > **当前版本 2.4.0 —— 迁移与分发。** 本版新增 **Bitwarden / Vaultwarden 导入**（JSON 与 CSV）与
@@ -321,6 +321,12 @@ GitHub Actions CI、校验值与代码签名。
 都能触发。结果是**新旧主密码都开不了库**，条目解出来全是空串。现在轮换把目标校验材料写进保险库数据库里的
 **轮换日志**，与整库重加密放在**同一个事务**：钥匙串写失败时日志继续承载新校验材料，钥匙串恢复后
 下次解锁自动清掉。轮换是全有或全无，钥匙串坏掉也不会再把人锁在外面。
+
+**同一版里还修掉了两个真机跑出来的后续问题。** 「校验主密码」曾经有**三份**实现（App 解锁、
+浏览器桥接解锁、查看私钥前的二次确认），而只有 App 那份知道轮换日志 —— 于是轮换的钥匙串写入失败后，
+桥接与二次确认会**继续接受旧密码、拒绝新密码**。现在三处共用同一个校验器，判据只有一条：
+**有轮换日志 ⇒ 只有日志里的目标密码有效**。另外，改完主密码原本会**留在解锁态**直接回主界面；
+现在会回到锁屏，强制你用新密码再进一次，这样"改完其实没生效"这类问题无法再被掩盖。
 
 **工程化。** 项目现在有 CI —— 每次 push 跑 `flutter analyze`、`flutter test`、扩展自检与原生 runner
 语法检查；打 tag 会构建安装包与 AppImage 并发布。发布产物与 `SHA256SUMS.txt` 由
