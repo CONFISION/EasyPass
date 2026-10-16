@@ -8,8 +8,10 @@ import 'package:uuid/uuid.dart';
 import '../../core/crypto/crypto_service.dart';
 import '../database/database.dart';
 import '../models/entry_fields.dart';
+import '../models/entry_type.dart';
 import '../models/vault_item.dart';
 import '../repositories/vault_repository.dart';
+import 'bitwarden_importer.dart';
 
 /// 导入文件无法解析 / 解不开时抛出。
 ///
@@ -147,10 +149,172 @@ class ExportImportService {
     return const JsonEncoder.withIndent('  ').convert(data);
   }
 
+  /// 导出为 **Bitwarden 兼容的 JSON**（未加密），让用户可以随时切回去。
+  ///
+  /// 这是对用户的承诺：迁移成本不该是单向的。形状对齐 Bitwarden 的
+  /// `{encrypted:false, folders:[], items:[]}`，`type` 用官方编号
+  /// （1=登录 2=安全笔记 3=银行卡 4=身份）。
+  ///
+  /// **有损映射**（EasyPass 有、Bitwarden 没有对应的）：
+  /// - SSH 密钥 → 降级为安全笔记，公钥/私钥/指纹/口令进自定义字段；
+  /// - 身份里 Bitwarden 没有的字段 → 自定义字段；
+  /// - 自定义字段的 `boolean` → `type: 2`（Bitwarden 的 boolean）；
+  /// - 一个登录只有一条 URI → Bitwarden 的 `uris[0]`。
+  ///
+  /// 往返保真的部分：标题、备注、收藏、文件夹、登录四要素（URL/用户名/密码/
+  /// TOTP）、自定义字段的标签与值。**密码与私钥是明文** —— 与
+  /// [exportPlainJson] 同级，只写用户自己选定的文件。
+  Future<String> exportBitwardenJson() async {
+    // 未解锁时直接抛错，别导出一个空壳。
+    _getEncryptionKey();
+
+    final items = await _repository.getItems();
+    final folders = await _repository.getFolders();
+
+    final payload = <String, dynamic>{
+      'encrypted': false,
+      'folders': [
+        for (final folder in folders) {'id': folder.id, 'name': folder.name},
+      ],
+      'items': [
+        for (final item in items) _toBitwardenItem(item),
+      ],
+    };
+
+    return const JsonEncoder.withIndent('  ').convert(payload);
+  }
+
+  /// 单个 [VaultItem] → Bitwarden 条目。
+  ///
+  /// 自定义字段统一放在 `fields` 上（Bitwarden 的登录/笔记/身份都支持它）。
+  Map<String, dynamic> _toBitwardenItem(VaultItem item) {
+    final fields = <Map<String, dynamic>>[
+      for (final field in item.effectiveCustomFields)
+        {
+          'name': field.label,
+          'value': field.value,
+          // 0=text 1=hidden 2=boolean
+          'type': switch (field.type) {
+            CustomFieldType.hidden => 1,
+            CustomFieldType.boolean => 2,
+            CustomFieldType.text => 0,
+          },
+        },
+    ];
+
+    final common = <String, dynamic>{
+      'id': item.id,
+      'organizationId': null,
+      'folderId': item.folderId,
+      'type': _bitwardenType(item.type),
+      'name': item.name,
+      'notes': item.notes,
+      'favorite': item.isFavorite,
+      'reprompt': 0,
+      'fields': fields.isEmpty ? null : fields,
+    };
+
+    switch (item.type) {
+      case EntryType.login:
+        final login = item.loginOrEmpty;
+        common['login'] = {
+          'uris': login.url.trim().isEmpty
+              ? null
+              : [
+                  {'match': null, 'uri': login.url},
+                ],
+          'username': login.username,
+          'password': login.password,
+          'totp': login.totpSecret.isEmpty ? null : login.totpSecret,
+        };
+      case EntryType.secureNote:
+        common['secureNote'] = {'type': 0};
+      case EntryType.identity:
+        final id = item.identityOrEmpty;
+        common['identity'] = {
+          'title': _nullIfEmpty(id.title),
+          'firstName': _nullIfEmpty(id.firstName),
+          'middleName': _nullIfEmpty(id.middleName),
+          'lastName': _nullIfEmpty(id.lastName),
+          'username': _nullIfEmpty(id.username),
+          'company': _nullIfEmpty(id.company),
+          'email': _nullIfEmpty(id.email),
+          'phone': _nullIfEmpty(id.phone),
+          'ssn': _nullIfEmpty(id.idNumber),
+          'passportNumber': _nullIfEmpty(id.passportNumber),
+          'licenseNumber': _nullIfEmpty(id.licenseNumber),
+          'address1': _nullIfEmpty(id.address1),
+          'address2': _nullIfEmpty(id.address2),
+          'city': _nullIfEmpty(id.city),
+          'state': _nullIfEmpty(id.state),
+          'postalCode': _nullIfEmpty(id.postalCode),
+          'country': _nullIfEmpty(id.country),
+          'birthDate': _nullIfEmpty(id.birthday),
+          'sex': _nullIfEmpty(id.sex),
+        };
+      case EntryType.sshKey:
+        // Bitwarden 没有 SSH 类型：降级为安全笔记，密钥材料进自定义字段，
+        // 并在备注里写明来源，避免用户以为数据丢了。
+        final ssh = item.sshKeyOrEmpty;
+        common['type'] = 2; // secureNote
+        common['secureNote'] = {'type': 0};
+        common['notes'] = _appendNotice(
+          item.notes,
+          '【此条目由 EasyPass 的 SSH 密钥导出】\n'
+          'Bitwarden 没有 SSH 密钥类型，密钥材料已放入自定义字段。',
+        );
+        final sshFields = <Map<String, dynamic>>[
+          if (ssh.publicKey.trim().isNotEmpty)
+            {'name': 'SSH 公钥', 'value': ssh.publicKey, 'type': 0},
+          if (ssh.privateKey.trim().isNotEmpty)
+            {'name': 'SSH 私钥', 'value': ssh.privateKey, 'type': 1},
+          if (ssh.passphrase.trim().isNotEmpty)
+            {'name': 'SSH 私钥口令', 'value': ssh.passphrase, 'type': 1},
+          if (ssh.fingerprint.trim().isNotEmpty)
+            {'name': 'SSH 指纹', 'value': ssh.fingerprint, 'type': 0},
+          if (ssh.keyType.trim().isNotEmpty)
+            {'name': 'SSH 类型', 'value': ssh.keyType, 'type': 0},
+          if (ssh.comment.trim().isNotEmpty)
+            {'name': 'SSH 注释', 'value': ssh.comment, 'type': 0},
+        ];
+        common['fields'] = [...sshFields, ...fields].isEmpty
+            ? null
+            : [...sshFields, ...fields];
+    }
+
+    return common;
+  }
+
+  /// EasyPass 类型 → Bitwarden 的 type 编号。
+  ///
+  /// SSH 在调用处被特判成 2（安全笔记），这里保持一份显式映射以便阅读。
+  int _bitwardenType(EntryType type) {
+    switch (type) {
+      case EntryType.login:
+        return 1;
+      case EntryType.secureNote:
+        return 2;
+      case EntryType.sshKey:
+        return 2;
+      case EntryType.identity:
+        return 4;
+    }
+  }
+
+  static String? _nullIfEmpty(String value) =>
+      value.trim().isEmpty ? null : value;
+
+  static String _appendNotice(String notes, String notice) =>
+      notes.trim().isEmpty ? notice : '$notes\n\n$notice';
+
   /// 导入明文导出或加密备份，返回 `{'folders': n, 'entries': m}`。
   ///
   /// 输入不合法（不是 JSON / 不是对象 / entries 不是数组 / 备份解不开）
   /// 一律抛 [ExportImportException]，且**在写库之前**抛出。
+  ///
+  /// Bitwarden 的导出走 [importBitwardenJson] / [importBitwardenCsv]；这里刻意
+  /// 不自动嗅探 Bitwarden JSON —— 两条路径的**冲突处理语义不同**（EasyPass 导入
+  /// 沿用原 id = 覆盖，Bitwarden 导入一律新建 id = 追加），悄悄选错会吃掉数据。
   Future<Map<String, int>> importFromJson(String jsonContent) async {
     final data = _decodeDocument(jsonContent);
 
@@ -159,6 +323,21 @@ class ExportImportService {
     }
 
     return _importPlainJson(data);
+  }
+
+  /// 导入 Bitwarden / Vaultwarden 的**未加密** JSON 导出。
+  ///
+  /// 返回条数映射（键与 [importFromJson] 一致，便于设置页复用同一段提示），
+  /// 跳过的条目通过 [BitwardenImporter] 的 [ImportReport] 另行取用。
+  Future<ImportReport> importBitwardenJson(String content) {
+    return BitwardenImporter(db: _db, repository: _repository)
+        .importJson(content);
+  }
+
+  /// 导入 Bitwarden / Vaultwarden 的 CSV 导出。
+  Future<ImportReport> importBitwardenCsv(String content) {
+    return BitwardenImporter(db: _db, repository: _repository)
+        .importCsv(content);
   }
 
   // ─── 导入：解析 ─────────────────────────────────────────

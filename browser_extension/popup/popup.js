@@ -17,7 +17,8 @@
  *    hard-coded copy);
  *  - every dynamic value inserted into the DOM is escaped (escapeHtml/escapeAttr);
  *  - plaintext passwords / TOTP codes / private keys live in memory only: never
- *    logged, never written to chrome.storage.
+ *    logged, never written to chrome.storage (the extension does not request the
+ *    storage permission at all).
  */
 
 'use strict';

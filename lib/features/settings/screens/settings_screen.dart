@@ -136,7 +136,7 @@ class SettingsScreen extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.info),
                   title: Text(l10n.version),
-                  subtitle: Text('2.3.3'),
+                  subtitle: Text('2.4.0'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.code),
@@ -405,6 +405,27 @@ class SettingsScreen extends ConsumerWidget {
               ],
             ),
           ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, 'bitwarden'),
+            child: Row(
+              children: [
+                const Icon(Icons.swap_horiz),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(l10n.bitwardenJson),
+                      Text(
+                        l10n.bitwardenJsonDesc,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -412,23 +433,33 @@ class SettingsScreen extends ConsumerWidget {
 
     try {
       final service = ref.read(exportImportServiceProvider);
-      final isPlain = format == 'plain';
-      final content = isPlain
-          ? await service.exportPlainJson()
-          : await service.exportEncrypted();
+      final String content;
+      final String baseName;
+      final String dialogTitle;
+      switch (format) {
+        case 'plain':
+          content = await service.exportPlainJson();
+          baseName = 'easypass_plain';
+          dialogTitle = l10n.savePlainExportDialog;
+        case 'bitwarden':
+          content = await service.exportBitwardenJson();
+          baseName = 'easypass_bitwarden';
+          dialogTitle = l10n.saveBitwardenExportDialog;
+        default:
+          content = await service.exportEncrypted();
+          baseName = 'easypass_backup';
+          dialogTitle = l10n.saveEncryptedBackupDialog;
+      }
 
       final now = DateTime.now();
       final date =
           '${now.year}'
           '${now.month.toString().padLeft(2, '0')}'
           '${now.day.toString().padLeft(2, '0')}';
-      final filename =
-          '${isPlain ? 'easypass_plain' : 'easypass_backup'}_$date.json';
+      final filename = '${baseName}_$date.json';
 
       final path = await FilePicker.platform.saveFile(
-        dialogTitle: isPlain
-            ? l10n.savePlainExportDialog
-            : l10n.saveEncryptedBackupDialog,
+        dialogTitle: dialogTitle,
         fileName: filename,
         type: FileType.custom,
         allowedExtensions: ['json'],
@@ -458,6 +489,85 @@ class SettingsScreen extends ConsumerWidget {
 
   void _importVault(BuildContext context, WidgetRef ref) async {
     final l10n = AppLocalizations.of(context);
+
+    // 先问来源 —— EasyPass 自己的备份 vs Bitwarden 迁移，两者的冲突语义不同
+    // （前者沿用原 id、后者一律新建），不能靠嗅探替用户猜。
+    final source = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(l10n.importSourceTitle),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, 'easypass'),
+            child: Row(
+              children: [
+                const Icon(Icons.shield_outlined),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(l10n.importDialogTitle),
+                      Text(
+                        'JSON',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, 'bitwarden-json'),
+            child: Row(
+              children: [
+                const Icon(Icons.swap_horiz),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(l10n.importFromBitwardenJson),
+                      Text(
+                        l10n.importFromBitwardenJsonDesc,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, 'bitwarden-csv'),
+            child: Row(
+              children: [
+                const Icon(Icons.table_chart_outlined),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(l10n.importFromBitwardenCsv),
+                      Text(
+                        l10n.importFromBitwardenCsvDesc,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (source == null || !context.mounted) return;
+
+    final isBitwarden = source.startsWith('bitwarden-');
+    final extension = source == 'bitwarden-csv' ? 'csv' : 'json';
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -480,8 +590,9 @@ class SettingsScreen extends ConsumerWidget {
 
     try {
       final result = await FilePicker.platform.pickFiles(
+        dialogTitle: l10n.pickImportFileTitle,
         type: FileType.custom,
-        allowedExtensions: ['json'],
+        allowedExtensions: [extension],
       );
 
       if (result == null || result.files.isEmpty || !context.mounted) return;
@@ -489,23 +600,44 @@ class SettingsScreen extends ConsumerWidget {
       final file = File(result.files.single.path!);
       final content = await file.readAsString();
 
-      final service = ref.read(exportImportServiceProvider);
-      final counts = await service.importFromJson(content);
+      if (!context.mounted) return;
 
-      ref.invalidate(vaultRepositoryProvider);
+      // 走哪条导入路径在**读文件之前**就定了：Bitwarden 的 JSON 若是加密导出，
+      // 交给导入器报"请改用未加密导出"，比在这里硬猜更准确。
+      if (!isBitwarden) {
+        final counts =
+            await ref.read(exportImportServiceProvider).importFromJson(content);
+        if (!context.mounted) return;
+        _showImportResult(
+          context,
+          l10n.importedCounts(counts['entries'] ?? 0, counts['folders'] ?? 0),
+        );
+        return;
+      }
 
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              l10n.importedCounts(
-                counts['entries'] ?? 0,
-                counts['folders'] ?? 0,
-              ),
-            ),
-          ),
+      final report = source == 'bitwarden-csv'
+          ? await ref.read(exportImportServiceProvider).importBitwardenCsv(content)
+          : await ref
+              .read(exportImportServiceProvider)
+              .importBitwardenJson(content);
+
+      if (!context.mounted) return;
+
+      final buffer = StringBuffer(
+        l10n.importedSummary(report.entries, report.folders),
+      );
+      if (report.cardsAsNotes > 0 || report.extraUris > 0) {
+        buffer.write(
+          '\n${l10n.importedLossyNotes(report.cardsAsNotes, report.extraUris)}',
         );
       }
+      if (report.hasSkipped) {
+        buffer.write('\n${l10n.importedSkipped(report.skipped.length)}');
+        buffer.write(
+          '\n${l10n.importedSkippedDetails(report.skipped.join('; '))}',
+        );
+      }
+      _showImportResult(context, buffer.toString());
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -516,6 +648,16 @@ class SettingsScreen extends ConsumerWidget {
         );
       }
     }
+  }
+
+  /// 导入结果提示。跳过的条目用更长的展示时间 —— 用户需要读到原因。
+  void _showImportResult(BuildContext context, String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: Duration(seconds: message.length > 120 ? 12 : 4),
+      ),
+    );
   }
 
   // ─── Change Master Password ─────────────────────────────
