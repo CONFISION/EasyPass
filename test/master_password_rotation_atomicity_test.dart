@@ -219,13 +219,15 @@ void main() {
           isTrue, reason: '钥匙串坏了也必须能用新密码开库（靠轮换日志）');
       expect(await readPasswordWithSessionKey(), 'secret-pw');
 
-      // 旧密码：被明确拒绝，并给出"请用新密码"的提示（不是含糊的失败）。
+      // 旧密码：被明确拒绝。有轮换日志 ⇒ 整库已是新钥匙的密文，旧密码在
+      // 校验阶段就被判否（不再放行一把解不开库的钥匙），所以这里报的是
+      // "主密码错误"——对用户来说比"含糊的解锁失败"清楚。
       container.read(encryptionKeyProvider.notifier).state = null;
       expect(await container.read(authProvider.notifier).unlock(oldPassword),
           isFalse);
       expect(
         container.read(authProvider).errorMessage,
-        AuthErrorCodes.useNewMasterPassword,
+        AuthErrorCodes.incorrectMasterPassword,
       );
     });
 

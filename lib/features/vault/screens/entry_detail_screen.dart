@@ -11,6 +11,7 @@ import '../../../data/models/entry_fields.dart';
 import '../../../data/models/entry_type.dart';
 import '../../../data/models/vault_item.dart';
 import '../../../data/repositories/vault_repository.dart';
+import '../../../data/services/master_password_rotation.dart';
 import '../../../l10n/app_localizations.dart';
 import '../providers/entry_item_provider.dart';
 import '../widgets/custom_fields_view.dart';
@@ -727,27 +728,27 @@ class _MasterPasswordDialogState extends ConsumerState<_MasterPasswordDialog> {
       _error = null;
     });
 
-    final crypto = ref.read(cryptoServiceProvider);
-    final salt = await crypto.getStoredSalt();
-    final hash = await crypto.getStoredPasswordHash();
-    if (!mounted) return;
+    // 校验走**唯一口径**（MasterPasswordVerifier）：它同时看轮换日志与钥匙串。
+    // 自己比对 secure storage 的 salt/hash 会在"轮换已提交、校验材料还没写进
+    // 钥匙串"的窗口里认旧密码、拒新密码。
+    final verifier = MasterPasswordVerifier(
+      db: ref.read(databaseProvider),
+      cryptoService: ref.read(cryptoServiceProvider),
+    );
 
-    if (salt == null || hash == null) {
-      setState(() {
-        _checking = false;
-        _error = l10n.noMasterPasswordConfigured;
-      });
-      return;
-    }
-
-    if (crypto.hashMasterPassword(password, salt) == hash) {
+    if (await verifier.isCorrect(password)) {
+      if (!mounted) return;
       Navigator.pop(context, true);
       return;
     }
 
+    final error = await verifier.hasStoredCredential()
+        ? l10n.errorIncorrectMasterPassword
+        : l10n.noMasterPasswordConfigured;
+    if (!mounted) return;
     setState(() {
       _checking = false;
-      _error = l10n.errorIncorrectMasterPassword;
+      _error = error;
     });
   }
 

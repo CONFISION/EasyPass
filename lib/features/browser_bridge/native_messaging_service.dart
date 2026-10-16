@@ -11,6 +11,7 @@ import '../../data/database/database.dart';
 import '../../data/models/entry_type.dart';
 import '../../data/models/vault_item.dart';
 import '../../data/repositories/vault_repository.dart';
+import '../../data/services/master_password_rotation.dart';
 import '../health/health_service.dart';
 import 'url_matcher.dart';
 import 'vault_session.dart';
@@ -275,22 +276,27 @@ class NativeMessagingService {
   }
 
   Future<Map<String, dynamic>> _unlock(String password) async {
-    final storedSalt = await _cryptoService.getStoredSalt();
-    final storedHash = await _cryptoService.getStoredPasswordHash();
+    // 校验走**唯一口径**（MasterPasswordVerifier）：它同时看轮换日志与钥匙串。
+    // 曾经这里是自己拿 secure storage 的 salt/hash 现算现比 —— 那样在"轮换已提交、
+    // 校验材料还没写进钥匙串"的窗口里，扩展会继续认旧密码、拒绝新密码，也就是
+    // 用户看到的"App 里改了主密码，扩展那边旧密码还能用"。
+    final verifier = MasterPasswordVerifier(
+      db: _db,
+      cryptoService: _cryptoService,
+    );
 
-    if (storedSalt == null || storedHash == null) {
-      throw Exception('No master password configured');
+    final check = await verifier.verify(password);
+    if (check == null) {
+      if (!await verifier.hasStoredCredential()) {
+        throw Exception('No master password configured');
+      }
+      throw Exception('Incorrect master password');
     }
 
-    final computedHash =
-        _cryptoService.hashMasterPassword(password, storedSalt);
-    if (computedHash == storedHash) {
-      // Derive and keep the session key so credential fields can be
-      // decrypted. The key lives in memory only until lock / idle timeout.
-      _session.unlock(_cryptoService.deriveKey(password, storedSalt));
-      return {'success': true};
-    }
-    throw Exception('Incorrect master password');
+    // Derive and keep the session key so credential fields can be
+    // decrypted. The key lives in memory only until lock / idle timeout.
+    _session.unlock(check.key);
+    return {'success': true};
   }
 
   Map<String, dynamic> _generatePassword(Map<String, dynamic>? options) {
