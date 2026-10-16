@@ -403,6 +403,20 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
   The packaging script enforces this; after publishing to a store, verify the ID the store
   actually assigned (Edge especially) and extend the allowlist via
   `EASYPASS_BROWSER_HOST_EXTENSION_ID` instead of editing the old one away.
+- **`flutter build windows` fails with `MSB3073` when an EasyPass instance is still
+  running from `build\windows\x64\runner\Release`.** The POST_BUILD steps
+  (`browser_extension/native_host/build_bridge.bat` and `installer/copy_vc_runtime.bat`)
+  write into that same directory, and `copy_vc_runtime.bat` uses `copy /y` — which is
+  **unconditional**, so it fails even when the file contents are unchanged. A running
+  `easypass.exe` keeps `MSVCP140.dll` / `VCRUNTIME140.dll` / `VCRUNTIME140_1.dll` mapped
+  and therefore locked ("The process cannot access the file because it is being used by
+  another process"), `copy` returns 1, and MSBuild aborts the whole build. The app is
+  also its own daemon (`daemon.json` carries the same pid), so closing the window is not
+  always enough — the process can outlive it.
+  **Before building, stop it:** `Get-Process easypass -ErrorAction SilentlyContinue | Stop-Process -Force`
+  (then delete a stale `%LOCALAPPDATA%\EasyPass\daemon.json`). MSBuild's `MSB3073`
+  output does **not** include the script's own message, so run the two `.bat` files by
+  hand with the output dir as the argument to see the real error.
 - **A Low mandatory integrity label on the workspace breaks the app in ways that look like
   code bugs.** Windows gives a process the integrity level of its image's mandatory label;
   a process started from a Low-labelled exe runs at **Low integrity**, and a Low process
