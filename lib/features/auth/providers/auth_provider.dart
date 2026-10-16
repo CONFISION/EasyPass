@@ -32,6 +32,12 @@ abstract final class AuthErrorCodes {
   /// 上一次改主密码已经生效（整库已换钥匙），但校验材料没写进钥匙串；
   /// 用户输入的是旧密码，无法派生新钥匙 —— 必须改用新密码。
   static const useNewMasterPassword = 'useNewMasterPassword';
+
+  /// 主密码已改成功，但新的校验材料没写进系统钥匙串（Linux Secret Service
+  /// 不可用 / 钥匙串上锁）。新密码**仍然有效**（依据是库里的轮换日志），
+  /// 所以这只是提示，不是失败。
+  static const masterPasswordChangedStorageWarning =
+      'masterPasswordChangedStorageWarning';
 }
 
 enum AuthStatus { loading, locked, unlocked, firstRun }
@@ -301,13 +307,29 @@ class AuthNotifier extends StateNotifier<AuthState> {
       // 最后一步：把新的校验材料写进 secure storage 并清掉日志。这一步失败
       // **不再会锁死库** —— 日志还在，条目密文已经在新钥匙上，下次解锁时
       // 用新密码即可由 recoverPendingRotation 自动补完。
-      await rotation.completeRotation(
+      final storeUpdated = await rotation.completeRotation(
         PendingRotation(salt: newSalt, passwordHash: newHash),
       );
 
-      _ref.read(encryptionKeyProvider.notifier).state = newKey;
-      state = state.copyWith(errorMessage: null);
-      _startAutoLockTimer();
+      // 改完主密码**回到锁定态**。
+      //
+      // 不留在解锁态的原因有两个：
+      // 1. **让用户当场验收**新密码确实生效 —— 本仓库刚因为"改了主密码而实际
+      //    生效的仍是旧密码"出过一次事故（三处校验口径不一致），"改完还能直接
+      //    用"恰恰会让这类问题看不出来。锁定后必须用新密码重新进来。
+      // 2. 换钥匙这个安全敏感动作之后重新认证一次，是密码管理器的常规做法。
+      // 路由层（app.dart 的 redirect）会据此把界面送回 /lock。
+      _autoLockTimer?.cancel();
+      _ref.read(encryptionKeyProvider.notifier).state = null;
+      BrowserSessionRegistry.lockIfAny();
+      state = state.copyWith(
+        status: AuthStatus.locked,
+        // 钥匙串没写成功时给一句可操作的提示（新密码仍然有效，依据是库里的
+        // 轮换日志）。写成功了就不打扰用户。
+        errorMessage: storeUpdated
+            ? null
+            : AuthErrorCodes.masterPasswordChangedStorageWarning,
+      );
       return true;
     } catch (_) {
       state = state.copyWith(errorMessage: AuthErrorCodes.failedToChange);
@@ -401,6 +423,8 @@ String authErrorMessage(AppLocalizations l10n, String? code) {
       return l10n.errorFailedToSaveSettings;
     case AuthErrorCodes.useNewMasterPassword:
       return l10n.errorUseNewMasterPassword;
+    case AuthErrorCodes.masterPasswordChangedStorageWarning:
+      return l10n.masterPasswordChangedStorageWarning;
     default:
       return code ?? '';
   }

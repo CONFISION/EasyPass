@@ -116,7 +116,18 @@ void main() {
         'password123', 'newpassword456', 'newpassword456');
     expect(ok, isTrue);
 
-    final newKey = container.read(encryptionKeyProvider)!;
+    // 改完主密码会**回到锁定态**（换钥匙后要求重新认证，也让用户当场验收新密码
+    // 确实生效），所以这里不再有会话密钥可取 —— 用 oldKey 与新密码自己派生的
+    // 钥匙直接验密文，判据更干净。
+    expect(container.read(authProvider).isLocked, isTrue);
+    expect(container.read(encryptionKeyProvider), isNull);
+
+    final newKey = container
+        .read(cryptoServiceProvider)
+        .deriveKey('newpassword456', (await container
+            .read(cryptoServiceProvider)
+            .getStoredSalt())!);
+
     final entries = await repo.getAllEntries();
     expect(entries.length, 1);
     expect(entries.single.name, 'GitHub');
@@ -128,7 +139,6 @@ void main() {
     expect(tryDecrypt(entries.single.notesEncrypted!, newKey), 'work');
 
     // The new password now unlocks; the old one does not.
-    notifier.lock();
     expect(await notifier.unlock('newpassword456'), isTrue);
     notifier.lock();
     expect(await notifier.unlock('password123'), isFalse);

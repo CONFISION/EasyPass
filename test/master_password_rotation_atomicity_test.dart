@@ -185,14 +185,16 @@ void main() {
 
       expect(await rawPasswordCiphertext(), isNot(ciphertextBefore),
           reason: '轮换应当真的换掉了密文');
-      expect(await readPasswordWithSessionKey(), 'secret-pw');
 
-      container.read(encryptionKeyProvider.notifier).state = null;
+      // 改完即锁定：不再能读到明文（会话密钥已清空）。
+      expect(await readPasswordWithSessionKey(), isNull,
+          reason: '改完主密码应当回到锁定态');
+
       expect(await container.read(authProvider.notifier).unlock(newPassword),
           isTrue, reason: '新密码应当能开库');
       expect(await readPasswordWithSessionKey(), 'secret-pw');
 
-      container.read(encryptionKeyProvider.notifier).state = null;
+      container.read(authProvider.notifier).lock();
       expect(await container.read(authProvider.notifier).unlock(oldPassword),
           isFalse, reason: '旧密码不应再能开库');
     });

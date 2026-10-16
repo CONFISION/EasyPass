@@ -236,6 +236,12 @@ abstract class AppLocalizations {
   /// **'Your master password was changed already. Unlock with the NEW password.'**
   String get errorUseNewMasterPassword;
 
+  /// No description provided for @masterPasswordChangedStorageWarning.
+  ///
+  /// In en, this message translates to:
+  /// **'Your master password was changed. The system key store could not be updated, so EasyPass will keep using the copy stored inside the vault — unlock with your NEW password.'**
+  String get masterPasswordChangedStorageWarning;
+
   /// No description provided for @fontSettingsFailed.
   ///
   /// In en, this message translates to:

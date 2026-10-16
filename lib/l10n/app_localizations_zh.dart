@@ -78,6 +78,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get errorUseNewMasterPassword => '主密码已经修改过了，请用**新**主密码解锁。';
 
   @override
+  String get masterPasswordChangedStorageWarning =>
+      '主密码已修改。系统钥匙串写入失败，EasyPass 会改用保险库内的轮换记录来校验 —— 请用**新**主密码解锁。';
+
+  @override
   String get fontSettingsFailed => '无法加载或保存字体设置';
 
   @override

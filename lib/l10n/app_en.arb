@@ -23,6 +23,7 @@
   "errorStorageUnavailable": "Unable to access secure storage; vault state is unavailable",
   "errorFailedToSaveSettings": "Failed to save setting",
   "errorUseNewMasterPassword": "Your master password was changed already. Unlock with the NEW password.",
+  "masterPasswordChangedStorageWarning": "Your master password was changed. The system key store could not be updated, so EasyPass will keep using the copy stored inside the vault — unlock with your NEW password.",
   "fontSettingsFailed": "Unable to load or save the font setting",
   "storageUnavailableTitle": "Secure storage unavailable",
   "storageUnavailableBody": "EasyPass cannot reach the system secret store (Linux Secret Service / GNOME Keyring / KDE Wallet). The master password cannot be created or verified until this is fixed.\n\nCheck that a Secret Service provider is installed and unlocked, then retry.",

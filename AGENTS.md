@@ -43,7 +43,7 @@ flutter pub get          # install deps
 dart run build_runner build --delete-conflicting-outputs   # regenerate database.g.dart (drift)
 flutter gen-l10n        # regenerate app_localizations.dart after editing lib/l10n/*.arb
 flutter analyze         # lint (flutter_lints)
-flutter test            # 562 cases on Windows (553 pass / 9 Linux-only skipped)
+flutter test            # 570 cases on Windows (561 pass / 9 Linux-only skipped)
 flutter run -d windows  # run desktop app
 flutter build windows   # release build → build\windows\x64\runner\Release\easypass.exe
 flutter build linux --release   # Linux bundle → build/linux/x64/release/bundle/
@@ -330,6 +330,19 @@ prose. The version comes from `pubspec.yaml` only. Runbook: `installer/release/R
   go back to "re-encrypt, then write the key material": that ordering is what could leave
   neither password able to open the vault. Regression net:
   `test/master_password_rotation_atomicity_test.dart`.
+- **Password verification has exactly ONE implementation: `MasterPasswordVerifier`.** It used
+  to exist three times (`AuthNotifier.unlock`, `NativeMessagingService._unlock`,
+  `EntryDetailScreen._verify`), and only one copy knew about the rotation journal — which is
+  how "the old master password still works after changing it" shipped in 2.4.0. Any new
+  place that needs to check a master password must use the verifier (or
+  `masterPasswordVerifierProvider`), never compare stored salt/hash by hand. Its rule is
+  "a journal exists ⇒ only the journal's target password is valid; the keychain copy is
+  stale".
+- **Changing the master password leaves the vault LOCKED** (`changeMasterPassword` clears the
+  session key and sets `AuthStatus.locked`; the router then redirects to `/lock`). That is
+  deliberate: it forces the user to prove the new password works, and it re-authenticates
+  after a security-sensitive key change. Do not "helpfully" restore the old auto-unlocked
+  state — that is exactly the state in which a broken rotation stays invisible.
 - **SQLite file location gotcha:** the DB opens through `app_paths.dart`
   (exe dir on Windows, `$XDG_DATA_HOME/easypass/` on Linux). Widget/unit tests that
   construct `AppDatabase()` will hit the real file — use `AppDatabase.forTesting()`

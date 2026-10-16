@@ -84,6 +84,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Your master password was changed already. Unlock with the NEW password.';
 
   @override
+  String get masterPasswordChangedStorageWarning =>
+      'Your master password was changed. The system key store could not be updated, so EasyPass will keep using the copy stored inside the vault — unlock with your NEW password.';
+
+  @override
   String get fontSettingsFailed => 'Unable to load or save the font setting';
 
   @override
