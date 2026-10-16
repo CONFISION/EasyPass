@@ -255,6 +255,27 @@ class VaultRepository {
     return count;
   }
 
+  /// 探测 [key] 是不是当前整库所用的钥匙。
+  ///
+  /// 用于改主密码被打断后的恢复：日志说"重加密提交过"，但得确认库到底落在
+  /// 哪把钥匙上。**只看一行、用严格模式**——严格模式解不开就抛
+  /// `VaultDecryptException`，这正是我们要的信号；宽容模式会把失败变成空串，
+  /// 分不出"解不开"和"本来就是空值"。
+  ///
+  /// 空库返回 true：没有密文就没有冲突，任意钥匙都"能用"。
+  /// 唯一一行恰好是坏密文时会误判为"不是这把钥匙"，届时恢复流程会走
+  /// "库已在新钥匙上"的分支 —— 结果仍是可解锁（用新密码），不丢数据。
+  Future<bool> encryptionProbeWorks(Uint8List key) async {
+    final rows = await db.getAllEntries();
+    if (rows.isEmpty) return true;
+    try {
+      mapper.fromRow(rows.first, key, lenient: false);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ─── 文件夹 ─────────────────────────────────────────────
 
   Future<List<Folder>> getFolders() => db.getAllFolders();

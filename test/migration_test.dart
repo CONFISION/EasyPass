@@ -7,6 +7,7 @@ import 'package:easypass/data/models/entry_fields.dart';
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
 import 'package:easypass/data/models/vault_item_mapper.dart';
+import 'package:easypass/data/services/master_password_rotation.dart';
 import 'package:easypass/core/crypto/crypto_service.dart';
 
 import 'fakes.dart';
@@ -55,6 +56,47 @@ void main() {
     db.execute(
         'CREATE INDEX idx_password_entries_favorite ON password_entries(is_favorite);');
     db.execute('PRAGMA user_version = 1;');
+  }
+
+  /// v2（2.3.x）的建表语句：有了 type / data_encrypted，但**没有 vault_meta**，
+  /// `user_version` 停在 2。
+  void createV2Schema(dynamic db) {
+    db.execute('''
+      CREATE TABLE folders (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        icon TEXT DEFAULT 'folder',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    ''');
+    db.execute('''
+      CREATE TABLE password_entries (
+        id TEXT PRIMARY KEY NOT NULL,
+        folder_id TEXT,
+        type TEXT NOT NULL DEFAULT 'login',
+        name TEXT NOT NULL,
+        url TEXT NOT NULL DEFAULT '',
+        username TEXT NOT NULL DEFAULT '',
+        password_encrypted TEXT NOT NULL,
+        notes_encrypted TEXT DEFAULT '',
+        totp_secret_encrypted TEXT DEFAULT '',
+        data_encrypted TEXT NOT NULL DEFAULT '',
+        is_favorite BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL
+      );
+    ''');
+    db.execute(
+        'CREATE INDEX idx_password_entries_folder ON password_entries(folder_id);');
+    db.execute(
+        'CREATE INDEX idx_password_entries_name ON password_entries(name);');
+    db.execute(
+        'CREATE INDEX idx_password_entries_favorite ON password_entries(is_favorite);');
+    db.execute(
+        'CREATE INDEX idx_password_entries_type ON password_entries(type);');
+    db.execute('PRAGMA user_version = 2;');
   }
 
   test('v1 → v2：旧数据保留、新列可用、类型默认登录', () async {
@@ -108,8 +150,74 @@ void main() {
     expect(others, isEmpty);
   });
 
-  test('v2 库新写入的四种类型：类型列与计数查询都正确', () async {
-    final db = AppDatabase.forTesting(NativeDatabase.memory());
+  test('v2 → v3：新增 vault_meta 表，旧数据不动，轮换日志可用', () async {
+    final crypto = CryptoService(secureStorage: FakeSecureStorage());
+    final key = crypto.deriveKey('master', crypto.generateSalt());
+    final legacyPassword = crypto.encryptData('v2-pw', key);
+
+    final executor = NativeDatabase.memory(setup: (raw) {
+      createV2Schema(raw);
+      raw.execute(
+        'INSERT INTO password_entries '
+        '(id, folder_id, type, name, url, username, password_encrypted, '
+        ' notes_encrypted, totp_secret_encrypted, data_encrypted, '
+        ' is_favorite, created_at, updated_at) '
+        "VALUES ('e1', NULL, 'login', 'GitHub', 'https://github.com', 'alice', "
+        "'$legacyPassword', '', '', '', 0, 100, 200);",
+      );
+    });
+
+    final db = AppDatabase.forTesting(executor);
+    addTearDown(db.close);
+
+    // 触发打开 + 迁移（2 → 3）。
+    final rows = await db.getAllEntries();
+    expect(rows.length, 1, reason: '迁移不该动旧数据');
+    expect(rows.single.name, 'GitHub');
+
+    // 新表存在且可读写 —— 这正是"改主密码轮换日志"依赖的能力。
+    expect(await db.getMeta(MasterPasswordRotation.metaKey), isNull);
+    await db.setMeta(MasterPasswordRotation.metaKey, '{"salt":"s","password_hash":"h"}');
+    expect(await db.getMeta(MasterPasswordRotation.metaKey), isNotNull);
+    await db.deleteMeta(MasterPasswordRotation.metaKey);
+    expect(await db.getMeta(MasterPasswordRotation.metaKey), isNull);
+
+    // 旧密文仍能用旧钥匙解开（迁移没碰加密）。
+    final mapper = VaultItemMapper(crypto);
+    expect(mapper.fromRow(rows.single, key).loginOrEmpty.password, 'v2-pw');
+  });
+
+  test('v1 → v3：一路升到最新 schema，旧数据与轮换日志都可用', () async {
+    final crypto = CryptoService(secureStorage: FakeSecureStorage());
+    final key = crypto.deriveKey('master', crypto.generateSalt());
+    final legacyPassword = crypto.encryptData('ancient-pw', key);
+
+    final executor = NativeDatabase.memory(setup: (raw) {
+      createV1Schema(raw);
+      raw.execute(
+        'INSERT INTO password_entries '
+        '(id, folder_id, name, url, username, password_encrypted, '
+        ' notes_encrypted, totp_secret_encrypted, is_favorite, created_at, updated_at) '
+        "VALUES ('legacy', NULL, 'Legacy', 'https://example.com', 'bob', "
+        "'$legacyPassword', '', '', 0, 1, 2);",
+      );
+    });
+
+    final db = AppDatabase.forTesting(executor);
+    addTearDown(db.close);
+
+    final rows = await db.getAllEntries();
+    expect(rows.length, 1);
+    expect(rows.single.type, 'login', reason: 'v1 数据要补上 v2 的类型默认值');
+    expect(rows.single.dataEncrypted, '');
+    expect(await db.getMeta(MasterPasswordRotation.metaKey), isNull,
+        reason: 'v3 的 vault_meta 表必须一并建出来');
+
+    final mapper = VaultItemMapper(crypto);
+    expect(mapper.fromRow(rows.single, key).loginOrEmpty.password, 'ancient-pw');
+  });
+
+  test('v2 库新写入的四种类型：类型列与计数查询都正确', () async {    final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     final crypto = CryptoService(secureStorage: FakeSecureStorage());
     final key = crypto.deriveKey('master', crypto.generateSalt());

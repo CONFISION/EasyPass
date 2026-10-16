@@ -37,3 +37,18 @@ CREATE INDEX idx_password_entries_folder ON password_entries(folder_id);
 CREATE INDEX idx_password_entries_name ON password_entries(name);
 CREATE INDEX idx_password_entries_favorite ON password_entries(is_favorite);
 CREATE INDEX idx_password_entries_type ON password_entries(type);
+
+-- 键值元数据表（schema 3 新增）。
+--
+-- 目前唯一的用途是**改主密码的轮换日志**（`rotation.*` 键）。
+--
+-- 为什么必须放在这个库里：改主密码要跨两个存储系统原子地换钥匙 ——
+-- 条目密文在 SQLite（有事务），校验哈希在 flutter_secure_storage（没有事务）。
+-- 把"目标 salt / 目标校验哈希"和重加密写进**同一个 SQLite 事务**，
+-- 两者就一起提交或一起回滚；secure storage 那一步失败时，日志还在，
+-- 下次解锁可以据此把轮换补完。详见
+-- `lib/data/services/master_password_rotation.dart`。
+CREATE TABLE vault_meta (
+  meta_key TEXT PRIMARY KEY NOT NULL,
+  meta_value TEXT NOT NULL
+);

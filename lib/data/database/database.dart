@@ -13,16 +13,20 @@ class AppDatabase extends _$AppDatabase {
 
   AppDatabase.forTesting(super.e);
 
+  /// 3 = 改主密码的轮换日志（`vault_meta` 表，v2.4）。
   /// 2 = 2.3.0 多条目类型（`type` + `data_encrypted`）。
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   /// 迁移策略。
   ///
   /// 1 → 2：新增两列（都带默认值，旧行自动成为 `type='login'`、
   /// `data_encrypted=''`，无需拷贝数据），并补上类型索引。
-  /// **每加一列都必须同时改这里**，否则老用户升级后一开库就抛
-  /// "no such column"（1.x 的 `onUpgrade` 是空实现，没有先例可抄）。
+  /// 2 → 3：新增 `vault_meta` 键值表（改主密码的轮换日志）。纯新增表，
+  /// 不动任何已有数据。
+  /// **每加一列/一表都必须同时改这里**，否则老用户升级后一开库就抛
+  /// "no such column" / "no such table"（1.x 的 `onUpgrade` 是空实现，
+  /// 没有先例可抄）。
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
@@ -37,8 +41,30 @@ class AppDatabase extends _$AppDatabase {
           'ON password_entries(type)',
         );
       }
+      if (from < 3) {
+        await m.createTable(vaultMeta);
+      }
     },
   );
+
+  // ─── Vault meta（轮换日志）──────────────────────────────
+
+  Future<String?> getMeta(String metaKey) async {
+    final row = await (select(
+      vaultMeta,
+    )..where((t) => t.metaKey.equals(metaKey))).getSingleOrNull();
+    return row?.metaValue;
+  }
+
+  Future<void> setMeta(String metaKey, String metaValue) {
+    return into(vaultMeta).insertOnConflictUpdate(
+      VaultMetaCompanion.insert(metaKey: metaKey, metaValue: metaValue),
+    );
+  }
+
+  Future<void> deleteMeta(String metaKey) {
+    return (delete(vaultMeta)..where((t) => t.metaKey.equals(metaKey))).go();
+  }
 
   // ─── Folders ───────────────────────────────────────────
 

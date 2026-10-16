@@ -1139,6 +1139,225 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
   }
 }
 
+class VaultMeta extends Table with TableInfo<VaultMeta, VaultMetaData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  VaultMeta(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _metaKeyMeta = const VerificationMeta(
+    'metaKey',
+  );
+  late final GeneratedColumn<String> metaKey = GeneratedColumn<String>(
+    'meta_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: 'PRIMARY KEY NOT NULL',
+  );
+  static const VerificationMeta _metaValueMeta = const VerificationMeta(
+    'metaValue',
+  );
+  late final GeneratedColumn<String> metaValue = GeneratedColumn<String>(
+    'meta_value',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL',
+  );
+  @override
+  List<GeneratedColumn> get $columns => [metaKey, metaValue];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'vault_meta';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<VaultMetaData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('meta_key')) {
+      context.handle(
+        _metaKeyMeta,
+        metaKey.isAcceptableOrUnknown(data['meta_key']!, _metaKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_metaKeyMeta);
+    }
+    if (data.containsKey('meta_value')) {
+      context.handle(
+        _metaValueMeta,
+        metaValue.isAcceptableOrUnknown(data['meta_value']!, _metaValueMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_metaValueMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {metaKey};
+  @override
+  VaultMetaData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return VaultMetaData(
+      metaKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}meta_key'],
+      )!,
+      metaValue: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}meta_value'],
+      )!,
+    );
+  }
+
+  @override
+  VaultMeta createAlias(String alias) {
+    return VaultMeta(attachedDatabase, alias);
+  }
+
+  @override
+  bool get dontWriteConstraints => true;
+}
+
+class VaultMetaData extends DataClass implements Insertable<VaultMetaData> {
+  final String metaKey;
+  final String metaValue;
+  const VaultMetaData({required this.metaKey, required this.metaValue});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['meta_key'] = Variable<String>(metaKey);
+    map['meta_value'] = Variable<String>(metaValue);
+    return map;
+  }
+
+  VaultMetaCompanion toCompanion(bool nullToAbsent) {
+    return VaultMetaCompanion(
+      metaKey: Value(metaKey),
+      metaValue: Value(metaValue),
+    );
+  }
+
+  factory VaultMetaData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return VaultMetaData(
+      metaKey: serializer.fromJson<String>(json['meta_key']),
+      metaValue: serializer.fromJson<String>(json['meta_value']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'meta_key': serializer.toJson<String>(metaKey),
+      'meta_value': serializer.toJson<String>(metaValue),
+    };
+  }
+
+  VaultMetaData copyWith({String? metaKey, String? metaValue}) => VaultMetaData(
+    metaKey: metaKey ?? this.metaKey,
+    metaValue: metaValue ?? this.metaValue,
+  );
+  VaultMetaData copyWithCompanion(VaultMetaCompanion data) {
+    return VaultMetaData(
+      metaKey: data.metaKey.present ? data.metaKey.value : this.metaKey,
+      metaValue: data.metaValue.present ? data.metaValue.value : this.metaValue,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('VaultMetaData(')
+          ..write('metaKey: $metaKey, ')
+          ..write('metaValue: $metaValue')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(metaKey, metaValue);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is VaultMetaData &&
+          other.metaKey == this.metaKey &&
+          other.metaValue == this.metaValue);
+}
+
+class VaultMetaCompanion extends UpdateCompanion<VaultMetaData> {
+  final Value<String> metaKey;
+  final Value<String> metaValue;
+  final Value<int> rowid;
+  const VaultMetaCompanion({
+    this.metaKey = const Value.absent(),
+    this.metaValue = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  VaultMetaCompanion.insert({
+    required String metaKey,
+    required String metaValue,
+    this.rowid = const Value.absent(),
+  }) : metaKey = Value(metaKey),
+       metaValue = Value(metaValue);
+  static Insertable<VaultMetaData> custom({
+    Expression<String>? metaKey,
+    Expression<String>? metaValue,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (metaKey != null) 'meta_key': metaKey,
+      if (metaValue != null) 'meta_value': metaValue,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  VaultMetaCompanion copyWith({
+    Value<String>? metaKey,
+    Value<String>? metaValue,
+    Value<int>? rowid,
+  }) {
+    return VaultMetaCompanion(
+      metaKey: metaKey ?? this.metaKey,
+      metaValue: metaValue ?? this.metaValue,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (metaKey.present) {
+      map['meta_key'] = Variable<String>(metaKey.value);
+    }
+    if (metaValue.present) {
+      map['meta_value'] = Variable<String>(metaValue.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('VaultMetaCompanion(')
+          ..write('metaKey: $metaKey, ')
+          ..write('metaValue: $metaValue, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1160,6 +1379,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'idx_password_entries_type',
     'CREATE INDEX idx_password_entries_type ON password_entries (type)',
   );
+  late final VaultMeta vaultMeta = VaultMeta(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1171,6 +1391,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     idxPasswordEntriesName,
     idxPasswordEntriesFavorite,
     idxPasswordEntriesType,
+    vaultMeta,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -1751,6 +1972,152 @@ typedef $PasswordEntriesProcessedTableManager =
       PasswordEntry,
       PrefetchHooks Function()
     >;
+typedef $VaultMetaCreateCompanionBuilder =
+    VaultMetaCompanion Function({
+      required String metaKey,
+      required String metaValue,
+      Value<int> rowid,
+    });
+typedef $VaultMetaUpdateCompanionBuilder =
+    VaultMetaCompanion Function({
+      Value<String> metaKey,
+      Value<String> metaValue,
+      Value<int> rowid,
+    });
+
+class $VaultMetaFilterComposer extends Composer<_$AppDatabase, VaultMeta> {
+  $VaultMetaFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get metaKey => $composableBuilder(
+    column: $table.metaKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get metaValue => $composableBuilder(
+    column: $table.metaValue,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $VaultMetaOrderingComposer extends Composer<_$AppDatabase, VaultMeta> {
+  $VaultMetaOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get metaKey => $composableBuilder(
+    column: $table.metaKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get metaValue => $composableBuilder(
+    column: $table.metaValue,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $VaultMetaAnnotationComposer extends Composer<_$AppDatabase, VaultMeta> {
+  $VaultMetaAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get metaKey =>
+      $composableBuilder(column: $table.metaKey, builder: (column) => column);
+
+  GeneratedColumn<String> get metaValue =>
+      $composableBuilder(column: $table.metaValue, builder: (column) => column);
+}
+
+class $VaultMetaTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          VaultMeta,
+          VaultMetaData,
+          $VaultMetaFilterComposer,
+          $VaultMetaOrderingComposer,
+          $VaultMetaAnnotationComposer,
+          $VaultMetaCreateCompanionBuilder,
+          $VaultMetaUpdateCompanionBuilder,
+          (
+            VaultMetaData,
+            BaseReferences<_$AppDatabase, VaultMeta, VaultMetaData>,
+          ),
+          VaultMetaData,
+          PrefetchHooks Function()
+        > {
+  $VaultMetaTableManager(_$AppDatabase db, VaultMeta table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $VaultMetaFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $VaultMetaOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $VaultMetaAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> metaKey = const Value.absent(),
+                Value<String> metaValue = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => VaultMetaCompanion(
+                metaKey: metaKey,
+                metaValue: metaValue,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String metaKey,
+                required String metaValue,
+                Value<int> rowid = const Value.absent(),
+              }) => VaultMetaCompanion.insert(
+                metaKey: metaKey,
+                metaValue: metaValue,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<VaultMeta, VaultMetaData>(table),
+                  BaseReferences<_$AppDatabase, VaultMeta, VaultMetaData>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $VaultMetaProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      VaultMeta,
+      VaultMetaData,
+      $VaultMetaFilterComposer,
+      $VaultMetaOrderingComposer,
+      $VaultMetaAnnotationComposer,
+      $VaultMetaCreateCompanionBuilder,
+      $VaultMetaUpdateCompanionBuilder,
+      (VaultMetaData, BaseReferences<_$AppDatabase, VaultMeta, VaultMetaData>),
+      VaultMetaData,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -1758,4 +2125,6 @@ class $AppDatabaseManager {
   $FoldersTableManager get folders => $FoldersTableManager(_db, _db.folders);
   $PasswordEntriesTableManager get passwordEntries =>
       $PasswordEntriesTableManager(_db, _db.passwordEntries);
+  $VaultMetaTableManager get vaultMeta =>
+      $VaultMetaTableManager(_db, _db.vaultMeta);
 }

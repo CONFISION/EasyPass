@@ -16,6 +16,17 @@ class FakeSecureStorage extends FlutterSecureStorage {
   /// When non-null, every [write] call throws this exception.
   Object? writeFailure;
 
+  /// When non-null, the *n*-th and all later [write] calls throw this
+  /// exception (1-based). Lets a test cut a multi-write sequence in half —
+  /// e.g. `storeKeyMaterial` writes salt first and hash second, so
+  /// `failWriteFrom = 2` reproduces "vault re-encrypted but the verifier
+  /// never landed", the exact shape of the Low-integrity-label incident.
+  int? failWriteFrom;
+
+  int _writeCount = 0;
+
+  int get writeCount => _writeCount;
+
   @override
   Future<String?> read({
     required String key,
@@ -47,6 +58,11 @@ class FakeSecureStorage extends FlutterSecureStorage {
     final failure = writeFailure;
     if (failure != null) {
       throw failure;
+    }
+    _writeCount++;
+    final partial = failWriteFrom;
+    if (partial != null && _writeCount >= partial) {
+      throw StateError('FakeSecureStorage: write #$_writeCount failed (injected)');
     }
     if (value == null) {
       store.remove(key);
