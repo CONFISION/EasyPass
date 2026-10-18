@@ -1,4 +1,4 @@
-; EasyPass 2.4.0 — Inno Setup installer script
+; EasyPass 3.0.0 — Inno Setup installer script
 ;
 ; Per-user install: easypass.db is written next to the executable, so the
 ; app must live in a user-writable directory (LocalAppData), not Program
@@ -65,9 +65,11 @@ AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppComments=Local-first, open-source password manager for Windows
 AppCopyright=Copyright (C) 2026 easypass.com
-; Version resource of the generated Setup.exe (file version 2.4.0.0).
+; Version resource of the generated Setup.exe. BOTH fields must track
+; MyAppVersion -- check_extension.mjs asserts them. It used to check only
+; VersionInfoVersion, which is how ProductVersion stayed behind at 2.4.0.0.
 VersionInfoVersion=3.0.0.0
-VersionInfoProductVersion=2.4.0.0
+VersionInfoProductVersion=3.0.0.0
 VersionInfoProductName=EasyPass
 VersionInfoDescription=EasyPass Password Manager Installer
 DefaultDirName={localappdata}\Programs\EasyPass
@@ -302,4 +304,6 @@ begin
     UnregisterNativeHost();
   end;
 end;
+
+
 

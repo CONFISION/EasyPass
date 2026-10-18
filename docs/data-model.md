@@ -1,0 +1,239 @@
+# EasyPass 数据模型与持久化规范
+
+> **本地文档**（`docs/` 被 `.gitignore` 忽略；入库建议见 `technical-spec.md` §13）。
+>
+> 本文是**数据的权威规范**：改 schema、加字段、写导入导出、动加密列之前必读。
+> 它取代了 2.3.x 的 `docs/entry-types.md`（已删除）—— 那里仍然有效的部分被搬到本文，
+> 过时的部分（桥接协议 v3、四处版本号同步、l10n 约定、验证门槛、踩坑清单）分别由
+> `protocol-api.md`、`AGENTS.md`、`CONTRIBUTING.md` 承担。
+>
+> 事实基准：提交 `7886490`。数据层自 2.3.0 起**未变**，只有 3.0.0 新增了 `vault_meta` 的内容
+> （校验材料）与"谁才有权打开库"的变化。
+
+---
+
+## 0. 一句话边界
+
+**只有一个进程碰数据库：核心（`easypass_core`）。** UI 通过 `VaultApi`（协议 5）间接读写；
+`test/architecture_boundary_test.dart` 禁止 `lib/features/**` 与 `lib/client/**`
+import drift / 数据库 / 仓储。所以：
+
+- **核心侧**（`lib/core_service/**`、`lib/data/**`）用本文 §3 的仓储 API。
+- **UI 侧**用 `VaultApi` 的同名动作（`listItems` / `saveItem` / …），**没有**数据库句柄，
+  也**没有** `session_key.dart`（3.0.0 已删除：密钥只活在核心的 `SessionDomains`）。
+
+---
+
+## 1. 数据模型
+
+文件：`lib/data/models/{entry_type,entry_fields,vault_item,vault_item_mapper}.dart`
+
+- **`EntryType`**：枚举 + `wireName`（`login` / `secure_note` / `identity` / `ssh_key`）。
+  `EntryType.fromWire(Object?)` 容错解析（含 `ssh` / `note` 等别名），未知值回退 `login`。
+  `isAutofillable` 只有登录类型为 true。
+- **`CustomField{label, value, type}`**，`CustomFieldType{text, hidden, boolean}`；
+  布尔以字符串 `'true'` / `'false'` 存。`CustomField.isEmpty` = 标签与值**都**为空（保存时丢弃）。
+- **`IdentityData`**：`title/firstName/middleName/lastName/username/company/email/phone/
+  idNumber/passportNumber/licenseNumber/address1/address2/city/state/postalCode/
+  country/birthday/sex`，全 `String`，JSON 用 snake_case。
+- **`SshKeyData`**：`publicKey/privateKey/passphrase/fingerprint/keyType/bits(int?)/comment`。
+- **`EntryPayload`**：进 `data_encrypted` 的载荷 = `customFields + identity? + sshKey?`（带 `v:1`）。
+- **`VaultItem`**：**内存态明文模型**，四种类型共用：
+  `id / folderId? / type / name / notes / isFavorite / login? / identity? / sshKey? /
+  customFields / createdAt / updatedAt`。
+  便捷访问器 `loginOrEmpty` / `identityOrEmpty` / `sshKeyOrEmpty`；
+  `subtitle`（列表副标题）、`searchableText`（**不含**密码 / TOTP / 私钥 / 口令 / 隐藏字段值）。
+
+**这里改签名要三处同步**：`VaultItemMapper`、协议编解码（`lib/protocol/codecs.dart`，UI 与 bridge
+两套形状）、导出/导入。bridge 侧的字段名**自协议 3 起冻结**（`protocol-api.md` §6）。
+
+---
+
+## 2. 持久化规则（冻结）
+
+`password_entries` 在 schemaVersion **2** 增加了两列（1→2 迁移已实现）：
+
+| 列 | 说明 |
+|----|------|
+| `type TEXT NOT NULL DEFAULT 'login'` | 类型标签，明文（SQL 过滤 / 列表用） |
+| `data_encrypted TEXT NOT NULL DEFAULT ''` | 载荷密文（`EntryPayload` JSON 加密） |
+
+- **登录字段仍走列**：`url` / `username` / `password_encrypted` / `totp_secret_encrypted`
+  —— 旧数据零迁移，自动填充与搜索行为不变；`VaultItem.login` 只是这些列的投影。
+- **身份 / SSH 专属字段 + 所有类型的自定义字段**统一进 `data_encrypted`。
+- 空值一律存**空串**，不加密空字符串（`password_encrypted` 是 NOT NULL，非登录类型写 `''`）。
+- `notes_encrypted` 承载所有类型的"备注"；安全笔记类型的**正文就是 `notes`**。
+- **加密 / 解密只允许经由 `VaultItemMapper`**：
+  `toInsert(item, key)` / `toUpdate(item, key)` / `fromRow(row, key, {lenient})` /
+  `encodePayload` / `decodePayload`；`VaultItemMapper.normalize(item)` 丢弃与类型不符的字段块，
+  并在 SSH 公钥可解析时自动补 `fingerprint/keyType/bits/comment`（不覆盖用户填过的值）。
+- **绝不**在加密失败时退化成写明文。宁可抛错。
+- 切换条目类型时用 `item.withoutTypeData()` 丢掉原类型字段（UI 负责二次确认）。
+
+### 2.1 `vault_meta`（schemaVersion 3 新增）
+
+键值表，承载两类东西：
+
+| 前缀 | 内容 | 写入者 |
+| --- | --- | --- |
+| `secret.*` | 主密码校验材料：salt、`SHA-256(derivedKey)` 验证子 | `VaultMetaSecretStore`（升级迁移 `auth.*` 一次） |
+| `rotation.*` | 主密码轮换日志（目标 salt + 验签子 + 状态） | `MasterPasswordRotation` |
+
+**轮换的原子性不变量**：目标 salt/验签子与整库重加密在**同一个 SQLite 事务**里写入。
+"没有日志 ⇒ 库还是旧钥匙；有日志 ⇒ 库已经是新钥匙"，日志的存在就是"哪个密码有效"的权威。
+`test/master_password_rotation_atomicity_test.dart` 与 `change_password_then_lock_test.dart` 守着这条。
+
+---
+
+## 3. 仓储 API（核心内部使用；UI 不得直接调用）
+
+文件：`lib/data/repositories/vault_repository.dart`。密钥来源是**核心的会话域**
+（`lib/core_service/session_domains.dart`）—— 3.0.0 起 `lib/data/state/session_key.dart`
+已删除，UI 侧不存在"当前密钥"这种东西。
+
+```dart
+// 条目（新代码只用这套）
+Future<List<VaultItem>> getItems({String? folderId, EntryType? type, bool favoritesOnly = false});
+Future<VaultItem?> getItem(String id);          // 未解锁 / 不存在 → null
+Future<void> saveItem(VaultItem item);          // 按 id upsert；createdAt 保留、updatedAt 刷新
+Future<void> deleteItem(String id);
+Future<List<VaultItem>> searchItems(String query);   // 见下
+Future<int> countItems();
+Future<int> countItemsByType(EntryType type);
+Future<int> countItemsInFolder(String folderId);
+Future<int> reencryptAll({required Uint8List oldKey, required Uint8List newKey});
+
+// 文件夹
+Future<List<Folder>> getFolders();
+Future<void> addFolder(FoldersCompanion folder);
+Future<void> updateFolder(String id, FoldersCompanion folder);   // 重命名 / 改图标
+Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
+```
+
+- 未解锁时：读返回空 / null，写抛 `VaultLockedException`。
+- **`searchItems` 语义**：大小写不敏感的内存匹配（解密后字段），支持
+  `type:login|note|identity|ssh|all`（中文别名：登录/笔记/身份/密钥/全部）、
+  `folder:<名>`、`url:<子串>`，自由词之间是 **AND**；空查询返回空列表；
+  结果按 `name`（忽略大小写）再按 `id` 排序。
+  匹配面：名称 / 备注 / 各类型专属字段 / 自定义字段的**标签**与非隐藏字段的**值**；
+  **不**匹配密码、TOTP 密钥、SSH 私钥与口令、隐藏字段的值。
+- 同一套语义由核心的 `searchItems` 动作暴露给 UI（`protocol-api.md` §5.2），
+  两边必须一致 —— 改一处要改另一处。
+- 旧的行级 API（`watchEntries` / `getAllEntries` / `search` / `saveEntry`…）标了
+  `@Deprecated`，只是 2.x 迁移期的桥梁；**新代码不要用**。
+- **3.0.0 起没有 `watch*` 流**：仓储不再暴露 drift 流（UI 进程根本没有库句柄）。
+  变更通知由核心在事务提交后广播 `changed` 事件，客户端重取快照 —— 见
+  `protocol-api.md` §7 与 `lib/features/vault/providers/core_stream.dart`。
+
+---
+
+## 4. UI 字段分工（避免三个界面各写一套）
+
+**新增 / 编辑表单**
+
+| 类型 | 字段（顺序） |
+|------|--------------|
+| login | 名称* · 网址 · 用户名 · 密码*（生成 / 显示） · TOTP 密钥 · 文件夹 · 备注 · 收藏 · 自定义字段 |
+| secure_note | 名称* · **笔记正文**（`notes`，多行，主输入区） · 文件夹 · 收藏 · 自定义字段 |
+| identity | 名称* · 个人信息（称谓/名/中间名/姓/用户名/公司/生日/性别） · 联系方式（邮箱/电话） · 证件（证件号/护照号/驾照号） · 地址（地址/地址2/城市/省州/邮编/国家） · 文件夹 · 备注 · 收藏 · 自定义字段 |
+| ssh_key | 名称* · 公钥 · 私钥（多行、可显示/隐藏） · 私钥口令（隐藏） · 指纹/类型/长度/注释（可由公钥自动推导，允许手改） · 文件夹 · 备注 · 收藏 · 自定义字段 |
+
+- `*` = 必填。登录条目沿用"密码必填"；SSH 条目要求**公钥或私钥至少填一个**。
+- 类型选择器只在**新建**时可改；编辑既有条目时切换类型要弹确认框
+  （`entryTypeSwitchTitle` / `entryTypeSwitchMessage` / `entryTypeSwitchConfirm`），
+  确认后调 `withoutTypeData()` 再保存。
+- 保存一律走 `VaultApi.saveItem(VaultItem)`（UI），**不要**自己拼 `PasswordEntriesCompanion`
+  —— 后者是核心内部的事。
+
+**详情页**
+
+| 类型 | 渲染 |
+|------|------|
+| login | 用户名 · 密码（显示需验证主密码） · 网址 · **TOTP 动态码 + 倒计时 + 复制** · 备注 · 自定义字段 · 收藏 |
+| secure_note | 笔记正文（可选文字、可复制） · 自定义字段 · 收藏 |
+| identity | 按分组展示所有非空字段 + 逐项复制 · 备注 · 自定义字段 · 收藏 |
+| ssh_key | 公钥（复制） · 私钥（验证后显示、可复制） · 口令（隐藏） · 指纹（复制） · 类型/长度/注释 · 备注 · 自定义字段 · 收藏 |
+
+**列表**
+
+- 每类一个图标 + 类型徽章；副标题用 `item.subtitle`；收藏星标保留。
+- 卡片上的"复制"按钮**只在登录条目**出现（复制密码）。
+- 侧边栏 / 工具栏提供**类型筛选**（全部 / 登录 / 安全笔记 / 身份 / SSH），可与文件夹、收藏叠加。
+- 搜索走 `VaultApi.searchItems`，搜索框下方给出前缀提示（`searchPrefixesHint`）。
+- **文件夹管理**：新建 / 重命名 / 换图标 / **删除**。删除入口必须**看得见**
+  （每行常驻 ⋮ 按钮）并且给鼠标原生手势（右键 `onSecondaryTap`），长按只是第三条路 ——
+  2.3.2 之前只有长按，用户直接得出"文件夹只能加不能删"的结论。
+  删除前先数条目（`countItemsInFolder`）：**空文件夹**普通确认；**有条目**时提示必须写明
+  "有 N 条、条目**不会**被删除、会被移到『无文件夹』"，确认按钮文案也随之变化。
+  删除只解除归属（`removeFolder` 先清 `folder_id` 再删），任何路径都不删条目。
+
+---
+
+## 5. 导出 / 导入格式
+
+`format: 'plain'` / `'encrypted'` 外壳不变（`version` 为 `'2.0.0'`），`entries[]` 元素：
+
+```json
+{
+  "id": "...", "folder_id": null, "type": "login",
+  "name": "...", "notes": "...", "is_favorite": false,
+  "created_at": 0, "updated_at": 0,
+  "login":     { "url": "...", "username": "...", "password": "...", "totp_secret": "..." },
+  "identity":  { ... } | 省略,
+  "ssh_key":   { ... } | 省略,
+  "custom_fields": [ ... ] | 省略
+}
+```
+
+- 导入必须**向后兼容 1.x 导出**：没有 `type` 时按 `login`，平铺的
+  `url/username/password/totp_secret` 也要能读（`VaultItem.fromJson` 已处理）。
+- 导入的登录字段要用**核心的会话密钥**重新加密后落地（`VaultApi.importVault` →
+  核心读写文件；UI 只传路径）。
+- 加密备份（`format:'encrypted'`）里**不得出现明文**密码 / 私钥 / 证件号。
+- 另有 Bitwarden JSON / CSV 导入（`lib/data/services/bitwarden_importer.dart`）：
+  结果里会额外回 `skippedDetails[]`、`extraUris`、`cardsAsNotes` 三个字段。
+
+---
+
+## 6. 迁移规则（改 schema 必读）
+
+- **`schemaVersion` 当前是 3**，`AppDatabase.migration.onUpgrade` 真实实现了 1→2 与 2→3；
+  每个新列 / 新表**都**要加进去，否则老库打开时报 "no such column" / "no such table"。
+- **改 `tables.drift` 必须跑**
+  `dart run build_runner build --delete-conflicting-outputs`。
+  先读 `pubspec.yaml` 里那段注释：analyzer 版本必须跟得上 Dart SDK，
+  否则 `drift_dev` 会以 `Missing implementation of visitDotShorthandPropertyAccess` 崩，
+  而且**什么都不写**（`--delete-conflicting-outputs` 已经把旧文件删了 ⇒ 仓库直接编不过）。
+- `test/migration_test.dart` 手工构造 v1 / v2 库并断言两条升级路径 —— 新增列 / 表时扩展它。
+- drift **不启用** SQLite 外键，所以 `ON DELETE SET NULL` 永远不会触发：
+  `deleteFolderAndUnassign()` 显式清 `folder_id`。
+- **迁移没有退路**：升级必须能在老库上补出新列，且不破坏旧密文。
+
+---
+
+## 7. 数据纪律（不可违反）
+
+1. **加密列必须被 `reencryptAll` 覆盖**。历史上漏列 = 那列只能用旧密钥解。
+   现在统一走 `VaultItemMapper`，加列不用改轮换逻辑 —— 但要确认新列确实经过它。
+2. **改主密码必须整段事务**：`reencryptAll` 的循环包在 `db.transaction` 内。
+   中途抛错若不回滚，已处理条目只能用新钥匙开，而主密码还是旧的 ⇒ 静默数据丢失。
+3. **明文的边界**：未加密存储的是标题、用户名、URL、文件夹名、类型、收藏位、时间戳
+   （列表/搜索/自动填充需要它们）。**库文件本身不是不透明 blob**，别把它当加密容器宣传。
+4. **扩展拿不到种子**：bridge 的条目 JSON 只有 `hasTotp`（布尔），没有 TOTP 密钥；
+   `getCredentials` 只返回**登录**条目（否则填充面板会出现安全笔记）。
+5. **不要吞解密异常后写回明文**；`fromRow(lenient: true)` 只用于"读展示"路径，
+   不可用于回写。
+6. **UI 不得自己比对 salt/hash**：校验只有 `MasterPasswordVerifier` 一个实现，
+   且只跑在核心里（`technical-spec.md` §5.2）。
+
+---
+
+## 8. 与其它文档的关系
+
+| 想知道 | 看 |
+| --- | --- |
+| 数据存哪、哪个进程能碰、密码学参数 | `technical-spec.md` §5、§6 |
+| 动作层面的读写接口（UI / bridge） | `protocol-api.md` §5、§6 |
+| 扩展形状为什么冻结、字段叫什么 | `protocol-api.md` §6 |
+| 改 schema 的工程流程与门禁 | `CONTRIBUTING.md` |
+| 3.0.0 为什么把校验材料搬进库 | `technical-spec.md` §5.2、`SECURITY.md` |

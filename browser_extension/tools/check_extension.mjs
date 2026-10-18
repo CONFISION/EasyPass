@@ -204,12 +204,19 @@ for (const rel of jsFiles) {
   const issText = existsSync(issPath) ? readFileSync(issPath, 'utf8') : '';
   const issVersion = (issText.match(/#define\s+MyAppVersion\s+"([0-9]+\.[0-9]+\.[0-9]+)"/) || [])[1];
   const issFileVersion = (issText.match(/^VersionInfoVersion=([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/m) || [])[1];
+  // ProductVersion 曾经被漏检：它停在 2.4.0.0 而 FileVersion 已跟到 3.0.0.0，
+  // 于是安装包属性里显示的是旧版本。两个字段都要盯。
+  const issProductVersion =
+    (issText.match(/^VersionInfoProductVersion=([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)/m) || [])[1];
 
   if (!pubVersion) fail('pubspec.yaml 未找到 version: x.y.z');
   if (!extVersion) fail('manifest.json 未找到 version');
   if (!settingsVersion) warn('settings_screen.dart 未找到版本显示串（Text(\'x.y.z\')）');
   if (!issVersion) warn('installer/easypass_setup.iss 未找到 #define MyAppVersion "x.y.z"');
   if (!issFileVersion) warn('installer/easypass_setup.iss 未找到 VersionInfoVersion=x.y.z');
+  if (!issProductVersion) {
+    warn('installer/easypass_setup.iss 未找到 VersionInfoProductVersion=x.y.z');
+  }
 
   const seen = new Set([pubVersion, extVersion, settingsVersion, issVersion].filter(Boolean));
   if (seen.size > 1) {
@@ -221,8 +228,15 @@ for (const rel of jsFiles) {
       `  版本号：${pubVersion}（pubspec / manifest / settings_screen / installer 一致）`,
     );
   }
-  if (issFileVersion && pubVersion && issFileVersion !== `${pubVersion}.0`) {
-    fail(`安装包文件版本应为 ${pubVersion}.0，实际 ${issFileVersion}（installer/easypass_setup.iss）`);
+  for (const [label, actual] of [
+    ['VersionInfoVersion', issFileVersion],
+    ['VersionInfoProductVersion', issProductVersion],
+  ]) {
+    if (actual && pubVersion && actual !== `${pubVersion}.0`) {
+      fail(
+        `安装包 ${label} 应为 ${pubVersion}.0，实际 ${actual}（installer/easypass_setup.iss）`,
+      );
+    }
   }
 }
 

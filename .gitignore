@@ -11,7 +11,12 @@
 .svn/
 .swiftpm/
 migrate_working_dir/
-docs/
+# docs/ 默认不入库（工作区本地文档：验收清单、发布说明、设计记录）。
+# 例外：三份长期规范入库，供 clone 后直接阅读；其余（acceptance/release/设计记录）保持本地。
+docs/*
+!docs/technical-spec.md
+!docs/protocol-api.md
+!docs/data-model.md
 dist/
 .codegraph/
 
@@ -75,4 +80,5 @@ log/
 *.pdb
 *.ilk
 /easypass_native_host.exe
+
 
