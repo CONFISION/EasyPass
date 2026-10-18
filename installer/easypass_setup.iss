@@ -88,8 +88,19 @@ ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 
 [Languages]
+; Inno Setup 官方安装包**不带**中文语言文件（中文属"非官方翻译"）：CI 上
+; `choco install innosetup` 装出来的 Languages\ 目录里没有 ChineseSimplified.isl，
+; 于是老的 `compiler:Languages\ChineseSimplified.isl` 直接编译失败（2026-10-18 CI 实测）。
+;
+; 现在把 .isl 随仓库分发（installer\languages\，UTF-8 BOM，文件头标注 Inno 6.5.0+，
+; 6 与 7 都能用），并用 #if 做**条件 include**：文件不在就退化为只有英文，
+; 绝不让"缺一个翻译文件"阻断打包。路径用 SourcePath 拼绝对路径，不依赖
+; ISCC 的工作目录。
+#define ChineseIsl AddBackslash(SourcePath) + "languages\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+#if FileExists(ChineseIsl)
+Name: "chinesesimplified"; MessagesFile: "{#ChineseIsl}"
+#endif
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked

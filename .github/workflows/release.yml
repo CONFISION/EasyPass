@@ -127,6 +127,25 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
 
+      # Inno Setup 官方安装包**不带**中文语言文件（中文属"非官方翻译"），
+      # `choco install innosetup` 装出来的 Languages\ 目录里没有 ChineseSimplified.isl。
+      # 所以 .isl 随仓库分发，并在编译前**严格断言**它到位且是 UTF-8 BOM ——
+      # .iss 本身是 fail-safe 的（缺文件就只剩英文），但**发布产物必须带中文**，
+      # 这里宁可让 CI 明确失败，也不要悄悄产出纯英文安装包。
+      - name: Assert vendored Chinese language file
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $f = 'installer\languages\ChineseSimplified.isl'
+          if (-not (Test-Path $f)) {
+            throw "缺少 $f —— 它必须随仓库分发（Inno Setup 官方包不含中文翻译）"
+          }
+          $b = [System.IO.File]::ReadAllBytes((Resolve-Path $f))
+          if (-not ($b[0] -eq 0xEF -and $b[1] -eq 0xBB -and $b[2] -eq 0xBF)) {
+            throw "$f 必须是 UTF-8 带 BOM（否则 Inno 6 会按 ANSI 解码，中文乱码）"
+          }
+          "OK: $f ($([math]::Round($b.Length/1KB,1)) KB, UTF-8 BOM)"
+
       - name: Compile installer (ISCC)
         shell: pwsh
         run: |
