@@ -33,10 +33,14 @@ abstract final class AuthErrorCodes {
 
   /// 主密码已改成功，但新的校验材料没能落盘。
   ///
-  /// **M4 之后不再可达**：校验材料现在由核心写进库文件的 `vault_meta`，与整库
-  /// 重加密同一个事务域（`MasterPasswordRotation.completeRotation`），而
-  /// `VaultApi.changeMasterPassword` 是 `Future<void>`，不把
-  /// `keyMaterialPersisted` 带出来。保留常量与文案，供核心将来回传该字段时使用。
+  /// 核心在同一个事务里重加密整库并写 `vault_meta`，最后一步
+  /// （`MasterPasswordRotation.completeRotation`）仍可能失败 —— 例如 Linux 的
+  /// Secret Service 锁定、Windows 低完整性降权。此时轮换日志还在，**新密码依然
+  /// 能开库**，但必须告诉用户"这次没写进去"，否则下次钥匙串异常时会很难排查。
+  ///
+  /// 3.0.0 起可达：`VaultApi.changeMasterPassword` 返回
+  /// `ChangePasswordResult.keyMaterialPersisted`（此前是 `Future<void>`，
+  /// 这条文案是死代码）。
   static const masterPasswordChangedStorageWarning =
       'masterPasswordChangedStorageWarning';
 }
@@ -302,8 +306,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
       return false;
     }
 
+    final ChangePasswordResult result;
     try {
-      await _api.changeMasterPassword(
+      result = await _api.changeMasterPassword(
         currentPassword: currentPassword,
         newPassword: newPassword,
         confirmPassword: confirmPassword,
@@ -326,10 +331,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
     // 2. 换钥匙这个安全敏感动作之后重新认证一次，是密码管理器的常规做法。
     //
     // 不要"顺手恢复解锁"：`test/change_password_then_lock_test.dart` 盯着这条。
+    // 轮换成功但新校验材料没落盘时，必须提示用户：库里的轮换日志仍然保证
+    // "新密码能开库"，但这次写入确实失败了（钥匙串/存储短暂不可用）。
+    // 悄悄吞掉这条就等于让用户以为一切正常。
     state = state.copyWith(
       status: AuthStatus.locked,
       remainingSeconds: null,
-      errorMessage: null,
+      errorMessage: result.keyMaterialPersisted
+          ? null
+          : AuthErrorCodes.masterPasswordChangedStorageWarning,
     );
     return true;
   }
@@ -504,3 +514,4 @@ String authErrorMessage(AppLocalizations l10n, String? code) {
       return code ?? '';
   }
 }
+

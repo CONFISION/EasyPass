@@ -165,6 +165,91 @@ class HealthReport {
     if (score >= 50) return HealthLevel.fair;
     return HealthLevel.poor;
   }
+
+  /// 空报告：0 条条目、满分。用于"锁定 / 还没有可分析的登录条目"，
+  /// 与 `HealthService.analyze([])` 的结果一致。
+  static const HealthReport empty = HealthReport(
+    totalEntries: 0,
+    weakPasswords: [],
+    reusedPasswords: [],
+    reusedGroupCount: 0,
+    noTotpEntries: [],
+    noUrlEntries: [],
+    score: 100,
+  );
+
+  /// 从**核心**算好的报告 JSON 还原模型。
+  ///
+  /// 为什么需要它：3.0.0 起报告由核心算（`healthReport` 动作），UI 只拿统计
+  /// 数字 —— **明文密码不再经过 IPC**。字段形状见
+  /// `lib/core_service/core_actions.dart` 的 `_getHealthReport`。
+  ///
+  /// 宽容解析：缺字段/类型不对时退化成"该项没有"，绝不抛异常把健康页打成红屏。
+  factory HealthReport.fromJson(Map<String, dynamic> json) {
+    List<T> parseList<T>(String key, T Function(Map<String, dynamic>) item) {
+      final raw = json[key];
+      if (raw is! List) return const [];
+      return [
+        for (final entry in raw)
+          if (entry is Map) item(Map<String, dynamic>.from(entry)),
+      ];
+    }
+
+    String text(Map<String, dynamic> map, String key) {
+      final value = map[key];
+      return value is String ? value : '';
+    }
+
+    int number(Map<String, dynamic> map, String key) {
+      final value = map[key];
+      return value is num ? value.toInt() : 0;
+    }
+
+    WeakPasswordReason reasonOf(Map<String, dynamic> map) {
+      final wire = text(map, 'reason');
+      for (final reason in WeakPasswordReason.values) {
+        if (reason.name == wire) return reason;
+      }
+      // 认不出的原因按"太短"处理（只是文案不同，不会误报成健康）。
+      return WeakPasswordReason.tooShort;
+    }
+
+    return HealthReport(
+      totalEntries: number(json, 'totalEntries'),
+      score: json['score'] is num ? (json['score'] as num).toInt() : 100,
+      reusedGroupCount: number(json, 'reusedGroupCount'),
+      weakPasswords: parseList(
+        'weakPasswords',
+        (map) => WeakPasswordIssue(
+          entryId: text(map, 'entryId'),
+          entryName: text(map, 'entryName'),
+          reason: reasonOf(map),
+        ),
+      ),
+      reusedPasswords: parseList(
+        'reusedPasswords',
+        (map) => ReusedPasswordIssue(
+          entryId: text(map, 'entryId'),
+          entryName: text(map, 'entryName'),
+          sharedCount: number(map, 'sharedCount'),
+        ),
+      ),
+      noTotpEntries: parseList(
+        'noTotpEntries',
+        (map) => NoTotpIssue(
+          entryId: text(map, 'entryId'),
+          entryName: text(map, 'entryName'),
+        ),
+      ),
+      noUrlEntries: parseList(
+        'noUrlEntries',
+        (map) => NoUrlIssue(
+          entryId: text(map, 'entryId'),
+          entryName: text(map, 'entryName'),
+        ),
+      ),
+    );
+  }
 }
 
 /// 纯函数分析器：输入解密后的条目列表，输出健康报告。

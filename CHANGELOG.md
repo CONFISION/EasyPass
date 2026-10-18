@@ -48,6 +48,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 
 ### Added
 
+- **健康报告改由核心计算**（`healthReport` 动作，同一套 `HealthService.analyze`）：
+  UI 只接收统计数字（条数 / 分数 / 问题条目的 id+名字），**明文密码与 TOTP 种子
+  不再经过 IPC**。回归网：两个健康测试都用 `expect(api.called('listItems'), isFalse)`
+  盯着"别再退回本地分析"。
+- **Windows UI 单实例**（`windows/runner/main.cpp`）：命名 Mutex `Local\EasyPass.UI`
+  + `FindWindowW` 抬窗，双击两次不会再出现第二个进程/第二个托盘图标；带 `--` 开关的
+  CLI 调用跳过闸门。
+- **改密"写入失败"的提示恢复可达**：`VaultApi.changeMasterPassword` 现在返回
+  `ChangePasswordResult`（`keyMaterialPersisted` + `reencrypted`），钥匙串/存储写失败时
+  界面会提示 —— 此前那个字段被丢掉，提示是死代码。
 - `easypass_core --serve / --bridge / --lock / --shutdown / --status / --version`。
   `--lock` 只锁库不停核心（托盘"仅退出 UI"先跑它再退 UI）。
 - Linux 自启项改为拉起核心（`<core> --serve`）；AppImage 场景因挂载点每次都是临时路径，
@@ -191,3 +201,4 @@ generator, search, auto-lock) came first.
 
 [Unreleased]: https://github.com/CONFISION/EasyPass/compare/v2.3.3...HEAD
 [2.3.3]: https://github.com/CONFISION/EasyPass/releases/tag/v2.3.3
+

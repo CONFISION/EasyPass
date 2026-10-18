@@ -179,3 +179,19 @@ Future<CoreSnapshot<List<WireFolder>>> fetchFolders(VaultApi api) async {
     rethrow;
   }
 }
+
+/// `healthReport` 的流式快照读取；未解锁 → null + `locked`。
+///
+/// **为什么走这条而不是 `listItems`**：报告由核心算完（同一套
+/// `HealthService.analyze`），UI 只接收统计数字 —— 明文密码不再经过 IPC。
+/// `null` 表示"核心锁着，暂时没有报告"，调用方用自己的空报告兜底。
+Future<CoreSnapshot<Map<String, dynamic>?>> fetchHealthReport(
+  VaultApi api,
+) async {
+  try {
+    return (value: await api.healthReport(), locked: false);
+  } on VaultApiException catch (error) {
+    if (error.isLocked) return (value: null, locked: true);
+    rethrow;
+  }
+}

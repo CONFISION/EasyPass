@@ -42,7 +42,12 @@ abstract class VaultApi {
 
   Future<void> setMasterPassword(String password, String confirmPassword);
 
-  Future<void> changeMasterPassword({
+  /// 原子轮换主密码（校验 + 整库重加密 + 写新校验材料都在核心内完成）。
+  ///
+  /// 返回 [ChangePasswordResult]：核心会告诉调用方**新的校验材料是否真的落盘**
+  /// （`keyMaterialPersisted`）。写失败时轮换仍然有效（库里的轮换日志是权威），
+  /// 但界面必须提示用户 —— 丢掉这个字段就等于把那条提示变成不可达代码。
+  Future<ChangePasswordResult> changeMasterPassword({
     required String currentPassword,
     required String newPassword,
     required String confirmPassword,
@@ -132,4 +137,20 @@ class VaultApiException implements Exception {
 
   @override
   String toString() => message;
+}
+/// `changeMasterPassword` 的结果。
+class ChangePasswordResult {
+  const ChangePasswordResult({
+    required this.keyMaterialPersisted,
+    required this.reencrypted,
+  });
+
+  /// 新的 salt / 校验哈希是否真的写进了库文件（`vault_meta`）。
+  ///
+  /// false 不是"改密失败"：轮换日志仍在，下次解锁会自动收敛；但用户需要知道
+  /// "这次写入没有落盘"，所以我们把提示显示出来而不是假装一切正常。
+  final bool keyMaterialPersisted;
+
+  /// 本次重新加密的条目数（0 表示空库，正常）。
+  final int reencrypted;
 }

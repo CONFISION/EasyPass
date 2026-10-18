@@ -170,12 +170,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // 健康页拉起后才会真的问核心要条目；断言放在这里（放在 seedVault 里时
-    // provider 还没跑，listItemRequests 是空的）。
-    // 只该要**登录**条目：安全笔记 / 身份 / SSH 不参与评分。
-    expect(api.listItemRequests, isNotEmpty,
-        reason: '健康页应该已经向核心请求过条目');
-    expect(api.listItemRequests.last.type, EntryType.login);
+    // 健康页拉起后才会真的问核心要数据；断言放在这里（放在 seedVault 里时
+    // provider 还没跑）。
+    //
+    // 3.0.0 契约：报告由**核心**算（`healthReport` 动作），UI 只收统计数字。
+    // 所以这里断言两件事——要了报告，且**没有**把条目取回本地（否则明文密码
+    // 会经过 IPC，那正是这次改动要消除的）。
+    expect(api.called('healthReport'), isTrue,
+        reason: '健康页应该向核心要报告');
+    expect(api.called('listItems'), isFalse,
+        reason: '明文密码不应再经 IPC：健康页不得回退到本地分析条目');
   }
 
   /// 一屏一屏往下滚，收集期间渲染过的所有 `Text`（列表是懒加载的，

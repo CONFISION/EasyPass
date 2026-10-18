@@ -503,8 +503,11 @@ void main() {
 
       final report = await container.read(healthReportProvider.future);
 
-      expect(api.listItemRequests.last.type, EntryType.login,
-          reason: '健康报告只该问核心要登录条目（非登录类型不参与评分）');
+      // 3.0.0 契约：报告由核心算 —— 要的是 `healthReport`，**不是**条目本身
+      // （否则明文密码会经过 IPC）。
+      expect(api.called('healthReport'), isTrue);
+      expect(api.called('listItems'), isFalse,
+          reason: '明文密码不应经 IPC：健康报告必须在核心里算');
       expect(report.totalEntries, 3);
       expect(report.weakPasswordCount, 1);
       expect(report.weakPasswords.single.entryId, 'a');

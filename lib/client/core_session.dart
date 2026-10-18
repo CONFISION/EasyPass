@@ -178,16 +178,20 @@ class CoreVaultApi implements VaultApi {
   }
 
   @override
-  Future<void> changeMasterPassword({
+  Future<ChangePasswordResult> changeMasterPassword({
     required String currentPassword,
     required String newPassword,
     required String confirmPassword,
   }) async {
-    await _call(Actions.changeMasterPassword, {
+    final data = await _call(Actions.changeMasterPassword, {
       'currentPassword': currentPassword,
       'newPassword': newPassword,
       'confirmPassword': confirmPassword,
     });
+    return ChangePasswordResult(
+      keyMaterialPersisted: data['keyMaterialPersisted'] != false,
+      reencrypted: (data['reencrypted'] as num?)?.toInt() ?? 0,
+    );
   }
 
   @override
@@ -356,3 +360,4 @@ bool coreExecutableExists() => coreExecutablePath() != null;
 
 /// 平台判断的薄封装（UI 侧不需要 import dart:io 的地方用它）。
 bool get isWindowsHost => Platform.isWindows;
+

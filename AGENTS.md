@@ -51,7 +51,7 @@ flutter pub get          # install deps
 dart run build_runner build --delete-conflicting-outputs   # regenerate database.g.dart (drift)
 flutter gen-l10n        # regenerate app_localizations.dart after editing lib/l10n/*.arb
 flutter analyze         # lint (flutter_lints)
-flutter test            # 569 passing / 3 skipped on Windows (the tree declares ~600
+flutter test            # 570 passing / 3 skipped on Windows (the tree declares ~600
                         # cases; Linux-only files register none here, so a Windows run
                         # reports FEWER CASES, not failures — see CONTRIBUTING.md)
 flutter run -d windows  # run desktop app
@@ -203,7 +203,8 @@ lib/adapters/flutter_secret_store.dart  唯一允许 import flutter_secure_stora
     ├── vault/    providers/{vault_provider,entry_item_provider,core_stream}.dart（快照 + 主题重取）,
     │             vault CRUD screens, widgets/{entry_card,entry_type_bits,custom_fields_editor,…}.dart
     ├── generator/ generator_provider.dart, generator_screen.dart
-    ├── health/   health_service.dart（纯函数，核心也在用）, health_provider.dart
+    ├── health/   health_service.dart（纯函数 + HealthReport.fromJson；核心也在用同一套 analyze）
+    │             health_provider.dart（走核心的 healthReport 动作，密码不过 IPC）
     ├── settings/ settings_screen.dart（导出/导入/清库全走 VaultApi）, providers/{font_settings,theme}_provider.dart
     ├── browser_bridge/  browser_host_installer.dart (per-browser native-messaging manifests),
     │                    browser_host_prompt.dart (first-run registration prompt)
@@ -213,7 +214,9 @@ lib/adapters/flutter_secret_store.dart  唯一允许 import flutter_secure_stora
     │                    linux_window_controller.dart (MethodChannel `com.easypass.app/window`)
     ├── desktop_autostart/  desktop_autostart.dart + linux_autostart.dart (XDG), windows_autostart.dart
     └── desktop_single_instance/  desktop_single_instance.dart + linux_single_instance.dart
-                                  (easypass.lock + unix socket), windows_single_instance.dart (no-op)
+                                  (easypass.lock + unix socket)；Windows 的单实例在原生层
+                                  （windows/runner/main.cpp 的 Mutex + FindWindow 抬窗），
+                                  Dart 侧 windows_single_instance.dart 保持 notApplicable 桩
 tool/build_core.ps1 / .sh                核心服务构建（dart build cli + 摊平产物）
 tool/probe_core.dart                     核心功能探针（19 项；只跑空库）
 browser_extension/                      Chrome MV3 extension (see below)
@@ -244,6 +247,10 @@ linux/                                  Flutter Linux runner (CMake): my_applica
   节流 20s）并订阅 `sessionLocked/sessionUnlocked` 事件。
 - 明文边界：核心把**明文 `VaultItem`** 发给 UI（`ui` 域动作）；扩展拿到的是
   受限 JSON（`hasTotp`、无 TOTP 种子）。导出/导入由**核心读写文件**，UI 只传路径。
+  **唯一例外已经收掉**：健康报告由核心算（`healthReport` 动作），UI 只收统计数字
+  （条数 / 分数 / 问题条目的 id+名字），**密码与种子不再经过 IPC**。
+  `test/health_test.dart` 与 `test/health_screen_test.dart` 用
+  `expect(api.called('listItems'), isFalse)` 盯着这条回归。
 - **通道加密（协议 5）**：`lib/protocol/secure_channel.dart`。握手用
   「nonce + 双向 HMAC 证明」，**令牌永不上线**；握手末帧起所有帧用
   AES-256-CBC + HMAC-SHA256（encrypt-then-MAC，四把方向密钥）加密。
@@ -281,8 +288,10 @@ replaces the TOTP secret, and `getCredentials` returns **login entries only**.
 `Exit UI and Stop Service`；关窗只隐藏到托盘（且仅在托盘图标真的注册成功时）。
 核心 exe 位于 `{app}\core\easypass_core.exe`（原生资产按 `<exe>\..\lib` 解析，
 所以库在 `{app}\lib`；数据目录仍取父目录 —— 见 `app_paths.dart` 的判据）。
-On Linux a second launch takes `easypass.lock` and wakes the running instance over
-a unix socket; Windows still has no single-instance gate for the *UI*.
+**UI 单实例**：Linux 二次启动取 `easypass.lock` 并经 unix socket 唤醒已有实例；
+Windows 由 `windows/runner/main.cpp` 的闸门负责（`Local\EasyPass.UI` Mutex →
+`FindWindowW` → `SW_RESTORE` + `SetForegroundWindow`，然后退出；带 `--` 开关的 CLI
+跳过闸门）。**核心自己的唯一性另算**（固定端口 47820），两者互不依赖。
 
 **Routing / auth gating** is centralized in `lib/app.dart` (`_routerProvider`
 redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
@@ -364,6 +373,9 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
   through the core, which re-encrypts all entries with a fresh key and then locks)
   and `setAutoLockMinutes()` (persisted by the core); `AuthState.autoLockMinutes`
   drives the settings UI. 全部经 `VaultApi`，UI 不自己校验、不自己定时。
+  `VaultApi.changeMasterPassword` 返回 **`ChangePasswordResult`**
+  （`keyMaterialPersisted` + `reencrypted`）：写入失败时界面会显示
+  `masterPasswordChangedStorageWarning` —— 这个字段一旦被丢掉，那条提示就又变成死代码。
 - **Export/import** distinguishes `format: 'encrypted'` backups (restorable) from
   plain JSON; plain imports are re-encrypted with the session key on import.
 - **Platform split:** `features/desktop_*/` and `core/platform/` hold the platform
@@ -653,3 +665,9 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
   **照样注册了托盘图标**，托盘菜单的 "Open EasyPass" 能把那个空窗口 `ShowWindow` 出来
   （2026-10-17 用 `WM_COMMAND(1001)` 实测复现）。3.0.0 的修法不是加门控，而是**根本
   没有无 UI 的 Flutter 进程**：核心是纯 Dart 控制台程序，托盘只属于 UI。
+
+
+
+
+
+

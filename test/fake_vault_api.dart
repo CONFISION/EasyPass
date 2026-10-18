@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:easypass/client/vault_api.dart';
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
+import 'package:easypass/features/health/health_service.dart';
 import 'package:easypass/protocol/protocol.dart';
 
 /// 内存版 [VaultApi] —— 测试里的"假核心"。
@@ -257,8 +258,11 @@ class FakeVaultApi implements VaultApi {
     _remainingSeconds = _autoLockMinutes * 60;
   }
 
+  /// 模拟"轮换成功但新校验材料没落盘"（钥匙串/存储写失败的真实场景）。
+  bool keyMaterialPersistedOnChange = true;
+
   @override
-  Future<void> changeMasterPassword({
+  Future<ChangePasswordResult> changeMasterPassword({
     required String currentPassword,
     required String newPassword,
     required String confirmPassword,
@@ -281,6 +285,10 @@ class FakeVaultApi implements VaultApi {
       _status = 'locked';
       _remainingSeconds = null;
     }
+    return ChangePasswordResult(
+      keyMaterialPersisted: keyMaterialPersistedOnChange,
+      reencrypted: items.length,
+    );
   }
 
   @override
@@ -378,7 +386,43 @@ class FakeVaultApi implements VaultApi {
   @override
   Future<Map<String, dynamic>> healthReport() async {
     calls.add('healthReport');
-    return <String, dynamic>{'totalEntries': items.length, 'score': 100};
+    final failure = readFailure;
+    if (failure != null) _throw(failure);
+    _requireUnlocked();
+    // 与真核心同构：同一套 analyze 算出统计数字，**不**包含明文密码。
+    final report = HealthService.analyze([
+      for (final item in items.values) HealthEntry.fromItem(item),
+    ]);
+    return <String, dynamic>{
+      'totalEntries': report.totalEntries,
+      'score': report.score,
+      'level': report.level.name,
+      'reusedGroupCount': report.reusedGroupCount,
+      'weakPasswords': [
+        for (final issue in report.weakPasswords)
+          {
+            'entryId': issue.entryId,
+            'entryName': issue.entryName,
+            'reason': issue.reason.name,
+          },
+      ],
+      'reusedPasswords': [
+        for (final issue in report.reusedPasswords)
+          {
+            'entryId': issue.entryId,
+            'entryName': issue.entryName,
+            'sharedCount': issue.sharedCount,
+          },
+      ],
+      'noTotpEntries': [
+        for (final issue in report.noTotpEntries)
+          {'entryId': issue.entryId, 'entryName': issue.entryName},
+      ],
+      'noUrlEntries': [
+        for (final issue in report.noUrlEntries)
+          {'entryId': issue.entryId, 'entryName': issue.entryName},
+      ],
+    };
   }
 
   @override
@@ -496,3 +540,5 @@ class FakeVaultApi implements VaultApi {
     // 真核心只续期 ui 域（bridge 域独立），这里只记录调用。
   }
 }
+
+

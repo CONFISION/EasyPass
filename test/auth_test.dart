@@ -401,6 +401,30 @@ void main() {
       expect(container.read(authProvider).status, AuthStatus.locked);
     });
 
+    test('轮换成功但校验材料没落盘 ⇒ 提示 masterPasswordChangedStorageWarning', () async {
+      // 这是 3.0.0 之前不可达的那条文案：核心现在通过
+      // ChangePasswordResult.keyMaterialPersisted 告诉我们写入失败了。
+      // 轮换本身仍然有效（日志是权威），但用户必须知道"这次没写进去"。
+      api = FakeVaultApi(masterPassword: 'old-password');
+      api.keyMaterialPersistedOnChange = false;
+      buildContainer();
+      await waitForAuth();
+      await container.read(authProvider.notifier).unlock('old-password');
+
+      final changed = await container
+          .read(authProvider.notifier)
+          .changeMasterPassword('old-password', 'new-password', 'new-password');
+
+      expect(changed, isTrue, reason: '轮换是成功的，只是材料没落盘');
+      final state = container.read(authProvider);
+      expect(state.status, AuthStatus.locked);
+      expect(
+        state.errorMessage,
+        AuthErrorCodes.masterPasswordChangedStorageWarning,
+        reason: '写入失败必须提示，不能悄悄吞掉',
+      );
+    });
+
     test('当前密码错 ⇒ currentPasswordIncorrect', () async {
       api = FakeVaultApi(masterPassword: 'old-password');
       buildContainer();
