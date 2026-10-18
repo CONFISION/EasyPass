@@ -102,7 +102,7 @@ Source: "..\build\windows\x64\runner\Release\easypass.exe"; DestDir: "{app}"; Fl
 ; (`<exe dir>\..\lib\sqlite3.dll`, see the next entry) stays inside {app}.
 ; The vault itself is still {app}\easypass.db: AppPaths takes the parent
 ; directory when it contains easypass.exe, so data coordinates are unchanged.
-Source: "..\build\windows\x64\runner\Release\core\easypass_core.exe"; DestDir: "{app}\core"; Flags: ignoreversion
+Source: "{#ReleaseDir}\core\easypass_core.exe"; DestDir: "{app}\core"; Flags: ignoreversion
 ; The core's sqlite3.dll, built as a Dart build-hook dependency. The Dart CLI
 ; runtime resolves it as `<exe dir>\..\lib\sqlite3.dll` -- measured on Dart
 ; 3.13.4; the copy sitting next to the executable is never consulted, and a
@@ -113,7 +113,7 @@ Source: "..\build\windows\x64\runner\Release\core\easypass_core.exe"; DestDir: "
 ; NOTE the path must include `Release`: tool/build_core.ps1 writes the library
 ; to <OutDir>\lib, and <OutDir> is the runner's Release directory. (An earlier
 ; version omitted it and ISCC failed with "Source file ... does not exist".)
-Source: "..\build\windows\x64\runner\Release\lib\sqlite3.dll"; DestDir: "{app}\lib"; Flags: ignoreversion
+Source: "{#ReleaseDir}\lib\sqlite3.dll"; DestDir: "{app}\lib"; Flags: ignoreversion
 ; x86 console bridge: browser stdio -> core TCP (native messaging host)
 Source: "..\build\windows\x64\runner\Release\easypass_native_host.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; Flutter engine
@@ -159,7 +159,7 @@ const
 var
   HostRegistered: Boolean;
 
-{ ─── Core service lifecycle ──────────────────────────────────────────────
+(* ─── Core service lifecycle ──────────────────────────────────────────────
   {app}\core\easypass_core.exe --serve is a user-level background process that
   owns the vault database. A running copy locks its own image and the vault in
   {app}, so it must be stopped before files are replaced (install) or removed
@@ -169,7 +169,7 @@ var
   Everything here is best-effort ON PURPOSE: this is a per-user install and a
   failure to stop the core must never abort it (the autostart entry brings the
   core back). taskkill exits 128 when no process matches -- that is the normal
-  "nothing to stop" case, not an error, so the exit code is ignored. }
+  "nothing to stop" case, not an error, so the exit code is ignored. *)
 procedure StopCoreService();
 var
   ResultCode: Integer;
@@ -177,30 +177,30 @@ var
 begin
   CorePath := ExpandConstant('{app}\core\easypass_core.exe');
 
-  { Graceful path: ask the running core to shut down (flushes, releases the
+  (* Graceful path: ask the running core to shut down (flushes, releases the
     vault, removes daemon.json). Started WITHOUT waiting -- a hung core must
     not be able to block the installer. Skipped on a fresh install and when
-    upgrading from 2.4.x (there is no core binary yet). }
+    upgrading from 2.4.x (there is no core binary yet). *)
   if FileExists(CorePath) then
   begin
     Exec(CorePath, '--shutdown', '', SW_HIDE, ewNoWait, ResultCode);
-    { ~3 s grace period for that shutdown, without a WaitForSingleObject that
+    (* ~3 s grace period for that shutdown, without a WaitForSingleObject that
       could hang: `ping` on loopback is the portable sleep here (`timeout`
-      needs a console). }
+      needs a console). *)
     Exec('cmd.exe', '/C ping -n 4 127.0.0.1 >NUL', '', SW_HIDE,
          ewWaitUntilTerminated, ResultCode);
   end;
 
-  { Backstop for anything still alive (a hung core, or one from an older
-    version). Idempotent: no matching process is not an error. }
+  (* Backstop for anything still alive (a hung core, or one from an older
+    version). Idempotent: no matching process is not an error. *)
   Exec('taskkill.exe', '/IM easypass_core.exe /F', '', SW_HIDE,
        ewWaitUntilTerminated, ResultCode);
 end;
 
 function JsonEscape(const S: String): String;
 begin
-  { JSON strings need backslashes escaped. The install dir may contain no
-    quotes, so escaping backslashes is sufficient for Windows paths. }
+  (* JSON strings need backslashes escaped. The install dir may contain no
+    quotes, so escaping backslashes is sufficient for Windows paths. *)
   Result := S;
   StringChangeEx(Result, '\', '\\', True);
 end;
@@ -224,9 +224,9 @@ begin
     '  "allowed_origins": ["chrome-extension://' + ExtensionId + '/"]' + #13#10 +
     '}';
 
-  { SaveStringToFile with Unicode=False writes ANSI -- since the manifest
+  (* SaveStringToFile with Unicode=False writes ANSI -- since the manifest
     content is pure ASCII, the output bytes equal UTF-8 WITHOUT a BOM, which
-    is what Chromium's JSON parser requires. Keep the content ASCII-only. }
+    is what Chromium's JSON parser requires. Keep the content ASCII-only. *)
   if SaveStringToFile(ManifestPath, Manifest, False) then
   begin
     // Register BOTH registry views: 64-bit browsers read HKCU\Software\...
@@ -250,14 +250,14 @@ begin
   DeleteFile(ExpandConstant('{localappdata}\EasyPass\') + HostName + '.json');
 end;
 
-{ Register EasyPass in the HKCU Run key so it starts at logon AND appears in
+(* Register EasyPass in the HKCU Run key so it starts at logon AND appears in
   Task Manager's "Startup" tab (Task Scheduler entries are NOT listed there).
   The value is written by the installer wizard itself (user-visible), not by
   a silent script, so it does not look like malware behavior.
 
   Since 3.0.0 this starts the CORE service (--serve), not the UI: the core is
   the resident process that owns the vault and serves the browser extension,
-  while the UI is opened by the user (tray / desktop icon / start menu). }
+  while the UI is opened by the user (tray / desktop icon / start menu). *)
 procedure RegisterAutoStart();
 begin
   RegWriteStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run',
@@ -278,8 +278,8 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  { ssInstall runs just before the files are copied: the core has to be gone
-    by then. }
+  (* ssInstall runs just before the files are copied: the core has to be gone
+    by then. *)
   if CurStep = ssInstall then
     StopCoreService();
 
@@ -294,7 +294,7 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
-  { usUninstall runs before the files are removed. }
+  (* usUninstall runs before the files are removed. *)
   if CurUninstallStep = usUninstall then
   begin
     StopCoreService();
@@ -302,3 +302,4 @@ begin
     UnregisterNativeHost();
   end;
 end;
+
