@@ -109,7 +109,11 @@ Source: "..\build\windows\x64\runner\Release\core\easypass_core.exe"; DestDir: "
 ; native_assets.json sidecar is ignored. With the core in {app}\core that path
 ; is exactly {app}\lib. {app}\sqlite3.dll is Flutter's own copy for the UI and
 ; stays untouched.
-Source: "..\build\windows\x64\runner\lib\sqlite3.dll"; DestDir: "{app}\lib"; Flags: ignoreversion
+;
+; NOTE the path must include `Release`: tool/build_core.ps1 writes the library
+; to <OutDir>\lib, and <OutDir> is the runner's Release directory. (An earlier
+; version omitted it and ISCC failed with "Source file ... does not exist".)
+Source: "..\build\windows\x64\runner\Release\lib\sqlite3.dll"; DestDir: "{app}\lib"; Flags: ignoreversion
 ; x86 console bridge: browser stdio -> core TCP (native messaging host)
 Source: "..\build\windows\x64\runner\Release\easypass_native_host.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; Flutter engine

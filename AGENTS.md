@@ -68,12 +68,13 @@ flutter build linux --release   # Linux bundle → build/linux/x64/release/bundl
   `flutter build windows -- -DEASYPASS_SKIP_CORE_BUILD=ON`。
   Linux 侧没有对应 hook（`linux/CMakeLists.txt` 未改），AppImage 与 CI 仍单独调
   `tool/build_core.sh --out-dir <bundle>`。
-- **`sqlite3` 被钉在 3.6.0（`pubspec.yaml`），不要随手升级。** `package:sqlite3` 的
-  build hook 在 Windows 上默认**从 GitHub 下载**预编译 `sqlite3.x64.windows.dll`；网络不稳时
-  `flutter build windows` 会在 `build_hooks` 阶段失败，只报 `Building native assets failed`
-  （真实原因 `SocketException / errno 121` 要翻日志）。诊断命令（不调 MSBuild，agent 可跑）：
-  `flutter assemble --no-version-check --output=build\agent_assemble -dTargetPlatform=windows-x64 -dBuildMode=release debug_bundle_windows-x64_assets`。
-  升级前先确认能访问 GitHub。
+- **构建卡在 `Building native assets failed` 时，先查网络/代理，不要改依赖版本。**
+  `package:sqlite3` 的 build hook 在 Windows 上默认**从 GitHub 下载**预编译
+  `sqlite3.x64.windows.dll`；代理没开时 `flutter build windows` 在 `build_hooks`
+  阶段失败，只报那句没有信息量的 `Building native assets failed`。拿到真实原因的命令
+  （不调 MSBuild，agent 可跑）：
+  `flutter assemble --no-version-check --output=build\agent_assemble -dTargetPlatform=windows-x64 -dBuildMode=release debug_bundle_windows-x64_assets`
+  —— 它会打印 `SocketException ... errno 121`。
 
 - **核心服务（3.0.0）用 `dart build cli` 构建，不是 `dart compile exe`** —— 后者会以
   `'dart compile' does not support build hooks` 直接失败（依赖图里 `sqlite3` /
