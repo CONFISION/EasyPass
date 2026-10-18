@@ -8,9 +8,9 @@ that keeps it available, and one-click auto-fill in the browser. The long-term g
 is a **self-hostable Bitwarden alternative** — same convenience, no cloud you don't
 control.
 
-![release](https://img.shields.io/badge/release-2.4.0-blue)
+![release](https://img.shields.io/badge/release-3.0.0-blue)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D6)
-![tests](https://img.shields.io/badge/tests-570%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-549%20passing-brightgreen)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 > **Current release: 2.4.0 — migration and distribution.** This release adds
@@ -34,7 +34,7 @@ control.
   sensitive field is AES-256-CBC encrypted with a key derived from your master
   password, which is never stored. No account, no server, no telemetry.
 - **A real background service, not a frozen app.** Since 2.0 the vault core runs as
-  a windowless daemon (`easypass.exe --service`) that the extension talks to through
+  a standalone, always-on core service (`easypass_core`) that the extension talks to through
   a local bridge — auto-fill works without the UI being open.
 - **Auto-fill that respects the page.** Nothing is injected unless the page has a
   visible password field; the extension never asks for your master password inside
@@ -132,12 +132,17 @@ control.
 | Application menu entry | Inno Setup shortcut | `--install` (desktop entry + hicolor icon), `--desktop-status`, `--uninstall` |
 | Browser host registration | Inno Setup writes the registry keys | `--install-browser-host` writes the per-browser manifests |
 
-- Background daemon (`easypass.exe --service`): windowless, cold-started on demand
-  by the native-messaging bridge, exits by itself after 10 minutes idle.
+- Core service (`core\easypass_core.exe`): a standalone, windowless, tray-less process that
+  owns the encrypted SQLite vault and the only copy of the session key. Single instance is
+  enforced by a fixed loopback port, and it **never exits on its own** — only an explicit
+  shutdown (tray "Exit UI and Stop Service", `--shutdown`, or the installer) ends it.
 - Architecture (Windows): browser → `easypass_native_host.exe` (x86 bridge) →
-  loopback TCP with a random per-run token handshake → daemon → encrypted SQLite.
-  On Linux the native-messaging host is the main binary itself
-  (`easypass --native-host`), started by the generated wrapper script.
+  loopback TCP with a random per-run token handshake → core service → encrypted SQLite.
+  On Linux there is no separate bridge: the generated wrapper script runs
+  `easypass_core --bridge`, which starts or reuses the one core and forwards frames.
+- The desktop UI (`easypass.exe`) is a pure client: it starts the core on demand, never
+  opens the database and never holds the key. The tray belongs to the UI and offers
+  **Exit UI Only** and **Exit UI and Stop Service**; closing the window just hides it.
 - Native minimum window size 900×600 on both platforms (enforced in the runner), with
   a persistent sidebar.
 
@@ -442,7 +447,7 @@ Four notes that come with the port:
    `%LOCALAPPDATA%` ACL behaviour.
 3. **The Linux native-messaging host is the app binary itself**
    (`easypass --native-host`, started by the generated wrapper). Windows keeps its
-   separate x86 bridge executable and the `--service` daemon contract.
+   separate x86 bridge executable; the bridge starts or reuses the single core service.
 4. **Windows tray handling was hardened at the same time**: the runner now checks
    that the icon was really registered (and would rather quit on close than hide a
    window nobody can restore), re-adds the icon when Explorer restarts

@@ -1,8 +1,10 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+
+import 'package:easypass/protocol/frames.dart' as frames;
+import 'package:easypass/protocol/frames.dart' show NativeMessageReader;
 
 import '../../core/constants/app_constants.dart';
 import '../../core/crypto/crypto_service.dart';
@@ -12,9 +14,14 @@ import '../../data/models/entry_type.dart';
 import '../../data/models/vault_item.dart';
 import '../../data/repositories/vault_repository.dart';
 import '../../data/services/master_password_rotation.dart';
-import '../health/health_service.dart';
+import 'package:easypass/features/health/health_service.dart';
 import 'url_matcher.dart';
 import 'vault_session.dart';
+
+/// 帧读取器/编码器现在**只有一份实现**（`lib/protocol/frames.dart`）：
+/// 核心服务与桥接共用，避免两套实现漂移。这里 re-export 是为了让既有调用方
+/// （`easypass_daemon.dart`、测试）的 import 保持不变。
+export 'package:easypass/protocol/frames.dart' show NativeMessageReader;
 
 /// Handles Native Messaging communication with the browser extension
 /// via stdin/stdout JSON protocol.
@@ -125,21 +132,10 @@ class NativeMessagingService {
   /// Encode a JSON message as a native-messaging frame: a 4-byte little-endian
   /// length prefix followed by the UTF-8 JSON bytes.
   ///
-  /// 帧编解码是桥接协议的一部分，除本服务外也被 [EasypassDaemon.probe]（发
-  /// 握手帧 + getStatus）和测试直接使用，所以**不是** testing-only API。
-  static Uint8List encodeMessage(Map<String, dynamic> message) {
-    final json = jsonEncode(message);
-    final bytes = utf8.encode(json);
-    final length = bytes.length;
-
-    final header = Uint8List(4);
-    header[0] = length & 0xff;
-    header[1] = (length >> 8) & 0xff;
-    header[2] = (length >> 16) & 0xff;
-    header[3] = (length >> 24) & 0xff;
-
-    return Uint8List.fromList([...header, ...bytes]);
-  }
+  /// 委托给协议层的**唯一实现**（`lib/protocol/frames.dart`）：核心服务、
+  /// 桥接、探针共用同一份，不再各写一套。
+  static Uint8List encodeMessage(Map<String, dynamic> message) =>
+      frames.encodeMessage(message);
 
   /// 每个 [StreamIterator] 对应一个有状态读取器：同一个 iterator 上连续调用
   /// 本方法时，上一帧所在 chunk 里多出来的字节会保留下来（见 [NativeMessageReader]）。
@@ -467,48 +463,3 @@ class NativeMessagingService {
   }
 }
 
-/// 有状态的 native messaging 帧读取器：在同一个字节流上**连续**读取多帧，
-/// 跨调用保留尚未消费的字节。
-///
-/// 为什么需要它：socket / pipe 的**一个 chunk 里完全可能同时到达两帧** ——
-/// bridge 会把"握手帧 + 首个请求"写在一起，扩展连发的 `getStatus` +
-/// `getAllCredentials` 也会被 loopback TCP 合并。早先的读法每帧都新建缓冲并把
-/// `iterator.current` 整个 chunk 塞进去，多出来的第二帧字节在切出第一帧后被
-/// 直接丢弃 → 对端永远等不到响应、只能超时（扩展"偶发卡死"的根因）。
-///
-/// 服务端必须全程共用同一个 reader：daemon 的握手帧由它读，随后把**同一个实例**
-/// 交给 [NativeMessagingService.serve] 继续读请求。
-class NativeMessageReader {
-  final StreamIterator<List<int>> _iterator;
-
-  /// 已从流中取出但尚未消费的字节（可能含下一帧的全部或部分）。
-  final List<int> _pending = <int>[];
-
-  NativeMessageReader(this._iterator);
-
-  /// 读取下一帧；对端关闭（EOF）返回 null。
-  Future<Map<String, dynamic>?> read() async {
-    // 不足 4 字节长度头就继续读。
-    while (_pending.length < 4) {
-      if (!await _iterator.moveNext()) return null;
-      _pending.addAll(_iterator.current);
-    }
-
-    final length = (_pending[0] & 0xff) |
-        ((_pending[1] & 0xff) << 8) |
-        ((_pending[2] & 0xff) << 16) |
-        ((_pending[3] & 0xff) << 24);
-    if (length <= 0) return null;
-
-    // 不足整帧（4 + length）就继续读。
-    while (_pending.length < 4 + length) {
-      if (!await _iterator.moveNext()) return null;
-      _pending.addAll(_iterator.current);
-    }
-
-    final payload = _pending.sublist(4, 4 + length);
-    // 只消费这一帧，同一 chunk 里剩下的字节留给下一次 read()。
-    _pending.removeRange(0, 4 + length);
-    return jsonDecode(utf8.decode(payload)) as Map<String, dynamic>;
-  }
-}

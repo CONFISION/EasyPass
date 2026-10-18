@@ -35,9 +35,31 @@ class FlutterWindow : public Win32Window {
   void RestoreWindow();
   void MinimizeToTray();
 
+  // Tray "Exit UI and Stop Service": run `easypass_core.exe --shutdown` from
+  // this executable's own directory and wait for that CLI to finish.
+  //
+  // Returns true only when the core CLI exited 0, which covers both "the core
+  // was stopped" and "no core was running" (see the core CLI contract:
+  // --shutdown returns 0 in either case, 1 on timeout/failure). On failure the
+  // reason is reported in a message box and false is returned, so the caller
+  // keeps this UI alive and the user can retry.
+  bool StopCoreService();
+
+  // Tray "Exit UI Only" preamble: run `easypass_core.exe --lock` so the vault
+  // the core keeps serving is not left unlocked behind a closed UI.
+  //
+  // Best effort by contract -- the caller quits either way. A failed lock opens
+  // a message box; a missing core (pure UI development layout) is skipped
+  // silently.
+  void LockVaultBeforeExit();
+
   static constexpr UINT kTrayIconMessage = WM_APP + 1;
   static constexpr UINT kTrayOpenCommand = 1001;
-  static constexpr UINT kTrayExitCommand = 1002;
+  // Ends this UI process only, after locking the vault. The background core
+  // keeps running, so the browser extension stays served.
+  static constexpr UINT kTrayQuitUiCommand = 1002;
+  // Stops the background core first and only then ends this UI process.
+  static constexpr UINT kTrayQuitServiceCommand = 1003;
 
   bool tray_icon_created_ = false;
 

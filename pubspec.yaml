@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.4.0+14
+version: 3.0.0+15
 
 environment:
   sdk: ^3.12.2
@@ -39,6 +39,11 @@ dependencies:
   cupertino_icons: ^1.0.8
   # State Management
   flutter_riverpod: ^2.6.1
+  # 纯 Dart 版 riverpod：数据层的 3 个文件（vault_repository / session_key /
+  # master_password_rotation）用的是它。`flutter_riverpod` 只是 Flutter 薄壳，
+  # Provider/StateProvider 是同一个类；换成纯 Dart 版后，核心服务
+  # （AOT 控制台、无 dart:ui）才能把数据层编进闭包。
+  riverpod: ^2.6.1
   riverpod_annotation: ^2.6.1
   # Routing
   go_router: ^14.8.1
@@ -46,6 +51,9 @@ dependencies:
   drift: ^2.35.0
   sqlite3_flutter_libs: ^0.5.30
   path: ^1.9.1
+  # 纯 Dart 注解（visibleForTesting）。核心服务（bin/easypass_core.dart）不能
+  # 依赖 flutter/foundation，因此这类注解统一走 package:meta。
+  meta: ^1.16.0
   # Encryption
   encrypt: ^5.0.3
   crypto: ^3.0.6

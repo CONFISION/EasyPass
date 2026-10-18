@@ -3,6 +3,8 @@
 #include <optional>
 #include <shellapi.h>
 #include <stdio.h>
+#include <string>
+#include <vector>
 
 #include "flutter/generated_plugin_registrant.h"
 #include "resource.h"
@@ -11,6 +13,13 @@ namespace {
 
 constexpr UINT kTrayIconId = 1;
 constexpr wchar_t kTrayTooltip[] = L"EasyPass";
+
+// Backstop for the `easypass_core.exe` helper commands the tray spawns
+// (`--shutdown`, `--lock`). Each CLI is specified to block until it is done and
+// to give up on its own after a few seconds, so this only fires when such a
+// helper is wedged; it exists so a broken helper cannot freeze the UI thread
+// forever.
+constexpr DWORD kCoreCommandTimeoutMs = 15000;
 
 // Append one line to %TEMP%\easypass-tray.log.
 //
@@ -44,6 +53,123 @@ void LogTrayLine(const wchar_t* text) {
               &written, nullptr);
   }
   CloseHandle(file);
+}
+
+// One modal error box, owned by the main window when it still exists (the tray
+// menu can be used while the window is hidden to the tray; a null owner keeps
+// the box top-level and visible in that case).
+void ShowTrayError(HWND owner, const std::wstring& text) {
+  MessageBoxW(owner, text.c_str(), L"EasyPass", MB_OK | MB_ICONERROR);
+}
+
+// This executable's own directory, without a trailing separator. Empty on
+// failure; |error| then receives GetLastError()'s value.
+//
+// The module path is used on purpose: GetCurrentDirectoryW returns whatever
+// directory the process was started from (shell shortcut "Start in", Explorer,
+// the browser launcher), which is unrelated to where the core lives.
+std::wstring CurrentExecutableDirectory(DWORD* error) {
+  wchar_t exe_path[MAX_PATH] = {0};
+  const DWORD length =
+      GetModuleFileNameW(nullptr, exe_path, ARRAYSIZE(exe_path));
+  if (length == 0 || length >= ARRAYSIZE(exe_path)) {
+    if (error != nullptr) {
+      *error = GetLastError();
+    }
+    return std::wstring();
+  }
+  std::wstring directory(exe_path, length);
+  const size_t separator = directory.find_last_of(L"\\/");
+  if (separator == std::wstring::npos) {
+    if (error != nullptr) {
+      *error = ERROR_BAD_PATHNAME;
+    }
+    return std::wstring();
+  }
+  directory.erase(separator);
+  return directory;
+}
+
+// Locate the core service next to this UI, in the order the two known layouts
+// use it:
+//   1. `<exe dir>\core\easypass_core.exe` -- the installer / release layout.
+//      The core lives in a subdirectory because the Dart runtime resolves its
+//      bundled libraries as `<exe dir>\..\lib\<name>` (see tool/build_core.ps1).
+//   2. `<exe dir>\easypass_core.exe` -- flat development layouts (build\qa,
+//      spike_core) where UI and core share one directory.
+// Returns an empty string when neither exists (pure UI build).
+std::wstring FindCoreExecutable(const std::wstring& exe_dir) {
+  const std::wstring candidates[] = {
+      exe_dir + L"\\core\\easypass_core.exe",
+      exe_dir + L"\\easypass_core.exe",
+  };
+  for (const std::wstring& candidate : candidates) {
+    if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) {
+      return candidate;
+    }
+  }
+  return std::wstring();
+}
+
+// Outcome of one `easypass_core.exe <arguments>` run.
+struct CoreRunResult {
+  // CreateProcessW succeeded.
+  bool started = false;
+  // The process exited before the timeout backstop fired.
+  bool finished = false;
+  // Its exit code (1 whenever the run did not complete normally).
+  DWORD exit_code = 1;
+  // GetLastError() when `started` is false.
+  DWORD error = 0;
+};
+
+// Run `<core_path> <arguments>` from |exe_dir| with CREATE_NO_WINDOW and wait
+// for it to finish.
+//
+// CREATE_NO_WINDOW matters: the core is a console program, so without it every
+// tray command would flash a console window over the UI (or over whatever the
+// user is doing when the window is hidden to the tray). The working directory
+// is the installation directory so the CLI resolves the same data files as the
+// core it talks to.
+CoreRunResult RunCoreCommand(const std::wstring& core_path,
+                             const std::wstring& exe_dir,
+                             const std::wstring& arguments) {
+  CoreRunResult result;
+  const std::wstring command_line =
+      L"\"" + core_path + L"\" " + arguments;
+  // CreateProcessW may modify the command line buffer, so it must be writable
+  // and NUL-terminated.
+  std::vector<wchar_t> command_line_buffer(command_line.begin(),
+                                           command_line.end());
+  command_line_buffer.push_back(L'\0');
+
+  STARTUPINFOW startup_info = {};
+  startup_info.cb = sizeof(startup_info);
+  PROCESS_INFORMATION process_info = {};
+  if (!CreateProcessW(core_path.c_str(), command_line_buffer.data(), nullptr,
+                      nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
+                      exe_dir.c_str(), &startup_info, &process_info)) {
+    result.error = GetLastError();
+    return result;
+  }
+  result.started = true;
+  CloseHandle(process_info.hThread);
+
+  const DWORD wait_result =
+      WaitForSingleObject(process_info.hProcess, kCoreCommandTimeoutMs);
+  if (wait_result == WAIT_OBJECT_0) {
+    result.finished = true;
+    DWORD exit_code = 1;
+    if (GetExitCodeProcess(process_info.hProcess, &exit_code) != FALSE) {
+      result.exit_code = exit_code;
+    }
+  } else {
+    // Timed out (or the wait failed): never leave the helper running.
+    TerminateProcess(process_info.hProcess, 1);
+    result.exit_code = 1;
+  }
+  CloseHandle(process_info.hProcess);
+  return result;
 }
 
 }  // namespace
@@ -146,8 +272,23 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
         RestoreWindow();
         return 0;
       }
-      if (LOWORD(wparam) == kTrayExitCommand) {
+      if (LOWORD(wparam) == kTrayQuitUiCommand) {
+        // Tier 1: lock the vault, then drop this UI. The core keeps running
+        // (the browser extension stays served), so the vault must not be left
+        // unlocked behind a closed UI. Locking is best effort -- the UI closes
+        // either way (see LockVaultBeforeExit).
+        LogTrayLine(L"tray: exit UI only (locking the vault first)");
+        LockVaultBeforeExit();
         Destroy();
+        return 0;
+      }
+      if (LOWORD(wparam) == kTrayQuitServiceCommand) {
+        // Tier 2: stop the core, and only leave when it is really gone.
+        // StopCoreService() reports the reason itself and returns false, in
+        // which case the UI deliberately stays up for a retry.
+        if (StopCoreService()) {
+          Destroy();
+        }
         return 0;
       }
       break;
@@ -231,7 +372,13 @@ void FlutterWindow::ShowTrayMenu() {
   HMENU menu = CreatePopupMenu();
   AppendMenuW(menu, MF_STRING, kTrayOpenCommand, L"Open EasyPass");
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(menu, MF_STRING, kTrayExitCommand, L"Exit");
+  // Two exits on purpose (docs/core-service-refactor.md section 3.8): the UI
+  // and the core have separate lifetimes now, so "leave" and "stop everything"
+  // must be two distinct choices. Labels stay English like the rest of this
+  // menu (no l10n in the native runner) and must stay ASCII.
+  AppendMenuW(menu, MF_STRING, kTrayQuitUiCommand, L"Exit UI Only");
+  AppendMenuW(menu, MF_STRING, kTrayQuitServiceCommand,
+              L"Exit UI and Stop Service");
   POINT pt;
   GetCursorPos(&pt);
   SetForegroundWindow(GetHandle());
@@ -268,4 +415,134 @@ void FlutterWindow::MinimizeToTray() {
            L"Click the tray icon to restore it.");
   nid.dwInfoFlags = NIIF_INFO;
   Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+// ---- core commands ---------------------------------------------------------
+
+bool FlutterWindow::StopCoreService() {
+  DWORD dir_error = 0;
+  const std::wstring exe_dir = CurrentExecutableDirectory(&dir_error);
+  if (exe_dir.empty()) {
+    wchar_t detail[256] = {0};
+    swprintf_s(detail, ARRAYSIZE(detail),
+               L"Could not determine the EasyPass installation directory "
+               L"(GetModuleFileNameW, error %lu).\n\nThe service was not "
+               L"stopped and this window stays open.",
+               dir_error);
+    ShowTrayError(GetHandle(), detail);
+    return false;
+  }
+
+  const std::wstring core_path = FindCoreExecutable(exe_dir);
+  if (core_path.empty()) {
+    ShowTrayError(GetHandle(),
+                  L"The EasyPass background service was not found at:\n" +
+                      exe_dir + L"\\core\\easypass_core.exe\n" + exe_dir +
+                      L"\\easypass_core.exe\n\nThis window stays open. "
+                      L"Reinstall EasyPass or start it from the installation "
+                      L"directory.");
+    return false;
+  }
+
+  const CoreRunResult result = RunCoreCommand(core_path, exe_dir, L"--shutdown");
+  if (!result.started) {
+    wchar_t detail[512] = {0};
+    swprintf_s(detail, ARRAYSIZE(detail),
+               L"Could not start the EasyPass background service shutdown:\n"
+               L"%ls\n\nWindows error %lu. This window stays open.",
+               core_path.c_str(), result.error);
+    ShowTrayError(GetHandle(), detail);
+    return false;
+  }
+
+  if (!result.finished || result.exit_code != 0) {
+    wchar_t detail[512] = {0};
+    if (result.finished) {
+      swprintf_s(detail, ARRAYSIZE(detail),
+                 L"The EasyPass background service did not stop (exit code "
+                 L"%lu).\n\nThe service may still be running; this window "
+                 L"stays open so you can retry or check the log.",
+                 result.exit_code);
+    } else {
+      swprintf_s(detail, ARRAYSIZE(detail),
+                 L"The EasyPass background service did not stop within %lu "
+                 L"seconds.\n\nThe service may still be running; this window "
+                 L"stays open so you can retry.",
+                 kCoreCommandTimeoutMs / 1000);
+    }
+    ShowTrayError(GetHandle(), detail);
+    LogTrayLine(L"FAILED StopCoreService: the core shutdown helper did not "
+                L"report success");
+    return false;
+  }
+
+  LogTrayLine(L"OK StopCoreService: the core is gone, exiting the UI");
+  return true;
+}
+
+void FlutterWindow::LockVaultBeforeExit() {
+  // "Exit UI Only" leaves the core (and therefore the vault) running for the
+  // browser extension, so the vault has to be locked before this UI goes away
+  // -- otherwise closing the window would leave an unlocked vault behind for
+  // whoever sits down at the machine next.
+  //
+  // Best effort by design: any failure is reported and the UI quits anyway. A
+  // failed lock must not trap the user inside the window (the same reasoning as
+  // the tray-vs-Task-Manager fallback in WM_CLOSE).
+  DWORD dir_error = 0;
+  const std::wstring exe_dir = CurrentExecutableDirectory(&dir_error);
+  if (exe_dir.empty()) {
+    wchar_t detail[256] = {0};
+    swprintf_s(detail, ARRAYSIZE(detail),
+               L"Could not lock the vault before closing the UI.\n\nThe "
+               L"EasyPass installation directory could not be determined "
+               L"(GetModuleFileNameW, error %lu). The vault may still be "
+               L"unlocked.",
+               dir_error);
+    ShowTrayError(GetHandle(), detail);
+    return;
+  }
+
+  const std::wstring core_path = FindCoreExecutable(exe_dir);
+  if (core_path.empty()) {
+    // Development layout with no core next to the UI (e.g. `flutter run`):
+    // there is nothing to lock, and this is not an error worth a dialog.
+    LogTrayLine(L"tray: no core executable found; skipping the vault lock");
+    return;
+  }
+
+  const CoreRunResult result = RunCoreCommand(core_path, exe_dir, L"--lock");
+  if (!result.started) {
+    wchar_t detail[512] = {0};
+    swprintf_s(detail, ARRAYSIZE(detail),
+               L"Could not lock the vault before closing the UI.\n\n%ls "
+               L"--lock could not be started (Windows error %lu). The vault "
+               L"may still be unlocked.",
+               core_path.c_str(), result.error);
+    ShowTrayError(GetHandle(), detail);
+    return;
+  }
+
+  if (!result.finished || result.exit_code != 0) {
+    wchar_t detail[512] = {0};
+    if (result.finished) {
+      swprintf_s(detail, ARRAYSIZE(detail),
+                 L"Could not lock the vault before closing the UI.\n\n"
+                 L"easypass_core --lock exited with code %lu. The vault may "
+                 L"still be unlocked.",
+                 result.exit_code);
+    } else {
+      swprintf_s(detail, ARRAYSIZE(detail),
+                 L"Could not lock the vault before closing the UI.\n\n"
+                 L"easypass_core --lock did not finish within %lu seconds. The "
+                 L"vault may still be unlocked.",
+                 kCoreCommandTimeoutMs / 1000);
+    }
+    ShowTrayError(GetHandle(), detail);
+    LogTrayLine(L"FAILED LockVaultBeforeExit: the lock helper did not report "
+                L"success");
+    return;
+  }
+
+  LogTrayLine(L"OK LockVaultBeforeExit: the vault is locked, exiting the UI");
 }

@@ -10,7 +10,7 @@ import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
 import 'package:easypass/data/repositories/vault_repository.dart';
 import 'package:easypass/data/services/master_password_rotation.dart';
-import 'package:easypass/features/browser_bridge/native_messaging_service.dart';
+import 'package:easypass/core_service/native_messaging_service.dart';
 
 import 'fakes.dart';
 
@@ -24,6 +24,12 @@ import 'fakes.dart';
 /// 后两处不知道**轮换日志**的存在，于是"轮换已提交、校验材料还没写进钥匙串"
 /// 这个窗口里，两边会给出互相矛盾的答案：App 认新密码，扩展 / 详情页只认旧密码。
 /// 对用户就是"改了主密码，旧密码还生效"。
+///
+/// M4 之后 UI 侧那份实现（1）已经不存在了 —— `AuthNotifier` 只转发
+/// `VaultApi`，校验全在核心里。但**核心内部**仍然有两个入口会碰主密码：UI 域
+/// （`CoreActions._unlock`）和 bridge 域（`NativeMessagingService._unlock`，
+/// 浏览器扩展走这条），它们必须继续共用 `MasterPasswordVerifier`。本文件就是
+/// 这条约束的回归：bridge 那条路径必须和轮换日志给出同一个答案。
 void main() {
   driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
 

@@ -8,8 +8,9 @@
 // the 64-bit Flutter host with a non-pipe stdin (observed: FILE_TYPE_CHAR),
 // so the host cannot receive browser messages. A console bridge compiled as
 // x86 matches the 32-bit browser's handle inheritance, so its stdin/stdout
-// are reliable. It then talks to the daemon (easypass.exe --service), which
-// owns the vault database and the unlock state.
+// are reliable. It then talks to the EasyPass core (easypass_core.exe
+// --serve), the headless process that owns the vault database and the
+// unlock state. The bridge never hosts the vault itself.
 //
 // Protocol: both ends use the native messaging framing (4-byte little-endian
 // length + UTF-8 JSON). The bridge is a pure byte forwarder; it never
@@ -155,7 +156,11 @@ DWORD WINAPI SocketToStdout(LPVOID param) {
 // ---- daemon connection ----------------------------------------------------
 
 bool LaunchDaemon(const std::wstring& exe_dir) {
-  std::wstring cmd = L"\"" + exe_dir + L"\\easypass.exe\" --service";
+  // The core service (not the UI): headless, owns the vault database, and the
+  // only process that writes daemon.json. It is installed in the `core`
+  // subdirectory of the application directory -- that keeps its native library
+  // lookup (`<exe dir>\..\lib\sqlite3.dll`) inside the install directory.
+  std::wstring cmd = L"\"" + exe_dir + L"\\core\\easypass_core.exe\" --serve";
   STARTUPINFOW si = {sizeof(si)};
   PROCESS_INFORMATION pi = {};
   // NOTE: do NOT pass STARTF_USESHOWWINDOW/SW_HIDE here. Diagnostic testing
@@ -244,6 +249,36 @@ SOCKET ConnectToDaemon() {
                           (unsigned char)((n >> 24) & 0xff)};
   send(s, reinterpret_cast<const char*>(len), 4, 0);
   send(s, hs.data(), (int)hs.size(), 0);
+
+  // Consume the handshake acknowledgement.
+  //
+  // The core answers every handshake with exactly one frame (ok + version
+  // info). It carries no requestId, so the extension ignored it - but
+  // forwarding it made the frame stream start with a response nobody asked
+  // for, and it made end-to-end probes (probe_bridge.mjs) attribute that
+  // frame to their first request. Dropping it here means the extension only
+  // ever sees answers to its own requests.
+  unsigned char ack_len[4];
+  if (!RecvExact(s, ack_len, 4)) {
+    closesocket(s);
+    return INVALID_SOCKET;
+  }
+  const unsigned int ack_size = (unsigned int)ack_len[0] |
+                                ((unsigned int)ack_len[1] << 8) |
+                                ((unsigned int)ack_len[2] << 16) |
+                                ((unsigned int)ack_len[3] << 24);
+  // 1 MiB ceiling: the acknowledgement is a tiny JSON object; anything larger
+  // means the peer is not the core we expect.
+  if (ack_size == 0 || ack_size > (1u << 20)) {
+    closesocket(s);
+    return INVALID_SOCKET;
+  }
+  std::string ack(ack_size, '\0');
+  if (!RecvExact(s, &ack[0], ack_size)) {
+    closesocket(s);
+    return INVALID_SOCKET;
+  }
+
   return s;
 }
 

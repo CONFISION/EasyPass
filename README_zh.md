@@ -6,19 +6,21 @@
 机器上，常驻的后台服务让它随时可用，浏览器里一键自动填充。长期目标是做一个**可自部署的
 Bitwarden 替代品** —— 同样的便利，但不把数据交给别人的云。
 
-![release](https://img.shields.io/badge/release-2.4.0-blue)
+![release](https://img.shields.io/badge/release-3.0.0-blue)
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D6)
-![tests](https://img.shields.io/badge/tests-570%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-549%20passing-brightgreen)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-> **当前版本 2.4.0 —— 迁移与分发。** 本版新增 **Bitwarden / Vaultwarden 导入**（JSON 与 CSV）与
-> **Bitwarden 兼容导出**，让迁移不再是单程票；修掉了**改主密码可能永久锁死保险库**的数据丢失路径
-> （轮换日志与整库重加密现在同一个 SQLite 事务提交，钥匙串写失败不再致命）；补上 **CI**
-> （analyze / test / 扩展自检四连 / runner 语法检查，tag 触发发布）与**发布工程化**
-> （`SHA256SUMS.txt` + 产物清单）。
+> **当前版本 3.0.0 —— 核心服务架构。** 保险库改由一个**独立、常驻、无窗口无托盘的核心服务进程**
+> （`easypass_core`）持有：它是唯一打开数据库、唯一持密钥的进程，只有用户显式退出才结束。
+> 桌面界面变成**纯客户端**，托盘只属于界面，菜单提供 **仅退出界面** 与 **完整退出服务** 两项；
+> 关窗只是收起窗口，核心照常运行。浏览器扩展同样接入这个核心，永远不会自己另起一个实例。
 >
-> 保险库功能沿用 2.3.x：**四种条目类型**（登录 / 安全笔记 / 身份信息 / SSH 密钥）+ 自定义字段、
-> 实时 TOTP、文件夹管理；平台支持 Windows 与 Linux 桌面端。
+> 这是一次架构与安全模型变更（密钥材料改存库文件的 `vault_meta`，并在升级时一次性从系统钥匙串
+> 迁入），所以版本号走 major。保险库坐标与条目格式**完全不变**，升级不需要迁移数据。
+>
+> 保险库功能沿用 2.3.x / 2.4.x：**四种条目类型**（登录 / 安全笔记 / 身份信息 / SSH 密钥）+
+> 自定义字段、实时 TOTP、文件夹管理、Bitwarden 导入导出。
 
 ---
 
@@ -26,8 +28,9 @@ Bitwarden 替代品** —— 同样的便利，但不把数据交给别人的云
 
 - **数据只在自己设备上。** 保险库就是一个本地 SQLite 文件；所有敏感字段用主密码派生的密钥做
   AES-256-CBC 加密，主密码本身**从不保存**。没有账号、没有服务器、没有遥测。
-- **真后台服务，而不是"假装常驻"的应用。** 自 2.0 起保险库核心作为无窗口服务运行
-  （`easypass.exe --service`），扩展通过本机桥接与它通信 —— 界面没打开也能自动填充。
+- **真后台服务，而不是"假装常驻"的应用。** 自 3.0 起保险库由一个独立的核心服务进程
+  （`easypass_core`）持有：无窗口、无托盘、常驻、唯一，只有用户显式退出才结束。界面与浏览器
+  扩展都只是它的客户端 —— 关掉界面甚至关掉浏览器，核心与保险库状态都还在。
 - **自动填充尊重页面。** 页面里没有可见的密码输入框就绝不注入；扩展永远不会在网页里索要
   主密码；只有**登录类型**的条目会被提供给填充。
 - **密钥不出桌面进程。** TOTP 密钥在服务进程里解密并算出 6 位验证码，浏览器只拿得到验证码。
@@ -96,11 +99,13 @@ Bitwarden 替代品** —— 同样的便利，但不把数据交给别人的云
 | 应用菜单项 | Inno Setup 创建快捷方式 | `--install`（桌面项 + hicolor 图标）、`--desktop-status`、`--uninstall` |
 | 浏览器宿主注册 | Inno Setup 写注册表 | `--install-browser-host` 写各浏览器的清单文件 |
 
-- 后台服务（`easypass.exe --service`）：无窗口，由 native messaging 桥接按需冷启动，空闲 10 分钟
-  自行退出。
+- 核心服务（`core\easypass_core.exe`）：**独立、常驻、无窗口、无托盘**，唯一打开加密 SQLite
+  并持有会话密钥；由固定回环端口保证单实例；**不会空闲自退** —— 只有显式退出才结束。
+- 界面（`easypass.exe`）是纯客户端：启动时按需拉起核心，自己不开库、不持密钥。托盘属于界面，
+  菜单两项：**仅退出界面** / **完整退出服务**；关窗只收起窗口。
 - 链路（Windows）：浏览器 → `easypass_native_host.exe`（x86 桥接）→ 带随机令牌握手的回环 TCP →
-  服务进程 → 加密 SQLite。Linux 上的 native messaging 宿主就是主程序自身
-  （`easypass --native-host`，由生成的包装脚本启动）。
+  核心服务 → 加密 SQLite。Linux 上无独立桥接：包装脚本直接
+  `exec easypass_core --bridge`，由核心自己转发。
 - 两个平台都在原生层强制最小窗口 900×600，侧边栏宽度固定。
 
 ## 安装
@@ -307,6 +312,14 @@ GitHub Actions CI、校验值与代码签名。
 
 ## 发布说明
 
+### 3.0.0 —— 核心服务架构
+
+- **保险库只有一个所有者**：新增独立的核心服务进程 `easypass_core`（纯 Dart，无 Flutter、
+  无窗口、无托盘）。桌面界面变纯客户端，浏览器扩展与未来的智能体接口都接入同一个核心。
+- **两档退出**：托盘"仅退出界面"让核心继续服务浏览器；"完整退出服务"才会停掉核心。
+- **密钥材料迁入库文件的 `vault_meta`**，升级时从系统钥匙串一次性交接（旧值保留，可回退）。
+- 修掉 2.4.x 的一个缺陷：无窗口的 `--service` 进程也会注册托盘图标，菜单能把一个空窗口显示出来。
+
 ### 2.4.0 —— 迁移与分发
 
 **进得来，也出得去。** Bitwarden / Vaultwarden 用户可以把保险库整个搬过来：直接读 Bitwarden 的
@@ -351,8 +364,8 @@ GitHub Actions CI、校验值与代码签名。
 2. **仅 Linux 的权限收紧。** 数据目录 `0700`，数据库与迁移临时文件 `0600`，native host 包装脚本
    `0700`，浏览器清单 `0644` 且位于 `0700` 目录内。这些 POSIX 位只是 Linux 侧加固；Windows 仍沿用
    `%LOCALAPPDATA%` 的 ACL 行为。
-3. **Linux 的 native messaging 宿主就是主程序自身**（`easypass --native-host`，由生成的包装脚本
-   启动）。Windows 继续使用独立的 x86 桥接可执行文件与 `--service` 服务契约。
+3. **Linux 的 native messaging 宿主就是核心服务本身**（`easypass_core --bridge`，由生成的包装脚本
+   启动）。Windows 继续使用独立的 x86 桥接可执行文件，宿主会拉起/复用同一个核心服务。
 4. **同期加固了 Windows 的托盘处理**：runner 现在会确认图标是否真的注册成功（宁可在关窗时退出，
    也不隐藏一个没人能叫回来的窗口），Explorer 重启后会重新添加图标（`TaskbarCreated`），并把
    900×600 的最小窗口尺寸同样施加到 Linux。

@@ -14,8 +14,8 @@ import 'package:easypass/data/models/entry_fields.dart';
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
 import 'package:easypass/data/repositories/vault_repository.dart';
-import 'package:easypass/features/browser_bridge/native_messaging_service.dart';
-import 'package:easypass/features/browser_bridge/vault_session.dart';
+import 'package:easypass/core_service/native_messaging_service.dart';
+import 'package:easypass/core_service/vault_session.dart';
 
 import 'fakes.dart';
 

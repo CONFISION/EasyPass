@@ -1,74 +1,51 @@
-import 'package:drift/drift.dart' show driftRuntimeOptions;
-import 'package:drift/native.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:easypass/core/crypto/crypto_service.dart';
-import 'package:easypass/data/database/database.dart';
+import 'package:easypass/core/storage/vault_meta_secret_store.dart';
+import 'package:easypass/core_service/core_actions.dart';
 import 'package:easypass/data/models/entry_fields.dart';
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
-import 'package:easypass/data/repositories/vault_repository.dart';
-import 'package:easypass/data/services/export_import_service.dart';
 import 'package:easypass/data/services/master_password_rotation.dart';
-import 'package:easypass/features/auth/providers/auth_provider.dart';
+import 'package:easypass/protocol/protocol.dart';
 
-import 'fakes.dart';
+import 'core_actions_harness.dart';
 
 /// 改主密码的**失败原子性**回归（v2.4 首要项）。
 ///
-/// 背景：`changeMasterPassword` 有两次独立写入 —— 先把整库用新钥匙重加密
-/// （SQLite 事务，可靠），再把新的 salt + 校验哈希写进 `flutter_secure_storage`
-/// （**不受事务保护**）。后者在真实世界会失败：Linux 的 Secret Service 不可用
-/// （纯 tty / keyring 上锁），或 Windows 上进程被完整性标签降权写不了
-/// `%APPDATA%`（HANDOFF §4 第 14 条的真实事故）。
+/// 背景：`changeMasterPassword` 要同时改动两个存储系统 ——
+/// 1. **条目密文**（SQLite 事务）；
+/// 2. **校验材料 salt + 哈希**（历史上在 `flutter_secure_storage`，**没有事务**）。
 ///
-/// 危险窗口在 `storeKeyMaterial` **内部**：它先写 salt、后写哈希，所以
-/// "salt 写成功、哈希写失败"会留下这样一个库：
+/// 旧实现在 2 的内部还要写两次（先 salt、后哈希），"整库已用新钥匙重写、而校验
+/// 材料半新半旧"是可达状态，结果是**新旧主密码都开不了库** = 静默丢数据。
 ///
-///   - 条目密文 = 新钥匙加密
-///   - salt     = 新 salt
-///   - 校验哈希 = 旧哈希（用旧 salt 算的）
+/// M4 之后校验材料搬进了库文件的 `vault_meta`，且与整库重加密**同一个事务域**；
+/// 但"写不进去"这件事在真实世界依然存在（磁盘满 / 库文件只读 / 权限被降级）。
+/// 所以不变量必须继续被测：**日志存在 ⇒ 整库已在新钥匙上 ⇒ 新密码一定能开库**。
 ///
-/// 于是**新旧主密码都开不了库**：新密码算出的哈希对不上旧哈希，旧密码虽然
-/// 校验通过、但派生出的是旧钥匙，解不开新密文（宽容模式只会解成空串）。
-/// 这正是"静默丢数据"。
-///
-/// 本文件先用 `failWriteFrom` 复现这个状态，再断言修复后的行为。
+/// 本文件用 [FailingSecretStore] 注入"写入第 n 次起全失败"，覆盖原来的
+/// `FakeSecureStorage.failWriteFrom` 场景；动作打在 `CoreActions` 上（UI 的实际
+/// 路径，见 `test/core_actions_harness.dart`）。
 void main() {
-  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
-
   const oldPassword = 'old-master-password';
   const newPassword = 'new-master-password';
   const entryId = 'rotate-me';
 
-  late ProviderContainer container;
-  late FakeSecureStorage storage;
-  late CryptoService crypto;
-  late AppDatabase db;
+  late FailingSecretStore materialStore;
+  late CoreVault vault;
 
-  Future<void> buildContainer({int? failWriteFrom}) async {
-    storage = FakeSecureStorage();
-    if (failWriteFrom != null) {
-      storage.failWriteFrom = failWriteFrom;
-    }
-    crypto = CryptoService(secureStorage: storage);
-    db = AppDatabase.forTesting(NativeDatabase.memory());
+  setUp(() {
+    vault = CoreVault.create(
+      storeFactory: (inner) => materialStore = FailingSecretStore(inner),
+    );
+    addTearDown(vault.close);
+  });
 
-    container = ProviderContainer(overrides: [
-      cryptoServiceProvider.overrideWithValue(crypto),
-      databaseProvider.overrideWithValue(db),
-    ]);
-    addTearDown(container.dispose);
-
-    // 首次设置主密码：写入 #1（salt）、#2（哈希）。
-    final ok = await container
-        .read(authProvider.notifier)
-        .setMasterPassword(oldPassword, oldPassword);
-    expect(ok, isTrue, reason: '初始状态搭建失败');
-
-    // 放一条四种类型都会碰到的条目：登录字段 + 自定义字段。
-    await container.read(vaultRepositoryProvider).saveItem(VaultItem(
+  /// 首次设置主密码（写 #1 salt、#2 哈希）+ 放一条登录条目。
+  Future<CoreHarness> seed() async {
+    final core = await vault.boot();
+    await core.setMasterPassword(oldPassword);
+    await core.repository.saveItem(VaultItem(
           id: entryId,
           type: EntryType.login,
           name: 'Rotate',
@@ -88,194 +65,192 @@ void main() {
           createdAt: 0,
           updatedAt: 0,
         ));
+    return core;
   }
 
   /// 数据库里那条记录的原始密文 —— 用它判断"整库到底有没有被换钥匙"。
   Future<String> rawPasswordCiphertext() async {
-    final rows = await db.getAllEntries();
-    final row = rows.firstWhere((r) => r.id == entryId);
-    return row.passwordEncrypted;
+    final rows = await vault.db.getAllEntries();
+    return rows.firstWhere((r) => r.id == entryId).passwordEncrypted;
   }
 
   /// 当前会话密钥能读出的密码（宽容模式：解不开就是空串）。
-  Future<String?> readPasswordWithSessionKey() async {
-    final item = await container.read(vaultRepositoryProvider).getItem(entryId);
+  Future<String?> readPasswordWithSessionKey(CoreHarness core) async {
+    final item = await core.repository.getItem(entryId);
     return item?.loginOrEmpty.password;
   }
 
-  group('复现：改主密码中途失败曾会锁死保险库', () {
-    test('salt 写不进去时，整库照样完成轮换且不留下半新半旧的状态', () async {
-      await buildContainer();
+  group('复现：改主密码中途写不进校验材料', () {
+    test('整库照样完成轮换，且不留半新半旧的状态', () async {
+      final core = await seed();
       final ciphertextBefore = await rawPasswordCiphertext();
 
-      // 让轮换过程中的**第一次** secure-storage 写入（salt）就抛错。
-      // 于是 storeKeyMaterial 在写哈希之前中断 —— 旧实现正是在这里丢数据。
-      storage.failWriteFrom = storage.writeCount + 1;
+      // 让轮换过程中**下一次**写入就失败（轮换要写 salt + hash 两次）。
+      materialStore.failWriteFrom = materialStore.writeCount + 1;
 
-      await container
-          .read(authProvider.notifier)
-          .changeMasterPassword(oldPassword, newPassword, newPassword);
+      await core.changeMasterPassword(current: oldPassword, next: newPassword);
 
-      // 整库确实换成新钥匙的密文（危险窗口本身是真实的）。
+      // 整库确实换成了新钥匙的密文（危险窗口本身是真实的）。
       expect(await rawPasswordCiphertext(), isNot(ciphertextBefore),
           reason: '前置条件失败：整库应当已被重加密');
 
       // 但**不允许**出现"新 salt + 旧哈希"这种自相矛盾的校验材料：
-      // 轮换日志承载了目标校验材料，secure storage 写失败时日志被保留。
-      final journal = await db.getMeta(MasterPasswordRotation.metaKey);
+      // 轮换日志承载了目标校验材料，写失败时日志被保留。
+      final journal = await vault.db.getMeta(MasterPasswordRotation.metaKey);
       expect(journal, isNotNull,
-          reason: 'secure storage 写失败时，轮换日志必须保留（它是新密码的唯一依据）');
+          reason: '校验材料写失败时，轮换日志必须保留（它是新密码的唯一依据）');
       final pending = PendingRotation.tryParse(journal);
       expect(pending, isNotNull);
 
-      // 日志里的校验材料必须与"当前整库的钥匙"一致：用日志的 salt 算新密码，
-      // 得到的哈希就要等于日志里的哈希。
+      // 日志里的校验材料必须与"当前整库的钥匙"一致。
       expect(
-        crypto.hashMasterPassword(newPassword, pending!.salt),
+        core.crypto.hashMasterPassword(newPassword, pending!.salt),
         pending.passwordHash,
         reason: '日志与整库密文必须同源，否则又会退回"两边都开不了"',
       );
 
-      // 而 secure storage 里仍是旧材料（写失败了）—— 这正是需要日志兜底的场景。
-      expect(await crypto.getStoredPasswordHash(), isNot(pending.passwordHash),
-          reason: '故障注入没生效：secure storage 不该已经是新哈希');
-      final hashWithStoredSalt =
-          crypto.hashMasterPassword(newPassword, (await crypto.getStoredSalt())!);
-      expect(hashWithStoredSalt, isNot(await crypto.getStoredPasswordHash()),
-          reason: '故障注入没生效：这不构成"verifier 与 salt 不匹配"的状态');
+      // 而 vault_meta 里仍是旧材料（写失败了）—— 这正是需要日志兜底的场景。
+      expect(await core.crypto.getStoredPasswordHash(),
+          isNot(pending.passwordHash),
+          reason: '故障注入没生效：不该已经是新哈希');
+      final storedSalt = (await core.crypto.getStoredSalt())!;
+      expect(
+        core.crypto.hashMasterPassword(newPassword, storedSalt),
+        isNot(await core.crypto.getStoredPasswordHash()),
+        reason: '故障注入没生效：这不构成"verifier 与 salt 不匹配"的状态',
+      );
+
+      // 校验材料落在库文件的 vault_meta 里（D1）；两个键都还在旧值上。
+      expect(
+        await vault.db.getMeta(
+          '${VaultMetaSecretStore.keyPrefix}easypass_master_pw_hash',
+        ),
+        isNotNull,
+      );
     });
 
     test('故障后必须至少有一把主密码还能开库（不许两边都开不了）', () async {
-      await buildContainer();
-      storage.failWriteFrom = storage.writeCount + 1;
+      final core = await seed();
+      materialStore.failWriteFrom = materialStore.writeCount + 1;
+      await core.changeMasterPassword(current: oldPassword, next: newPassword);
 
-      await container
-          .read(authProvider.notifier)
-          .changeMasterPassword(oldPassword, newPassword, newPassword);
+      // 模拟用户重新启动：同一份库，全新会话。
+      final restarted = await vault.boot();
 
-      // 模拟用户重新启动 / 锁定后重试两种密码。
-      container.read(encryptionKeyProvider.notifier).state = null;
-      final oldWorks =
-          await container.read(authProvider.notifier).unlock(oldPassword);
-      if (!oldWorks) {
-        container.read(encryptionKeyProvider.notifier).state = null;
-      }
-      final newWorks = oldWorks
-          ? false
-          : await container.read(authProvider.notifier).unlock(newPassword);
+      // 有日志 ⇒ 只有日志里的目标密码有效；旧密码在**校验阶段**就被拒
+      // （不再放行一把解不开库的钥匙）。
+      await expectLater(
+        restarted.unlock(oldPassword),
+        throwsA(
+          isA<CoreActionException>().having(
+            (e) => e.code,
+            'code',
+            ErrorCodes.unauthorized,
+          ),
+        ),
+        reason: '旧密码不该再被放行',
+      );
 
-      expect(oldWorks || newWorks, isTrue,
+      // 新密码必须能进来 —— 依据是库里的轮换日志，**不依赖**校验材料是否写得进去
+      // （此刻它仍然是坏的）。这是"不许两边都开不了"的核心保证。
+      final unlocked = await restarted.unlock(newPassword);
+      expect(unlocked['success'], isTrue,
           reason: '灾难：新旧主密码都无法解锁，条目永久解不开（静默丢数据）');
 
       // 而且解开之后数据必须真的能读出来（不是解锁了却全是空串）。
-      expect(await readPasswordWithSessionKey(), 'secret-pw',
+      expect(await readPasswordWithSessionKey(restarted), 'secret-pw',
           reason: '解锁成功了却读不出明文 —— 仍然是丢数据');
     });
   });
 
-  group('修复后：轮换具备全有或全无语义', () {
-    test('存储可用时轮换成功，新密码生效、旧密码失效', () async {
-      await buildContainer();
-      final ciphertextBefore = await rawPasswordCiphertext();
+  group('故障之后：新密码能开库，旧密码被明确拒绝', () {
+    test('旧密码的拒绝理由要落到"主密码不正确"而不是含糊的失败', () async {
+      final core = await seed();
+      materialStore.failWriteFrom = materialStore.writeCount + 1;
+      await core.changeMasterPassword(current: oldPassword, next: newPassword);
 
-      final changed = await container
-          .read(authProvider.notifier)
-          .changeMasterPassword(oldPassword, newPassword, newPassword);
-      expect(changed, isTrue);
+      final restarted = await vault.boot();
+      try {
+        await restarted.unlock(oldPassword);
+        fail('旧密码不该被接受');
+      } on CoreActionException catch (error) {
+        expect(error.code, ErrorCodes.unauthorized);
+        expect(error.message, contains('主密码不正确'));
+      }
 
-      expect(await rawPasswordCiphertext(), isNot(ciphertextBefore),
-          reason: '轮换应当真的换掉了密文');
-
-      // 改完即锁定：不再能读到明文（会话密钥已清空）。
-      expect(await readPasswordWithSessionKey(), isNull,
-          reason: '改完主密码应当回到锁定态');
-
-      expect(await container.read(authProvider.notifier).unlock(newPassword),
-          isTrue, reason: '新密码应当能开库');
-      expect(await readPasswordWithSessionKey(), 'secret-pw');
-
-      container.read(authProvider.notifier).lock();
-      expect(await container.read(authProvider.notifier).unlock(oldPassword),
-          isFalse, reason: '旧密码不应再能开库');
+      expect(await restarted.repository.getItem(entryId), isNull,
+          reason: '被拒绝的解锁不该留下半个会话');
     });
 
-    test('钥匙串写失败时：新密码能开库，旧密码被明确拒绝而不是静默损坏', () async {
-      await buildContainer();
-      final ciphertextBefore = await rawPasswordCiphertext();
-
-      storage.failWriteFrom = storage.writeCount + 1;
-      // 轮换在语义上是**成功**的：整库已换钥匙、新密码可用。钥匙串写失败只是
-      // 降级（校验材料改由库内日志承载），不该向用户报"修改失败"。
-      final changed = await container
-          .read(authProvider.notifier)
-          .changeMasterPassword(oldPassword, newPassword, newPassword);
-      expect(changed, isTrue,
-          reason: '整库确实换钥匙了，谎报失败会让用户以为密码没变');
-
-      // 整库已是新钥匙密文。
-      expect(await rawPasswordCiphertext(), isNot(ciphertextBefore));
-
-      // 新密码：能开库，且能读出明文。
-      container.read(encryptionKeyProvider.notifier).state = null;
-      expect(await container.read(authProvider.notifier).unlock(newPassword),
-          isTrue, reason: '钥匙串坏了也必须能用新密码开库（靠轮换日志）');
-      expect(await readPasswordWithSessionKey(), 'secret-pw');
-
-      // 旧密码：被明确拒绝。有轮换日志 ⇒ 整库已是新钥匙的密文，旧密码在
-      // 校验阶段就被判否（不再放行一把解不开库的钥匙），所以这里报的是
-      // "主密码错误"——对用户来说比"含糊的解锁失败"清楚。
-      container.read(encryptionKeyProvider.notifier).state = null;
-      expect(await container.read(authProvider.notifier).unlock(oldPassword),
-          isFalse);
-      expect(
-        container.read(authProvider).errorMessage,
-        AuthErrorCodes.incorrectMasterPassword,
-      );
-    });
-
-    test('钥匙串恢复后，残留的轮换日志会被自动清掉（收敛回去）', () async {
-      await buildContainer();
-      storage.failWriteFrom = storage.writeCount + 1;
-      await container
-          .read(authProvider.notifier)
-          .changeMasterPassword(oldPassword, newPassword, newPassword);
-      expect(await db.getMeta(MasterPasswordRotation.metaKey), isNotNull,
+    test('校验材料恢复后，残留的轮换日志会被自动清掉（收敛回去）', () async {
+      final core = await seed();
+      materialStore.failWriteFrom = materialStore.writeCount + 1;
+      await core.changeMasterPassword(current: oldPassword, next: newPassword);
+      expect(await vault.db.getMeta(MasterPasswordRotation.metaKey), isNotNull,
           reason: '前置条件：此刻日志应当还在');
 
-      // 钥匙串恢复可用，用户再解锁一次。
-      storage.failWriteFrom = null;
-      container.read(encryptionKeyProvider.notifier).state = null;
-      expect(await container.read(authProvider.notifier).unlock(newPassword),
-          isTrue);
+      // 存储恢复可用，用户重新启动并用新密码解锁。
+      materialStore.failWriteFrom = null;
+      final restarted = await vault.boot();
+      await restarted.unlock(newPassword);
 
-      expect(await db.getMeta(MasterPasswordRotation.metaKey), isNull,
-          reason: '钥匙串恢复后日志应当被清掉，不该永久留在库里');
-      expect(await crypto.getStoredPasswordHash(), isNotNull);
-      expect(await readPasswordWithSessionKey(), 'secret-pw');
+      expect(await vault.db.getMeta(MasterPasswordRotation.metaKey), isNull,
+          reason: '存储恢复后日志应当被清掉，不该永久留在库里');
+
+      final salt = (await restarted.crypto.getStoredSalt())!;
+      expect(
+        await restarted.crypto.getStoredPasswordHash(),
+        restarted.crypto.hashMasterPassword(newPassword, salt),
+        reason: '日志清掉之后，vault_meta 里必须是新密码的校验材料',
+      );
+      expect(await readPasswordWithSessionKey(restarted), 'secret-pw');
     });
 
     test('导出在轮换失败后仍然可用（备份路径没被破坏）', () async {
-      await buildContainer();
-      storage.failWriteFrom = storage.writeCount + 1;
-      await container
-          .read(authProvider.notifier)
-          .changeMasterPassword(oldPassword, newPassword, newPassword);
+      final core = await seed();
+      materialStore.failWriteFrom = materialStore.writeCount + 1;
+      await core.changeMasterPassword(current: oldPassword, next: newPassword);
 
-      container.read(encryptionKeyProvider.notifier).state = null;
-      final unlocked =
-          await container.read(authProvider.notifier).unlock(newPassword);
-      expect(unlocked, isTrue);
+      final restarted = await vault.boot();
+      await restarted.unlock(newPassword);
 
-      final service = ExportImportService(
-        db,
-        () => container.read(encryptionKeyProvider) ??
-            (throw Exception('Vault is locked')),
-        repository: container.read(vaultRepositoryProvider),
-        cryptoService: crypto,
-      );
-      final json = await service.exportPlainJson();
+      final json = await restarted.exporter.exportPlainJson();
       expect(json, contains('secret-pw'),
-          reason: '回滚后导出应当仍能拿到明文，用户才有自救手段');
+          reason: '轮换失败后导出仍要能拿到明文，用户才有自救手段');
+    });
+  });
+
+  group('存储可用时：轮换是全有或全无', () {
+    test('轮换成功：日志不留、材料是新密码的、旧密码被拒', () async {
+      final core = await seed();
+      final ciphertextBefore = await rawPasswordCiphertext();
+
+      await core.changeMasterPassword(current: oldPassword, next: newPassword);
+
+      expect(await rawPasswordCiphertext(), isNot(ciphertextBefore),
+          reason: '轮换应当真的换掉了密文');
+      expect(await vault.db.getMeta(MasterPasswordRotation.metaKey), isNull,
+          reason: '成功轮换不该留下日志');
+
+      // 改完即锁定：读不到明文。
+      expect(await readPasswordWithSessionKey(core), isNull,
+          reason: '改完主密码应当回到锁定态');
+
+      await core.unlock(newPassword);
+      expect(await readPasswordWithSessionKey(core), 'secret-pw');
+
+      await core.lock();
+      await expectLater(
+        core.unlock(oldPassword),
+        throwsA(
+          isA<CoreActionException>().having(
+            (e) => e.code,
+            'code',
+            ErrorCodes.unauthorized,
+          ),
+        ),
+        reason: '旧密码不应再能开库',
+      );
     });
   });
 }

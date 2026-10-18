@@ -1,23 +1,16 @@
-import 'dart:typed_data';
-
-import 'package:drift/drift.dart' show driftRuntimeOptions;
-import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
-import 'package:easypass/core/crypto/crypto_service.dart';
-import 'package:easypass/data/database/database.dart';
+import 'package:easypass/client/api_providers.dart';
 import 'package:easypass/data/models/entry_fields.dart';
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
-import 'package:easypass/data/repositories/vault_repository.dart';
-import 'package:easypass/data/state/session_key.dart';
 import 'package:easypass/features/health/screens/health_screen.dart';
 import 'package:easypass/l10n/app_localizations.dart';
 
-import 'fakes.dart';
+import 'fake_vault_api.dart';
 
 /// 健康报告页布局 / 文案回归（2.3.0）：
 /// 1) 明确写出"只统计登录条目"，并显示被分析的登录条目数；
@@ -25,39 +18,28 @@ import 'fakes.dart';
 /// 3) 安全笔记 / 身份 / SSH 条目不出现在任何问题列表里；
 /// 4) **900×600（原生最小窗口）下不出现 RenderFlex 溢出** —— 超长条目名也不能撑破；
 /// 5) 点问题条目跳到 `/vault/entry/:id`；
-/// 6) 加载失败时给出错误 + 重试按钮。
+/// 6) 核心读不出来时给出错误 + 重试按钮（重试能自愈）；
+/// 7) **未解锁不再算错误**（M4）：核心抛 locked → 空报告，而不是红屏。
 void main() {
-  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
-
   /// 与原生层的最小窗口尺寸一致（`windows/runner/win32_window.cpp`）。
   const minWindow = Size(900, 600);
 
   final l10n = lookupAppLocalizations(const Locale('en'));
 
-  // PBKDF2（100k 次）很慢：整个文件只派生一把会话密钥，所有测试复用。
-  final seedCrypto = CryptoService(secureStorage: FakeSecureStorage());
-  late final Uint8List sessionKey = seedCrypto.deriveKey(
-    'master-password',
-    seedCrypto.generateSalt(),
-  );
-
+  late FakeVaultApi api;
   late ProviderContainer container;
 
   setUp(() {
+    api = FakeVaultApi(initialStatus: 'unlocked');
     container = ProviderContainer(
-      overrides: [
-        cryptoServiceProvider.overrideWithValue(
-          CryptoService(secureStorage: FakeSecureStorage()),
-        ),
-        databaseProvider.overrideWithValue(
-          AppDatabase.forTesting(NativeDatabase.memory()),
-        ),
-      ],
+      overrides: [vaultApiProvider.overrideWithValue(api)],
     );
-    container.read(encryptionKeyProvider.notifier).state = sessionKey;
   });
 
-  tearDown(() => container.dispose());
+  tearDown(() {
+    container.dispose();
+    api.dispose();
+  });
 
   /// 超长名字：列表项必须换行 / 省略，而不是把窗口撑出黄黑条纹。
   final longName = 'A-Very-Long-Entry-Name-${'x' * 120}-END';
@@ -122,38 +104,37 @@ void main() {
   /// 评分预期：弱密码 1 个(-10) + 重复密码 1 组(-15) + 无 TOTP 2 个(-4)
   /// + 无 URL 2 个(-4) = 67 分。
   Future<void> seedVault() async {
-    final repo = container.read(vaultRepositoryProvider);
-    await repo.saveItem(login(
+    await api.saveItem(login(
       id: 'weak',
       name: longName,
       password: '123456',
     ));
-    await repo.saveItem(login(
+    await api.saveItem(login(
       id: 'reused-a',
       password: 'Tr0ub4dor&3X!9',
       url: 'https://a.example.com',
       totpSecret: 'JBSWY3DPEHPK3PXP',
     ));
-    await repo.saveItem(login(
+    await api.saveItem(login(
       id: 'reused-b',
       password: 'Tr0ub4dor&3X!9',
       url: 'https://b.example.com',
       totpSecret: 'JBSWY3DPEHPK3PXP',
     ));
-    await repo.saveItem(login(
+    await api.saveItem(login(
       id: 'nototp',
       password: 'AnotherStr0ng!pw',
       url: 'https://c.example.com',
     ));
-    await repo.saveItem(login(
+    await api.saveItem(login(
       id: 'nourl',
       password: 'ThirdStr0ng!pw',
       totpSecret: 'JBSWY3DPEHPK3PXP',
     ));
     for (final item in nonLoginItems()) {
-      await repo.saveItem(item);
+      await api.saveItem(item);
     }
-    expect(await repo.countItems(), 8);
+    expect(api.items, hasLength(8));
   }
 
   Future<void> pumpHealthScreen(WidgetTester tester) async {
@@ -188,6 +169,13 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+
+    // 健康页拉起后才会真的问核心要条目；断言放在这里（放在 seedVault 里时
+    // provider 还没跑，listItemRequests 是空的）。
+    // 只该要**登录**条目：安全笔记 / 身份 / SSH 不参与评分。
+    expect(api.listItemRequests, isNotEmpty,
+        reason: '健康页应该已经向核心请求过条目');
+    expect(api.listItemRequests.last.type, EntryType.login);
   }
 
   /// 一屏一屏往下滚，收集期间渲染过的所有 `Text`（列表是懒加载的，
@@ -262,12 +250,42 @@ void main() {
     expect(find.text('entry-detail-reused-a'), findsOneWidget);
   });
 
-  testWidgets('保险库未解锁时显示错误状态与重试按钮', (tester) async {
+  testWidgets('核心读不出来时显示错误状态，重试能自愈', (tester) async {
     await seedVault();
-    container.read(encryptionKeyProvider.notifier).state = null;
+    api.readFailure = StateError('核心不可达');
     await pumpHealthScreen(tester);
 
     expect(find.byIcon(Icons.health_and_safety_outlined), findsOneWidget);
     expect(find.text(l10n.retry), findsOneWidget);
+
+    // 核心回来了 → 点重试必须真的重新取数（而不是永远停在错误页）。
+    api.readFailure = null;
+    await tester.tap(find.text(l10n.retry));
+    await tester.pumpAndSettle();
+
+    expect(find.text('67'), findsOneWidget, reason: '重试后拿到真报告');
+    expect(find.byIcon(Icons.health_and_safety_outlined), findsNothing);
+  });
+
+  testWidgets('未解锁不再算错误：空报告而不是红屏（M4 契约）', (tester) async {
+    await seedVault();
+    api.lockEnforcedReads = true;
+    api.forceStatus('locked');
+    await pumpHealthScreen(tester);
+
+    // 核心抛 locked ⇒ provider 当成"没有可分析的条目"，不冒泡成错误态。
+    expect(find.byIcon(Icons.health_and_safety_outlined), findsNothing,
+        reason: '未解锁不该把健康页打成红屏');
+    expect(find.text(l10n.retry), findsNothing);
+    expect(find.text(l10n.healthLoginCount(0)), findsOneWidget);
+
+    // 解锁后自动恢复（核心的 sessionUnlocked 事件不经 UI 通道，靠轮询兜底）。
+    // 这里必须让它跑完轮询：否则测试结束时还挂着一个未触发的 Timer。
+    api.forceStatus('unlocked');
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+
+    expect(find.text('67'), findsOneWidget, reason: '解锁后自动把报告算出来');
+    expect(find.text(l10n.healthLoginCount(5)), findsOneWidget);
   });
 }

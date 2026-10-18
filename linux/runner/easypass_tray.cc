@@ -1,6 +1,11 @@
 #include "easypass_tray.h"
 
 #include <flutter_linux/flutter_linux.h>
+// WIFEXITED / WEXITSTATUS：`g_spawn_sync` 回的是 `waitpid()` 原始状态。
+// 刻意**不用** `g_spawn_check_wait_status()`（GLib 2.70+ 才有）：AppImage 不
+// 打包 GLib，用的是发行版运行时，多要一个新符号就多一类"老发行版上点菜单即
+// 崩"的失败模式；这个文件其余 API 也都在很旧的 GLib 里就有。
+#include <sys/wait.h>
 
 #ifdef HAVE_AYATANA
 #include <libayatana-appindicator/app-indicator.h>
@@ -29,12 +34,55 @@ const char* kIconSuffixes[] = {
     "../assets/icons/Easypass.png",
 };
 
-gchar* resolve_icon_path() {
+// 核心可执行文件名。安装布局把它放在 UI 旁边的 `core/` 子目录（核心按
+// `<exe>/../lib/<name>` 解析自己的原生库，见 tool/build_core.sh），开发态的扁平
+// 布局（build/linux/.../bundle、spike_core）则与 UI 同目录。核心不是 GTK 程序，
+// 这里只负责按路径把它拉起来。
+const char* kCoreBinaryName = "easypass_core";
+
+// 核心可执行文件相对 UI 目录的候选位置，按顺序取第一个存在的。
+const char* kCoreRelativePaths[] = {
+    "core/easypass_core",
+    "easypass_core",
+};
+
+// `g_spawn_sync` 需要 `gchar**`（非 const），但不会改写实参，所以给可写的数组
+// 而不是对字符串字面量做 const_cast。
+gchar kShutdownArgument[] = "--shutdown";
+gchar kLockArgument[] = "--lock";
+
+// 本进程 exe 所在目录；`/proc/self/exe` 是 Linux 上唯一可靠的自身路径（cwd 和
+// argv[0] 都可能被调用方改写）。失败返回 nullptr，调用方必须兜底。
+gchar* resolve_exe_dir() {
   g_autofree gchar* exe = g_file_read_link("/proc/self/exe", nullptr);
   if (exe == nullptr) {
     return nullptr;
   }
-  g_autofree gchar* exe_dir = g_path_get_dirname(exe);
+  return g_path_get_dirname(exe);
+}
+
+// 核心服务的绝对路径（`<UI 目录>/core/easypass_core` → `<UI 目录>/easypass_core`）。
+// 找不到返回 nullptr —— 开发态（`flutter run` / 只 build 了 UI）就是这个分支，
+// 调用方必须静默跳过而不是报错。
+gchar* resolve_core_executable() {
+  g_autofree gchar* exe_dir = resolve_exe_dir();
+  if (exe_dir == nullptr) {
+    return nullptr;
+  }
+  for (const char* relative : kCoreRelativePaths) {
+    g_autofree gchar* candidate = g_build_filename(exe_dir, relative, nullptr);
+    if (g_file_test(candidate, G_FILE_TEST_IS_EXECUTABLE)) {
+      return g_strdup(candidate);
+    }
+  }
+  return nullptr;
+}
+
+gchar* resolve_icon_path() {
+  g_autofree gchar* exe_dir = resolve_exe_dir();
+  if (exe_dir == nullptr) {
+    return nullptr;
+  }
   for (const char* suffix : kIconSuffixes) {
     g_autofree gchar* candidate = g_build_filename(exe_dir, suffix, nullptr);
     if (g_file_test(candidate, G_FILE_TEST_IS_REGULAR)) {
@@ -102,16 +150,159 @@ void on_open_activate(GtkMenuItem* item, gpointer user_data) {
   easypass_window_show();
 }
 
-void on_exit_activate(GtkMenuItem* item, gpointer user_data) {
+// 弹一个模态错误框。父窗口**不可见时不挂父窗口**：窗口此时多半藏在托盘里，
+// 把 dialog 设成不可见窗口的 transient 会让部分窗口管理器把提示也一起藏起来
+// —— 用户点了"完整退出服务"却什么都没发生，正是最坏的结果。
+void show_error_dialog(const gchar* primary, const gchar* detail) {
+  GtkWindow* parent = nullptr;
+  if (g_window != nullptr && gtk_widget_get_visible(GTK_WIDGET(g_window))) {
+    parent = g_window;
+  }
+  GtkWidget* dialog = gtk_message_dialog_new(
+      parent, GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+      GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE, "%s", primary);
+  if (detail != nullptr) {
+    gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s",
+                                             detail);
+  }
+  gtk_dialog_run(GTK_DIALOG(dialog));
+  gtk_widget_destroy(dialog);
+}
+
+// 跑一次核心 CLI（`--shutdown` / `--lock`）并等它结束。
+//
+// 成功（退出码 0）返回 TRUE；失败返回 FALSE 并把可读原因写进 *error_detail
+// （调用方负责提示 —— 两个动作的文案不同，这里不弹框）。同步等待
+// （`g_spawn_sync`）会短暂阻塞主循环：这是托盘菜单里的显式动作，核心侧 CLI 自带
+// 超时，卡住的窗口只是"点了没反应"而不是数据风险；换成异步需要把菜单回调拆成
+// 状态机，收益不足。
+gboolean run_core_command(gchar* core, gchar* argument, gchar** error_detail) {
+  g_autofree gchar* exe_dir = resolve_exe_dir();
+  if (exe_dir == nullptr) {
+    *error_detail =
+        g_strdup("The EasyPass installation directory could not be determined.");
+    return FALSE;
+  }
+
+  gchar* argv[] = {core, argument, nullptr};
+  g_autoptr(GError) error = nullptr;
+  gint wait_status = 0;
+  // 核心是控制台程序，stdout/stderr 丢进 /dev/null：桌面启动的 UI 没有终端，
+  // 让输出继承父进程只会污染日志或阻塞。
+  const GSpawnFlags flags = static_cast<GSpawnFlags>(
+      G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL);
+  if (!g_spawn_sync(exe_dir, argv, nullptr, flags, nullptr, nullptr, nullptr,
+                    nullptr, &wait_status, &error)) {
+    *error_detail = g_strdup_printf(
+        "Could not run:\n%s %s\n\n%s", core, argument,
+        error != nullptr ? error->message : "unknown error");
+    return FALSE;
+  }
+
+  // 核心 CLI 契约：成功 0 / 无核心、超时或失败 1。非 0 一律当失败处理，并把
+  // 退出码放进提示，方便用户/我们判断是"没找到核心"还是"停机超时"。
+  if (!WIFEXITED(wait_status) || WEXITSTATUS(wait_status) != 0) {
+    if (WIFEXITED(wait_status)) {
+      *error_detail = g_strdup_printf("`easypass_core %s` exited with code %d.",
+                                      argument, WEXITSTATUS(wait_status));
+    } else {
+      *error_detail = g_strdup_printf(
+          "`easypass_core %s` was terminated abnormally (status %d).", argument,
+          wait_status);
+    }
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+// "完整退出服务"：拉起 `<UI 目录>/core/easypass_core --shutdown` 并等它结束。
+// 返回 TRUE 表示核心已经不在（CLI 退出码 0 —— 契约：无核心运行时也是 0）。
+gboolean stop_core_service() {
+  g_autofree gchar* core = resolve_core_executable();
+  if (core == nullptr) {
+    // 开发态（`flutter run` / 只 build 了 UI）就是这个分支：必须**说清楚**
+    // 找不到核心，而不是静默失败或假装成功退出。文件在但不可执行（例如从
+    // 压缩包解出来丢了权限位）也要说清楚，否则用户会以为"文件明明在"。
+    g_autofree gchar* exe_dir = resolve_exe_dir();
+    g_autofree gchar* expected = exe_dir != nullptr
+                                     ? g_build_filename(exe_dir, "core",
+                                                        kCoreBinaryName, nullptr)
+                                     : g_strdup("<EasyPass directory>");
+    const gchar* reason = g_file_test(expected, G_FILE_TEST_EXISTS)
+                              ? "It exists but is not executable."
+                              : "The file was not found.";
+    g_autofree gchar* detail = g_strdup_printf(
+        "Expected the core executable at:\n%s\n\n%s The service was not "
+        "stopped.",
+        expected, reason);
+    show_error_dialog("EasyPass core executable not found.", detail);
+    return FALSE;
+  }
+
+  g_autofree gchar* detail = nullptr;
+  if (!run_core_command(core, kShutdownArgument, &detail)) {
+    g_autofree gchar* message = g_strdup_printf(
+        "%s\n\nThe service may still be running; the UI stays open so you can "
+        "retry.",
+        detail != nullptr ? detail : "unknown error");
+    show_error_dialog("The EasyPass background service did not stop.", message);
+    return FALSE;
+  }
+
+  return TRUE;
+}
+
+// "仅退出 UI"的锁定前置步骤：核心常驻，"仅退出 UI" 之后保险库不能还开着。
+// 尽力而为 —— 锁定失败只提示、照样退出（把用户困在界面里比一个未锁的保险库更
+// 糟，而且用户还有任务管理器）。核心不存在（开发态）时静默跳过。
+void lock_vault_before_exit() {
+  g_autofree gchar* core = resolve_core_executable();
+  if (core == nullptr) {
+    g_message("easypass tray: no core executable found; skipping the vault lock");
+    return;
+  }
+
+  g_autofree gchar* detail = nullptr;
+  if (!run_core_command(core, kLockArgument, &detail)) {
+    g_autofree gchar* message = g_strdup_printf(
+        "%s\n\nThe vault may still be unlocked.",
+        detail != nullptr ? detail : "unknown error");
+    show_error_dialog("Could not lock the vault before closing the UI.",
+                      message);
+    return;
+  }
+
+  g_message("easypass tray: vault locked before closing the UI");
+}
+
+// 退出 UI 进程本身（不含锁定）：先置 quitting（关窗处理器据此不再藏窗口），再
+// 销毁窗口（destroy → g_application_quit），最后还回 runner 在托盘模式下持有的
+// g_application_hold，否则主循环不会结束。
+static void quit_ui_only() {
   g_quitting = TRUE;
   if (g_window != nullptr) {
     gtk_widget_destroy(GTK_WIDGET(g_window));
   }
   GApplication* app = g_application_get_default();
   if (app != nullptr) {
-    // Drop the tray-mode hold taken in the runner so the loop can finish.
     g_application_release(app);
     g_application_quit(app);
+  }
+}
+
+// "仅退出 UI"：先锁保险库，再只结束 UI 进程（核心照常运行，扩展照常可用）。
+void on_quit_ui_activate(GtkMenuItem* item, gpointer user_data) {
+  lock_vault_before_exit();
+  quit_ui_only();
+}
+
+void on_quit_service_activate(GtkMenuItem* item, gpointer user_data) {
+  // 核心没停成功就**不退出**：让用户能重试，也让提示框有机会被看到。
+  // 这里**不**再锁库：核心已经退出，密钥随进程一起没了，再跑 `--lock` 只会
+  // 因为没有核心而报错。
+  if (stop_core_service()) {
+    quit_ui_only();
   }
 }
 
@@ -125,10 +316,19 @@ GtkWidget* build_menu() {
 
   gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
 
-  GtkWidget* exit_item = gtk_menu_item_new_with_label("Exit");
-  g_signal_connect(exit_item, "activate", G_CALLBACK(on_exit_activate),
+  // 两档退出语义见 docs/core-service-refactor.md §3.8：UI 与核心各自有生命
+  // 周期，所以"离开界面"和"连服务一起停"必须是两个明确的选择。文案与 Windows
+  // runner 保持一致（英文，托盘不做 l10n）。
+  GtkWidget* quit_ui_item = gtk_menu_item_new_with_label("Exit UI Only");
+  g_signal_connect(quit_ui_item, "activate", G_CALLBACK(on_quit_ui_activate),
                    nullptr);
-  gtk_menu_shell_append(GTK_MENU_SHELL(menu), exit_item);
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu), quit_ui_item);
+
+  GtkWidget* quit_service_item =
+      gtk_menu_item_new_with_label("Exit UI and Stop Service");
+  g_signal_connect(quit_service_item, "activate",
+                   G_CALLBACK(on_quit_service_activate), nullptr);
+  gtk_menu_shell_append(GTK_MENU_SHELL(menu), quit_service_item);
 
   return menu;
 }
@@ -136,6 +336,12 @@ GtkWidget* build_menu() {
 }  // namespace
 
 gboolean easypass_tray_install(GtkWindow* window) {
+  // 无论托盘是否真的装得上，runner 的窗口都先登记：`easypass_window_show()`
+  // 与 `easypass_quit_ui()` 必须对"没有托盘的降级形态"同样有效（那条路径下
+  // 关窗即退出，退出时同样要销毁窗口并还回 hold）。托盘**可用性**仍由
+  // `easypass_tray_is_active()` 三个条件决定，与这里无关。
+  g_window = window;
+
   if (g_indicator != nullptr) {
     // 幂等：已经装过就沿用上次的宿主判定。
     return g_tray_host_available;
@@ -197,7 +403,6 @@ gboolean easypass_tray_install(GtkWindow* window) {
   app_indicator_set_menu(g_indicator, GTK_MENU(menu));
   app_indicator_set_status(g_indicator, APP_INDICATOR_STATUS_ACTIVE);
 
-  g_window = window;
   // 返回"托盘是否真的可用"而不是"indicator 对象是否建起来了"：没有宿主时图标
   // 不可见，调用方**不该**依赖托盘（头文件里写明了这个契约）。当前调用点
   // （`my_application.cc`）忽略返回值、用 `easypass_tray_is_active()` 决策，
@@ -211,12 +416,11 @@ gboolean easypass_tray_is_active(void) {
   return g_indicator != nullptr && g_tray_host_available && !g_quitting;
 }
 
-// CI / smoke-test hook only. Marks the tray state as quitting so the
-// `delete-event` handler does not try to hide the window during the headless
-// `EASYPASS_DEBUG_AUTO_EXIT_AFTER_MS` flow — which is just a CI helper, never
-// triggered in normal user paths.
-void g_quitting_set_for_test(void) {
-  g_quitting = TRUE;
+void easypass_quit_ui(void) {
+  // 与托盘 "Exit UI Only" 完全同一条路径（含"先锁库"这一步）：CI 的
+  // `EASYPASS_DEBUG_AUTO_EXIT_AFTER_MS` 钩子跑的就是用户在菜单里点的东西。
+  lock_vault_before_exit();
+  quit_ui_only();
 }
 
 void easypass_window_show(void) {

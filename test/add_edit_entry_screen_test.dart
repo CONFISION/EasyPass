@@ -1,9 +1,7 @@
-import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:easypass/data/database/database.dart' show FoldersCompanion;
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
 import 'package:easypass/features/vault/providers/vault_provider.dart';
@@ -15,9 +13,10 @@ import 'add_edit_entry_harness.dart';
 /// 新增/编辑条目表单的屏幕级行为：生成密码预填回归、类型选择器（下拉）、
 /// 文件夹下拉（实时 / 删除兜底）、编辑既有条目、条目不存在、删除确认、
 /// 保存后的实时刷新、900×600 最小窗口布局。
+///
+/// M4：数据面全部经 `VaultApi`（[EntryFormHarness] 注入假核心），
+/// 行级断言（`*_encrypted` 列）已移到核心侧（见 `add_edit_entry_types_test.dart`）。
 void main() {
-  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
-
   late EntryFormHarness harness;
 
   setUp(() => harness = EntryFormHarness());
@@ -178,7 +177,7 @@ void main() {
 
   testWidgets('编辑态取消类型切换：选择器与表单都停在原类型（不会显示被拒的新类型）',
       (tester) async {
-    await harness.repo.saveItem(harness.loginItem());
+    await harness.api.saveItem(harness.loginItem());
     await harness.pumpEdit(tester, 'seed-login');
     expect(harness.readSelectedType(tester), EntryType.login);
 
@@ -201,7 +200,7 @@ void main() {
     await harness.tapSave(tester);
     await harness.flushSnackBar(tester);
 
-    final item = (await harness.repo.getItems()).single;
+    final item = (await harness.api.listItems()).single;
     expect(item.type, EntryType.login);
     expect(item.loginOrEmpty.url, 'https://github.com');
     expect(item.loginOrEmpty.password, 'pw-seed');
@@ -245,7 +244,7 @@ void main() {
     await harness.tapSave(tester);
     await harness.flushSnackBar(tester);
 
-    final item = (await harness.repo.getItems()).single;
+    final item = (await harness.api.listItems()).single;
     expect(item.folderId, server);
   });
 
@@ -265,7 +264,7 @@ void main() {
     expect(
       harness.folderOptionIds(tester),
       containsAll(<String?>[null, work, fresh, second]),
-      reason: '文件夹列表必须是 drift 流：新增后无需重开表单',
+      reason: '文件夹列表由核心的 folders 主题推送：新增后无需重开表单',
     );
     await harness.openFolderDropdown(tester);
     expect(find.text('新文件夹'), findsWidgets);
@@ -275,13 +274,7 @@ void main() {
     expect(harness.readSelectedFolderId(tester), fresh);
 
     // 改名同理 —— 打开着的表单里显示的名字也要更新。
-    await harness.repo.updateFolder(
-      fresh,
-      FoldersCompanion(
-        name: const Value('改名了'),
-        updatedAt: Value(DateTime.now().millisecondsSinceEpoch),
-      ),
-    );
+    await harness.api.updateFolder(fresh, name: '改名了');
     await tester.pumpAndSettle();
     await harness.openFolderDropdown(tester);
     expect(find.text('改名了'), findsWidgets, reason: '改名也要推到打开着的表单');
@@ -291,12 +284,12 @@ void main() {
   testWidgets('编辑期间文件夹被删除：回退到"无文件夹"，不崩，也不会把旧 id 写回去',
       (tester) async {
     final temp = await harness.addFolder('临时');
-    await harness.repo.saveItem(harness.loginItem(folderId: temp));
+    await harness.api.saveItem(harness.loginItem(folderId: temp));
     await harness.pumpEdit(tester, 'seed-login');
     expect(harness.readSelectedFolderId(tester), temp);
 
     // 表单还开着，文件夹在别处被删了（本地列表 → 编辑页这条流会推过来）。
-    await harness.repo.removeFolder(temp);
+    await harness.api.removeFolder(temp);
     await tester.pumpAndSettle();
 
     // 旧实现把不在 items 里的 value 交给下拉框 → 断言崩溃（红屏）。
@@ -308,9 +301,9 @@ void main() {
     await harness.tapSave(tester);
     await harness.flushSnackBar(tester);
 
-    final item = await harness.repo.getItem('seed-login');
+    final item = await harness.api.getItem('seed-login');
     expect(item!.folderId, isNull, reason: '不能把已删除的文件夹 id 写回条目');
-    expect(await harness.repo.getFolders(), isEmpty);
+    expect(await harness.api.listFolders(), isEmpty);
   });
 
   // ─── 校验 ─────────────────────────────────────────────
@@ -322,7 +315,7 @@ void main() {
     await harness.tapSave(tester);
 
     expect(find.text(enL10n.passwordRequired), findsOneWidget);
-    expect(await harness.repo.countItems(), 0);
+    expect(harness.api.items, isEmpty);
   });
 
   testWidgets('名称为空：校验报错且不落库', (tester) async {
@@ -330,7 +323,7 @@ void main() {
     await harness.tapSave(tester);
 
     expect(find.text(enL10n.nameRequired), findsOneWidget);
-    expect(await harness.repo.countItems(), 0);
+    expect(harness.api.items, isEmpty);
   });
 
   // ─── 登录条目的保存 / 回填 ─────────────────────────────
@@ -349,7 +342,7 @@ void main() {
     expect(find.text(enL10n.entrySaved), findsWidgets);
     await harness.flushSnackBar(tester);
 
-    final items = await harness.repo.getItems(type: EntryType.login);
+    final items = await harness.api.listItems(type: EntryType.login);
     expect(items, hasLength(1));
     final login = items.single.loginOrEmpty;
     expect(items.single.name, 'GitLab');
@@ -359,15 +352,13 @@ void main() {
     expect(login.password, 'pw-123');
     expect(login.totpSecret, 'JBSWY3DPEHPK3PXP');
 
-    // 明文绝不进列。
-    final row = await harness.db.getEntryById(items.single.id);
-    expect(row!.passwordEncrypted, isNotEmpty);
-    expect(row.passwordEncrypted, isNot(contains('pw-123')));
-    expect(row.notesEncrypted, isNot(contains('work account')));
+    // 明文绝不落地：UI 侧没有加密路径，这份模型只能经核心写库
+    // （`*_encrypted` 列由核心的 mapper 负责，见 entry_models_test.dart）。
+    expect(harness.api.called('saveItem'), isTrue);
   });
 
   testWidgets('编辑既有登录条目：按条目自己的类型回填字段', (tester) async {
-    await harness.repo.saveItem(
+    await harness.api.saveItem(
       harness.loginItem(notes: 'seed notes', favorite: true),
     );
     await harness.pumpEdit(tester, 'seed-login');
@@ -387,7 +378,7 @@ void main() {
   });
 
   testWidgets('编辑保存：走 saveItem 更新，不新增条目', (tester) async {
-    await harness.repo.saveItem(harness.loginItem());
+    await harness.api.saveItem(harness.loginItem());
     await harness.pumpEdit(tester, 'seed-login');
 
     await tester.enterText(find.byKey(EntryFormKeys.username), 'bob');
@@ -395,24 +386,24 @@ void main() {
     expect(find.text(enL10n.entryUpdated), findsWidgets);
     await harness.flushSnackBar(tester);
 
-    final items = await harness.repo.getItems();
+    final items = await harness.api.listItems();
     expect(items, hasLength(1));
     expect(items.single.id, 'seed-login');
     expect(items.single.loginOrEmpty.username, 'bob');
     expect(items.single.loginOrEmpty.password, 'pw-seed');
   });
 
-  testWidgets('编辑保存后：仓储、条目流与列表 provider 都拿到新值（全程没有手动刷新）',
+  testWidgets('编辑保存后：核心里的值、推送主题与列表 provider 都拿到新值（全程没有手动刷新）',
       (tester) async {
-    await harness.repo.saveItem(harness.loginItem());
+    await harness.api.saveItem(harness.loginItem());
     await harness.pumpEdit(tester, 'seed-login');
 
-    // 列表页读的那条 drift 流 + 它外面的 provider。保存前先订阅，
-    // 看它们会不会**自己**推新值 —— 这里刻意不调用任何 invalidate：
-    // 手写失效正是 2.3.1 之前"保存后界面还是旧数据"的来源。
-    final rowEmissions = <List<VaultItem>>[];
-    final rowSub = harness.repo.watchItems().listen(rowEmissions.add);
-    addTearDown(rowSub.cancel);
+    // 列表页读的 provider + 核心推的主题。保存前先订阅，看它们会不会**自己**
+    // 推新值 —— 这里刻意不调用任何 invalidate：手写失效正是 2.3.1 之前
+    // "保存后界面还是旧数据"的来源。
+    final pushedTopics = <String>[];
+    final topicSub = harness.api.changes.listen(pushedTopics.add);
+    addTearDown(topicSub.cancel);
 
     final providerEmissions = <List<VaultItem>>[];
     final providerSub = harness.container.listen(
@@ -424,10 +415,7 @@ void main() {
       fireImmediately: true,
     );
     addTearDown(providerSub.close);
-
     await tester.pumpAndSettle();
-    expect(rowEmissions, isNotEmpty, reason: '订阅后先收到当前列表');
-    expect(rowEmissions.last.single.loginOrEmpty.username, 'alice');
     expect(providerEmissions, isNotEmpty);
     expect(providerEmissions.last.single.loginOrEmpty.username, 'alice');
 
@@ -435,15 +423,16 @@ void main() {
     await harness.tapSave(tester);
     await harness.flushSnackBar(tester);
 
-    // 1) 仓储里是保存后的值。
-    final stored = await harness.repo.getItem('seed-login');
+    // 1) 核心里是保存后的值。
+    final stored = await harness.api.getItem('seed-login');
     expect(stored, isNotNull);
     expect(stored!.loginOrEmpty.username, 'bob');
-    expect(stored.updatedAt, isNot(0), reason: 'updatedAt 由仓储刷新');
+    // 时间戳规范化（0 → now）是核心侧职责（VaultRepository.saveItem），
+    // UI 只负责把模型原样交过去。
+    expect(stored.updatedAt, 0);
 
-    // 2) 条目流自己推了新值。
-    expect(rowEmissions.length, greaterThan(1), reason: '保存必须触发一次推送');
-    expect(rowEmissions.last.single.loginOrEmpty.username, 'bob');
+    // 2) 保存必须推出列表主题（UI 靠它重取）。
+    expect(pushedTopics, contains('items'), reason: '保存必须触发一次核心推送');
     // 3) 列表 provider（UI 真正渲染的那份）也推了新值。
     expect(providerEmissions.last.single.loginOrEmpty.username, 'bob');
   });
@@ -458,7 +447,7 @@ void main() {
   // ─── 删除 ─────────────────────────────────────────────
 
   testWidgets('删除仍走确认框，确认后条目消失', (tester) async {
-    await harness.repo.saveItem(harness.loginItem());
+    await harness.api.saveItem(harness.loginItem());
     await harness.pumpEdit(tester, 'seed-login');
 
     await tester.tap(find.byKey(EntryFormKeys.delete));
@@ -469,12 +458,12 @@ void main() {
     await tester.tap(find.text(enL10n.delete));
     await tester.pumpAndSettle();
 
-    expect(await harness.repo.getItem('seed-login'), isNull);
+    expect(await harness.api.getItem('seed-login'), isNull);
     expect(find.text('vault-home'), findsOneWidget);
   });
 
   testWidgets('删除确认框可以取消', (tester) async {
-    await harness.repo.saveItem(harness.loginItem());
+    await harness.api.saveItem(harness.loginItem());
     await harness.pumpEdit(tester, 'seed-login');
 
     await tester.tap(find.byKey(EntryFormKeys.delete));
@@ -482,7 +471,7 @@ void main() {
     await tester.tap(find.text(enL10n.cancel));
     await tester.pumpAndSettle();
 
-    expect(await harness.repo.getItem('seed-login'), isNotNull);
+    expect(await harness.api.getItem('seed-login'), isNotNull);
     expect(find.byKey(EntryFormKeys.save), findsOneWidget);
   });
 }

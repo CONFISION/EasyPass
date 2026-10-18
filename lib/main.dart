@@ -5,17 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
-import 'core/constants/app_constants.dart';
-import 'core/crypto/crypto_service.dart';
-import 'core/crypto/totp_service.dart';
-import 'data/database/database.dart';
-import 'data/repositories/vault_repository.dart';
+import 'adapters/flutter_secret_store.dart';
+import 'core/storage/secret_store.dart';
 import 'data/services/font_discovery_service.dart';
 import 'features/browser_bridge/browser_host_installer.dart';
-import 'features/browser_bridge/browser_session_registry.dart';
-import 'features/browser_bridge/easypass_daemon.dart';
-import 'features/browser_bridge/native_messaging_service.dart';
-import 'features/browser_bridge/vault_session.dart';
 import 'features/desktop_integration/desktop_integration.dart';
 import 'features/desktop_integration/linux_desktop_integration.dart';
 import 'features/desktop_single_instance/desktop_single_instance.dart';
@@ -51,37 +44,10 @@ Future<void> main() async {
 
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Native messaging host mode: launched by the browser extension
-  // (`easypass.exe --native-host`, see browser_extension/native_host/).
-  // Serves the stdin/stdout JSON protocol instead of the UI.
-  // The runner (windows/runner/main.cpp) mirrors the flag into the
-  // EASYPASS_NATIVE_HOST environment variable because
-  // Platform.executableArguments is not reliably populated on Flutter
-  // Windows; keep both checks for safety.
-  // Linux 修复：`Platform.executableArguments` 在 Linux/AppImage 下拿不到
-  // 进程 argv（浏览器通过 wrapper 传的 `--native-host` 会丢），于是宿主进程
-  // 会被当成 GUI 启动 → 扩展侧一直等不到协议回复（表现为"连接超时"）。
-  // 因此这里加上 `/proc/self/cmdline` 这条真实 argv 来源（与 CLI 子命令同一
-  // 份读取逻辑）。
-  final argv = _readCommandLineArguments();
-  final isNativeHost = Platform.environment['EASYPASS_NATIVE_HOST'] == '1' ||
-      Platform.executableArguments.contains('--native-host') ||
-      argv.contains('--native-host');
-  if (isNativeHost) {
-    await runNativeHost();
-    return;
-  }
-
-  // Background daemon mode (`easypass.exe --service`, launched on demand by
-  // the native host bridge). Serves the protocol over TCP localhost so the
-  // extension works regardless of browser bitness and without the UI open.
-  final isDaemon = Platform.environment['EASYPASS_SERVICE'] == '1' ||
-      argv.contains('--service') ||
-      Platform.executableArguments.contains('--service');
-  if (isDaemon) {
-    await runDaemon();
-    return;
-  }
+  // 密钥材料存储：UI 侧用系统钥匙串（只在迁移期读旧值；核心自己用 vault_meta）。
+  // 必须在任何 CryptoService 构造之前注册，否则读写密钥材料会明确抛错
+  // （见 lib/core/storage/secret_store.dart 的 UnregisteredSecretStore）。
+  SecretStoreRegistry.register(const FlutterSecretStore());
 
   // 单实例：UI 模式才需要"唤起已有窗口"语义。`--native-host` / `--service`
   // 进程是浏览器 / 桥接按需拉起的，不能被"二次启动唤起"拦截 —— 否则桥接
@@ -100,48 +66,13 @@ Future<void> main() async {
   // 主实例：保留 backend，挂到 runApp 的 ProviderScope 里给 UI 用。
   final singleInstanceBackend = singleInstanceDecision.backend;
 
-  // UI mode: keep the background daemon (extension backend) alive in this
-  // process, Bitwarden style -- closing the window hides the app to the tray
-  // while the daemon keeps serving the browser extension.
+  // UI 只是核心服务的客户端：它**不再**在自己进程里起 daemon，也不再自己
+  // 打开数据库。核心由 `lib/client/core_session.dart` 在需要时拉起 / 连接。
   //
-  // 注意不能只看"端口能不能连上"：升级后**旧的 daemon 进程**可能仍在服务扩展，
-  // 它不认识新动作（扩展侧表现为"未知操作/无法连接"）。所以这里做协议版本
-  // 探测：能应答且版本一致才复用；陈旧则尽力结束旧进程 + 清掉 daemon.json，
-  // 由本进程接管；残留文件（端口已死）直接清掉。
-  final probe = await EasypassDaemon.probe();
-  AppDatabase? uiDatabase;
-  if (!probe.isUsable) {
-    await EasypassDaemon.retire(probe);
-    // The in-process daemon and the Riverpod UI must share one database
-    // object.  Constructing a second AppDatabase here creates a second drift
-    // executor (and was the source of the "created multiple times" warning).
-    //
-    // 为什么现在是「只在不可用时构造」而不是
-    // 「永远构造同一个」：
-    //   - **probe.isUsable == true** 时另一进程（升级前的旧 daemon）已经在
-    //     服务扩展，本进程只需要消费 UI，不需要重新拥有数据库（fork/跨进程
-    //     语义上游设计；本仓库不具备 IPC）。
-    //   - 走 `databaseProvider.overrideWithValue(uiDatabase)` 只能把"本进
-    //     进程构造的实例"挂到 Riverpod；旧 daemon 的 `AppDatabase` 实例位
-    //     于另一个进程，挂不进来。如果硬要在 UI 路径上无条件开库，本进程
-    //     与旧 daemon 各持一份 `easypass.db` 的 SQLite handle —— SQLite 允许
-    //     但加重锁竞争，且 drift 会再吐一次 "AppDatabase created multiple
-    //     times" 警告（此前修过）。
-    //   - 这是上游架构问题，不是本仓库能改的。要彻底消除，必须先把 daemon
-    //     从"同进程 / 跨进程"二选一抽到一个明确的 IPC 通道（如 loopback
-    //     上的 query 转发），属于 v3.0 路线图范畴。
-    //
-    // 不改变行为：仅在 `!probe.isUsable` 时构造 `uiDatabase` 并进入
-    // `startInProcessDaemon`；`probe.isUsable` 时一律走 `databaseProvider`
-    // 默认实现（vault_repository.dart:12-14）。
-    uiDatabase = AppDatabase();
-    try {
-      await startInProcessDaemon(database: uiDatabase);
-    } catch (_) {
-      // Daemon failure must never block the UI from starting.
-    }
-  }
+  // 旧实现（v2.4 及以前）在这里 probe 已有 daemon，没有就在本进程
+  // `startInProcessDaemon` 并与 Riverpod 共用同一个 AppDatabase —— 那正是
 
+  // "双核心 / 双 SQLite 句柄"的来源，也是本次架构改造要消除的东西。
   // Lock app in portrait mode
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -161,7 +92,6 @@ Future<void> main() async {
   runApp(
     ProviderScope(
       overrides: [
-        if (uiDatabase != null) databaseProvider.overrideWithValue(uiDatabase),
         if (singleInstanceBackend != null)
           singleInstanceBackendProvider.overrideWithValue(singleInstanceBackend),
         if (desktopTray.windowController != null)
@@ -201,101 +131,6 @@ List<String> _readCommandLineArguments() {
     return parts.sublist(1);
   } catch (_) {
     return const [];
-  }
-}
-
-/// Runs the native messaging host loop. Shares the same database file and
-/// secure storage as the UI (resolved by the application path helper), so the
-/// browser extension can query credentials while the desktop app is closed.
-Future<void> runNativeHost() async {
-  final db = AppDatabase();
-  final cryptoService = CryptoService();
-  final service = NativeMessagingService(db, cryptoService, TotpService());
-  try {
-    await service.start();
-  } finally {
-    await db.close();
-    // The runner keeps its (hidden) window and message loop alive after Dart
-    // main() returns, so without an explicit exit the host process would
-    // linger every time the browser closes the pipe (stdin EOF). Exit here so
-    // each host process lives exactly as long as the browser connection.
-    exit(0);
-  }
-}
-
-/// Runs the background daemon: owns the vault database and serves the
-/// native messaging protocol over loopback TCP (see [EasypassDaemon]).
-/// The browser host bridge relaunches it on demand.
-Future<void> runDaemon() async {
-  final db = AppDatabase();
-  try {
-    await startInProcessDaemon(
-      database: db,
-      // 空闲自退：桥接按需拉起的 `--service` 进程不能赖着不走 —— 升级后旧
-      // 进程一直服务扩展、对新动作一律回 `Unknown action: xxx` 正是这次的
-      // 根因。退出前会删掉自己写的 daemon.json（见 maybeExitWhenIdle）。
-      // UI 模式不传这个开关：daemon 与 UI 同进程，退出等于把用户踢出应用。
-      exitWhenIdle: true,
-      onIdleExit: () async {
-        await db.close();
-        exit(0);
-      },
-    );
-  } catch (_) {
-    // Nothing will serve: release the database handle and let the failure
-    // surface (the bridge will relaunch the daemon on the next request).
-    await db.close();
-    rethrow;
-  }
-  // On success the daemon keeps serving until the process exits, so the
-  // database connection must stay open -- closing it here would race with the
-  // first bridge connection and break every query after it.
-}
-
-/// Creates the daemon's [VaultSession] with the idle timeout the user
-/// configured for auto-lock (Settings, 1-60 min; default 5), registers it so
-/// locking the desktop app also locks the browser session immediately, and
-/// starts the daemon.
-///
-/// The session is seeded from the persisted auto-lock preference at startup;
-/// changing the setting takes effect for the browser session on next launch
-/// (the desktop timer itself updates immediately).
-///
-/// [exitWhenIdle] / [onIdleExit] 只给 `--service` 模式用：空闲自退是"升级后
-/// 旧 daemon 让位"的自愈机制，与 [EasypassDaemon.probe] 的版本判定互补
-/// （前者覆盖"没人打开应用、只有浏览器在用"的场景）。
-Future<EasypassDaemon> startInProcessDaemon({
-  AppDatabase? database,
-  CryptoService? cryptoService,
-  bool exitWhenIdle = false,
-  Future<void> Function()? onIdleExit,
-}) async {
-  final db = database ?? AppDatabase();
-  final crypto = cryptoService ?? CryptoService();
-  final session = VaultSession(idleTimeout: await _sessionIdleTimeout(crypto));
-  BrowserSessionRegistry.register(session);
-
-  final daemon = EasypassDaemon(
-    db,
-    crypto,
-    TotpService(),
-    session: session,
-    exitWhenIdle: exitWhenIdle,
-    onIdleExit: onIdleExit,
-  );
-  await daemon.start();
-  return daemon;
-}
-
-/// Idle timeout for the browser session: mirrors the desktop auto-lock setting
-/// (clamped to the same 1-60 minute range as the settings UI).
-Future<Duration> _sessionIdleTimeout(CryptoService cryptoService) async {
-  try {
-    final minutes = await cryptoService.getAutoLockMinutes();
-    return Duration(minutes: minutes.clamp(1, 60));
-  } catch (_) {
-    // Secure storage unavailable: fall back to the shipped default (5 min).
-    return const Duration(minutes: AppConstants.autoLockTimeoutMinutes);
   }
 }
 

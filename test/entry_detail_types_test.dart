@@ -1,23 +1,16 @@
-import 'dart:typed_data';
-
-import 'package:drift/drift.dart' show driftRuntimeOptions;
-import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:easypass/core/crypto/crypto_service.dart';
+import 'package:easypass/client/api_providers.dart';
 import 'package:easypass/core/crypto/totp_service.dart';
-import 'package:easypass/data/database/database.dart';
 import 'package:easypass/data/models/entry_fields.dart';
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
-import 'package:easypass/data/repositories/vault_repository.dart';
-import 'package:easypass/data/state/session_key.dart';
 import 'package:easypass/features/vault/screens/entry_detail_screen.dart';
 import 'package:easypass/l10n/app_localizations.dart';
 
-import 'fakes.dart';
+import 'fake_vault_api.dart';
 
 /// 条目详情页（2.3.0 四种类型）的字段分工回归。
 ///
@@ -28,53 +21,48 @@ import 'fakes.dart';
 /// - login 渲染 6 位 TOTP 动态码 + 倒计时，且**永不**渲染原始密钥；
 /// - 自定义字段（文本 / 隐藏 / 勾选）的展示与打码。
 ///
+/// M4：数据面与二次校验都经 `VaultApi`（[FakeVaultApi]）——详情页不再解密
+/// `*_encrypted` 列，也不再自己读钥匙串比对 salt/hash；主密码校验由假核心
+/// 按 `masterPassword` 判定（真核心走 `MasterPasswordVerifier` 的唯一口径）。
+///
 /// 注意：详情页里的 TOTP 卡片带 1 秒周期定时器，`pumpAndSettle` 永远等不到
 /// "没有待处理帧"，所以这里统一用固定帧数的 [settle]。
 void main() {
-  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
-
   /// 与原生层的最小窗口尺寸一致（900×600），守住"最小窗口不溢出"。
   const minWindow = Size(900, 600);
 
   const masterPassword = 'correct horse battery staple';
 
+  late FakeVaultApi api;
   late ProviderContainer container;
-  late AppDatabase db;
-  late CryptoService crypto;
-  late FakeSecureStorage storage;
-  late Uint8List key;
 
   setUp(() {
-    storage = FakeSecureStorage();
-    crypto = CryptoService(secureStorage: storage);
-    key = crypto.deriveKey('session-master', crypto.generateSalt());
-    db = AppDatabase.forTesting(NativeDatabase.memory());
-    container = ProviderContainer(
-      overrides: [
-        cryptoServiceProvider.overrideWithValue(crypto),
-        databaseProvider.overrideWithValue(db),
-      ],
+    api = FakeVaultApi(
+      initialStatus: 'unlocked',
+      masterPassword: masterPassword,
     );
-    container.read(encryptionKeyProvider.notifier).state = key;
+    // 读接口按真核心的 `_requireUnlocked()` 语义（这里始终是解锁态）。
+    api.lockEnforcedReads = true;
+    container = ProviderContainer(
+      overrides: [vaultApiProvider.overrideWithValue(api)],
+    );
   });
 
-  tearDown(() async {
+  tearDown(() {
     container.dispose();
-    await db.close();
+    api.dispose();
   });
 
-  /// 泵固定帧数：既让 drift 的 FutureProvider 落地，又不会被周期定时器挂住。
+  /// 泵固定帧数：既让异步取数落地，又不会被周期定时器挂住。
   Future<void> settle(WidgetTester tester, {int frames = 24}) async {
     for (var i = 0; i < frames; i++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
   }
 
-  Future<VaultItem?> readItem(String id) =>
-      container.read(vaultRepositoryProvider).getItem(id);
+  Future<VaultItem?> readItem(String id) => api.getItem(id);
 
-  Future<void> seed(VaultItem item) =>
-      container.read(vaultRepositoryProvider).saveItem(item);
+  Future<void> seed(VaultItem item) => api.saveItem(item);
 
   Future<AppLocalizations> pumpDetail(WidgetTester tester, String entryId) async {
     tester.view.physicalSize = minWindow;
@@ -192,13 +180,6 @@ void main() {
   // ─── ssh_key ──────────────────────────────────────────
 
   testWidgets('SSH：指纹/类型可见，私钥默认打码、验证主密码后才显示', (tester) async {
-    // 真正配置一个主密码，验证流程才走得通。
-    final salt = crypto.generateSalt();
-    await crypto.storeKeyMaterial(
-      salt,
-      crypto.hashMasterPassword(masterPassword, salt),
-    );
-
     const privateKey = '-----BEGIN OPENSSH PRIVATE KEY-----\n'
         'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gt\n'
         '-----END OPENSSH PRIVATE KEY-----';
@@ -351,12 +332,6 @@ void main() {
   });
 
   testWidgets('登录：密码验证主密码后才显示，错误密码不显示明文，1 分钟后自动隐藏', (tester) async {
-    final salt = crypto.generateSalt();
-    await crypto.storeKeyMaterial(
-      salt,
-      crypto.hashMasterPassword(masterPassword, salt),
-    );
-
     await seed(const VaultItem(
       id: 'login-3',
       type: EntryType.login,
@@ -452,10 +427,11 @@ void main() {
   // 用户原话："编辑条目后页面不刷新，刚加的自定义字段不见了。"
   // 根因：详情页读的是一次性 `FutureProvider.family`，结果被永久缓存，而
   // "编辑保存 → 弹回详情页"这条路径上没有人 invalidate。现在
-  // `entryItemProvider` 是 drift 单行查询上的流（`repository.watchItem`）。
+  // `entryItemProvider` 由核心的 `item` 主题驱动重取（M4 之前是 drift 单行
+  // 查询上的流）。
   //
   // 下面两个用例**故意不调用任何 invalidate**（既不 invalidate provider，
-  // 也不碰 container）：刷新只能来自"写库 → 流推送"。
+  // 也不碰 container）：刷新只能来自"写库 → 核心推主题 → 重取"。
 
   testWidgets('回归：保存后详情页自动刷新（改名 + 新增自定义字段，全程不 invalidate）',
       (tester) async {
@@ -513,8 +489,9 @@ void main() {
     final l10n = await pumpDetail(tester, 'live-2');
     expect(find.text('会被删掉'), findsOneWidget);
 
-    // 详情页自己删是走 _confirmDelete 弹窗；这里验证的是"流推 null → 页面收敛"。
-    await container.read(vaultRepositoryProvider).deleteItem('live-2');
+    // 详情页自己删是走 _confirmDelete 弹窗；这里验证的是"核心推主题 → 重取
+    // 拿到 null → 页面收敛"。
+    await api.deleteItem('live-2');
     await settle(tester);
 
     expect(find.text(l10n.entryNotFound), findsOneWidget);
@@ -545,9 +522,10 @@ void main() {
     await settle(tester);
 
     expect((await readItem('note-3'))!.isFavorite, isTrue,
-        reason: '收藏必须通过 repo.saveItem 持久化');
+        reason: '收藏必须通过 VaultApi.saveItem 交给核心持久化');
     expect(tester.widget<SwitchListTile>(find.byType(SwitchListTile)).value,
-        isTrue, reason: 'entryItemProvider 是流，写库后开关应自己显示新值');
+        isTrue,
+        reason: '核心推 item 主题后 entryItemProvider 重取，开关自己显示新值');
     expect(tester.takeException(), isNull);
   });
 

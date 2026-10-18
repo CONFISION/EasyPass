@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 
 /// 浏览器扩展 Native Messaging 主机的 Linux 安装 / 卸载 / 状态服务。
@@ -195,8 +195,9 @@ class BrowserHostInstaller {
     w('# and the user would see "Unknown action: ..." without knowing why.');
     w('');
     w('set -eu');
-    // 双保险：不依赖 argv 解析，直接告诉 App"我是被浏览器拉起的宿主"。
-    w('export EASYPASS_NATIVE_HOST=1');
+    // 宿主不再由 UI 二进制承担：wrapper 只负责找到 **核心** 并以 `--bridge`
+    // 启动它（核心自己会先发现/复用已在跑的核心，见
+    // lib/core_service/bridge_forwarder.dart）。因此不再需要 EASYPASS_NATIVE_HOST。
     w('');
     w('log() {');
     w('  # stderr only; stdout is reserved for the protocol.');
@@ -210,13 +211,13 @@ class BrowserHostInstaller {
     w('  _tried="\${_tried}\${_tried:+; }\$1"');
     w('}');
     w('');
-    w('if [ -n "\${APPIMAGE:-}" ]; then');
-    w('  if [ -x "\${APPIMAGE}" ]; then');
-    w('    exec "\${APPIMAGE}" --native-host "\$@"');
+    w('if [ -n "\${APPDIR:-}" ]; then');
+    w('  if [ -x "\${APPDIR}/usr/bin/easypass_core" ]; then');
+    w('    exec "\${APPDIR}/usr/bin/easypass_core" --bridge "\$@"');
     w('  fi');
-    w('  record "APPIMAGE=\'\${APPIMAGE}\' (not executable or missing)"');
+    w('  record "APPDIR=\'\${APPDIR}\' (core missing or not executable)"');
     w('else');
-    w('  record \'APPIMAGE (unset)\'');
+    w('  record \'APPDIR (unset; not running from an AppImage)\'');
     w('fi');
 
     if (quoted.isNotEmpty) {
@@ -238,8 +239,9 @@ class BrowserHostInstaller {
         w('    ${quoted[i]}$suffix');
       }
       w('  do');
-      w('    if [ -x "\$_c" ]; then');
-      w('      exec "\$_c" --native-host "\$@"');
+      w('    _d="\$(dirname "\$_c")"');
+      w('    if [ -x "\${_d}/easypass_core" ]; then');
+      w('      exec "\${_d}/easypass_core" --bridge "\$@"');
       w('    else');
       w('      record "baked candidate=\'\$_c\' (missing or not '
           'executable)"');
@@ -249,17 +251,17 @@ class BrowserHostInstaller {
 
     w('');
     w('HERE="\$(dirname "\$(readlink -f "\$0")")"');
-    w('if [ -x "\${HERE}/easypass" ]; then');
-    w('  exec "\${HERE}/easypass" --native-host "\$@"');
+    w('if [ -x "\${HERE}/easypass_core" ]; then');
+    w('  exec "\${HERE}/easypass_core" --bridge "\$@"');
     w('fi');
-    w('record "\${HERE}/easypass (missing or not executable)"');
+    w('record "\${HERE}/easypass_core (missing or not executable)"');
     w('');
-    w('if command -v easypass >/dev/null 2>&1; then');
-    w('  exec easypass --native-host "\$@"');
+    w('if command -v easypass_core >/dev/null 2>&1; then');
+    w('  exec easypass_core --bridge "\$@"');
     w('fi');
-    w('record \'command -v easypass (not on PATH)\'');
+    w('record \'command -v easypass_core (not on PATH)\'');
     w('');
-    w('log "cannot locate easypass binary; tried: \${_tried}"');
+    w('log "cannot locate easypass_core binary; tried: \${_tried}"');
     w('exit 127');
 
     return buf.toString();

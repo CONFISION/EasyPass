@@ -1,25 +1,16 @@
-import 'dart:typed_data';
-
-import 'package:drift/drift.dart' show driftRuntimeOptions;
-import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:easypass/core/crypto/crypto_service.dart';
-import 'package:easypass/data/database/database.dart';
+import 'package:easypass/client/api_providers.dart';
 import 'package:easypass/data/models/entry_fields.dart';
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
-import 'package:easypass/data/repositories/vault_repository.dart';
-import 'package:easypass/features/auth/providers/auth_provider.dart';
 import 'package:easypass/features/health/health_provider.dart';
 import 'package:easypass/features/health/health_service.dart';
 
-import 'fakes.dart';
+import 'fake_vault_api.dart';
 
 void main() {
-  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
-
   // ─── 纯函数分析逻辑 ────────────────────────────────────
 
   group('HealthService.analyze - 弱密码', () {
@@ -430,29 +421,19 @@ void main() {
     });
   });
 
-  // ─── provider 装配（解密 + 分析）────────────────────────
+  // ─── provider 装配（经核心取数 + 本地分析）──────────────
 
   group('healthReportProvider', () {
     late ProviderContainer container;
-    late Uint8List key;
+    late FakeVaultApi api;
 
     setUp(() {
+      api = FakeVaultApi(initialStatus: 'unlocked');
       container = ProviderContainer(
-        overrides: [
-          cryptoServiceProvider.overrideWithValue(
-            CryptoService(secureStorage: FakeSecureStorage()),
-          ),
-          databaseProvider.overrideWithValue(
-            AppDatabase.forTesting(NativeDatabase.memory()),
-          ),
-        ],
+        overrides: [vaultApiProvider.overrideWithValue(api)],
       );
       addTearDown(container.dispose);
-      key = CryptoService().deriveKey(
-        'testmaster',
-        CryptoService().generateSalt(),
-      );
-      container.read(encryptionKeyProvider.notifier).state = key;
+      addTearDown(api.dispose);
     });
 
     VaultItem loginItem({
@@ -505,14 +486,13 @@ void main() {
           ),
         ];
 
-    test('解密装配：弱密码/重复密码/无TOTP/无URL 全部识别', () async {
-      final repo = container.read(vaultRepositoryProvider);
-
+    test('装配：弱密码/重复密码/无TOTP/无URL 全部识别', () async {
+      // 只经核心取数（VaultApi），UI 侧不再有数据库句柄。
       // a: 常见弱密码 + 无 url + 无 totp
-      await repo.saveItem(loginItem(id: 'a', name: 'SiteA', password: '123456'));
+      await api.saveItem(loginItem(id: 'a', name: 'SiteA', password: '123456'));
       // b/c: 共用强密码 + 有 url + 有 totp
       for (final id in ['b', 'c']) {
-        await repo.saveItem(loginItem(
+        await api.saveItem(loginItem(
           id: id,
           name: 'Site$id',
           password: 'Tr0ub4dor&3X!9',
@@ -523,6 +503,8 @@ void main() {
 
       final report = await container.read(healthReportProvider.future);
 
+      expect(api.listItemRequests.last.type, EntryType.login,
+          reason: '健康报告只该问核心要登录条目（非登录类型不参与评分）');
       expect(report.totalEntries, 3);
       expect(report.weakPasswordCount, 1);
       expect(report.weakPasswords.single.entryId, 'a');
@@ -545,44 +527,35 @@ void main() {
       expect(report.noUrlEntries.single.entryId, 'a');
     });
 
-    test('加密字段解密失败时不泄漏明文并继续分析', () async {
-      final db = container.read(databaseProvider);
-      final crypto = CryptoService();
-      // 用错误密钥加密的密码无法解密，按空串处理，不抛异常
-      final wrongKey = crypto.deriveKey(
-        'wrongmaster',
-        crypto.generateSalt(),
-      );
-      final wrongRepo = VaultRepository(
-        db: db,
-        cryptoService: crypto,
-        keyReader: () => wrongKey,
-      );
-      await wrongRepo.saveItem(loginItem(
+    test('核心给回的机密字段是空的（核心里解不开）时按空串分析，不泄漏明文', () async {
+      // 解密容错本身是**核心**的职责（`VaultItemMapper` 解不开就按空串处理，
+      // 见 vault_repository_items_test.dart）；UI 侧要守的是"空密码照样被识别成
+      // 弱密码，报告里不出现任何明文"。
+      await api.saveItem(loginItem(
         id: 'a',
         name: 'SiteA',
-        password: '123456',
-        // totp 也解不开 → 按"没有 TOTP"处理；url 是明文列（不受密钥影响），
-        // 这里刻意留空以免混淆被测行为。
-        totpSecret: 'JBSWY3DPEHPK3PXP',
+        // 解不开 → 空串；TOTP 同理 → 按"没有 TOTP"处理。
+        password: '',
+        totpSecret: '',
       ));
 
       final report = await container.read(healthReportProvider.future);
       expect(report.totalEntries, 1);
-      // 解不开 → 空密码（弱：长度不足）+ 无 TOTP + 无 URL
+      // 空密码 → 长度不足（弱）+ 无 TOTP + 无 URL
       expect(report.weakPasswordCount, 1);
       expect(report.weakPasswords.single.reason, WeakPasswordReason.tooShort);
       expect(report.noTotpCount, 1);
       expect(report.noUrlCount, 1);
+      // 报告里只有 id / 名字 / 统计数字，永远没有密码本身。
+      expect(report.weakPasswords.single.entryId, 'a');
     });
 
     test('只有安全笔记 / 身份 / SSH 的保险库：100 分且各问题列表为空', () async {
-      final repo = container.read(vaultRepositoryProvider);
       for (final item in nonLoginItems()) {
-        await repo.saveItem(item);
+        await api.saveItem(item);
       }
       // 确认库里真的有 3 条（而不是空库恰好 100 分）
-      expect(await repo.countItems(), 3);
+      expect(api.items, hasLength(3));
 
       final report = await container.read(healthReportProvider.future);
 
@@ -598,15 +571,14 @@ void main() {
     });
 
     test('混合库只报告登录条目，非登录条目不出现在任何问题列表里', () async {
-      final repo = container.read(vaultRepositoryProvider);
       // 唯一的登录条目：常见弱密码 + 无 URL + 无 TOTP
-      await repo.saveItem(
+      await api.saveItem(
         loginItem(id: 'login-1', name: 'GitHub', password: '123456'),
       );
       for (final item in nonLoginItems()) {
-        await repo.saveItem(item);
+        await api.saveItem(item);
       }
-      expect(await repo.countItems(), 4);
+      expect(api.items, hasLength(4));
 
       final report = await container.read(healthReportProvider.future);
 
@@ -622,12 +594,22 @@ void main() {
       expect(report.score, 86);
     });
 
-    test('未解锁时抛错（不静默返回满分报告）', () async {
-      container.read(encryptionKeyProvider.notifier).state = null;
-      await expectLater(
-        container.read(healthReportProvider.future),
-        throwsA(isA<StateError>()),
-      );
+    test('未解锁：空报告（不是异常，也不是"假装满分"）', () async {
+      await api.saveItem(loginItem(id: 'a', name: 'SiteA', password: '123456'));
+      api.lockEnforcedReads = true;
+      api.forceStatus('locked');
+
+      final report = await container.read(healthReportProvider.future);
+
+      // 核心抛 locked ⇒ 当成"没有可分析的条目"，不把健康页打成红屏。
+      expect(report.totalEntries, 0, reason: '锁定时不该把 1 条登录条目算进去');
+      expect(report.weakPasswords, isEmpty);
+      expect(report.score, 100,
+          reason: '空报告就是 0 条 / 100 分；旧实现是抛 StateError 让整页报错');
+
+      // 结束前显式 dispose：未解锁时流在轮询会话状态，留着定时器会让测试
+      // 在"还有后台任务"的状态下结束（dispose 是幂等的，tearDown 再调一次无害）。
+      container.dispose();
     });
   });
 }

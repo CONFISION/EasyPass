@@ -79,26 +79,48 @@ jobs:
         run: flutter pub get
 
       # Windows 构建命令固定为 `flutter build windows`（AGENTS.md）。
-      # 这一步同时产出安装包需要的全部东西：
+      # 这一步产出安装包需要的大部分东西：
       #   · easypass.exe + flutter_windows.dll + 插件 DLL（Flutter 自己的 install 步骤）
       #   · easypass_native_host.exe —— 原生消息桥，由 windows/runner/CMakeLists.txt 的
       #     POST_BUILD 调 browser_extension/native_host/build_bridge.bat 生成（cl.exe，x86）
       #   · msvcp140.dll / vcruntime140.dll / vcruntime140_1.dll —— 由另一个 POST_BUILD
       #     调 installer/copy_vc_runtime.bat 拷进 Release 目录（.iss 需要它们）
+      # 核心服务 easypass_core.exe 不在其中，由下一步单独构建。
       - name: flutter build windows
         run: flutter build windows
+
+      # 核心服务（无窗口、独占库）是独立可执行文件：`dart compile exe` 在本仓库
+      # 不可用（依赖图含 build hook，SDK 要求改用 `dart build cli`），所以由
+      # tool/build_core.ps1 构建并摊平到 Release 目录：
+      #   · core\easypass_core.exe  -> 核心（放子目录，见下）
+      #   · lib\sqlite3.dll         -> 核心的原生库；Dart CLI 运行时按
+      #     `<exe>\..\lib\<name>` 解析，核心在 core\ 时正好命中 Release\lib\
+      #   · Release\sqlite3.dll     -> Flutter 自己那份（UI 用），保持不动
+      # 数据坐标不变：AppPaths 发现父目录里有 easypass.exe 就取父目录，
+      # 所以核心在 core\ 里，保险库仍是 Release\easypass.db。
+      - name: Build core service (dart build cli)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tool/build_core.ps1 -OutDir 'build\windows\x64\runner\Release'
+          if ($LASTEXITCODE -ne 0) { throw "tool/build_core.ps1 失败，exit=$LASTEXITCODE" }
 
       - name: Verify build output
         shell: pwsh
         run: |
           $release = 'build\windows\x64\runner\Release'
-          $required = @('easypass.exe', 'easypass_native_host.exe', 'flutter_windows.dll', 'sqlite3.dll')
+          # core\easypass_core.exe + lib\sqlite3.dll：核心本体与它真正加载的那份库
+          # （Dart CLI 运行时按 <exe>\..\lib\<name> 解析，核心在 core\ 时即 lib\）。
+          $required = @('easypass.exe', 'easypass_native_host.exe', 'flutter_windows.dll', 'sqlite3.dll',
+                        'core\easypass_core.exe', 'lib\sqlite3.dll')
           $missing = @($required | Where-Object { -not (Test-Path -LiteralPath (Join-Path $release $_)) })
           if ($missing.Count -gt 0) {
             throw "缺少构建产物：$($missing -join ', ')（目录 $release）"
           }
           Write-Host "OK: $release"
           Get-ChildItem $release -File | Select-Object Name, Length | Format-Table -AutoSize | Out-String | Write-Host
+          Get-ChildItem (Join-Path $release 'core'), (Join-Path $release 'lib') -File |
+            Select-Object FullName, Length | Format-Table -AutoSize | Out-String | Write-Host
 
       # Chocolatey 的 innosetup 包目前是 Inno Setup 6.7.1（装到
       # "C:\Program Files (x86)\Inno Setup 6"）。.iss 里用到的
@@ -200,6 +222,8 @@ jobs:
           cache: true
 
       # GTK 3 + libayatana-appindicator3-dev 是 linux/runner 的依赖（AGENTS.md）。
+      # libsqlite3-dev 是核心构建（`dart build cli` + pubspec.yaml 的
+      # `source: {linux: system}` 钩子）需要的；Flutter 侧自己编 sqlite3，不依赖它。
       # 刻意不写 libstdc++-12-dev 这种带版本号的包名：ubuntu-latest 的默认 GCC
       # 版本会随镜像升级而变，写死版本号会让 apt 在镜像升级后直接失败；
       # build-essential 一定存在，且会把当前默认的 libstdc++-dev 一起装上。
@@ -210,7 +234,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential clang cmake ninja-build pkg-config \
-            libgtk-3-dev liblzma-dev libayatana-appindicator3-dev
+            libgtk-3-dev liblzma-dev libayatana-appindicator3-dev libsqlite3-dev
           # appimagetool 自己就是个 AppImage，正常跑需要 FUSE2（24.04 起包名是
           # libfuse2t64）。装得上最好；装不上也不影响打包 —— 打包步骤用
           # APPIMAGE_EXTRACT_AND_RUN=1 让运行时解包后直接执行，完全绕开 FUSE。
@@ -227,14 +251,24 @@ jobs:
       - name: flutter build linux --release
         run: flutter build linux --release
 
+      # 核心服务同样进 bundle（core/easypass_core，库复用 bundle 的 lib/）：
+      # build_appimage.sh 把 bundle 原样拷进 usr/bin/，所以核心自动进 AppImage。
+      # 工具与 Windows 侧同源（tool/build_core.sh 对应 tool/build_core.ps1）。
+      - name: Build core service (dart build cli)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tool/build_core.sh --out-dir build/linux/x64/release/bundle
+
       - name: Verify bundle
         shell: bash
         run: |
           set -euo pipefail
           bundle=build/linux/x64/release/bundle
           test -x "$bundle/easypass" || { echo "::error::$bundle/easypass 不存在"; exit 1; }
+          test -x "$bundle/core/easypass_core" || { echo "::error::$bundle/core/easypass_core 不存在（核心服务未构建）"; exit 1; }
           test -f "$bundle/assets/icons/Easypass.png" || echo "::warning::缺少 $bundle/assets/icons/Easypass.png（AppImage 将不带图标）"
-          ls -l "$bundle"
+          ls -l "$bundle" "$bundle/core"
 
       - name: Download appimagetool
         shell: bash

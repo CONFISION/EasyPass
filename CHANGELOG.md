@@ -17,7 +17,54 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 
 ---
 
-## [Unreleased] — 2.4.0
+## [3.0.0] — 核心服务化
+
+### Changed（架构 / 安全模型变更 → major）
+
+- **保险库改由独立的核心服务进程持有。** 新增 `easypass_core`（纯 Dart AOT，无 Flutter、
+  无窗口、无托盘）：它是唯一打开 `easypass.db`、唯一持有会话密钥的进程，常驻直到用户显式
+  退出（不再有空闲自退）。UI 变成**纯客户端**，经 `VaultApi`（`lib/client/`）与本机回环
+  协议访问核心，自己不再开库、不再持密钥。
+- **协议 5 + 通道加密。** 核心与客户端之间**不再有明文**：握手改为「双方各出一个 nonce +
+  用令牌双向 HMAC 证明」（**令牌本身永不上线**），握手末帧起所有帧用 AES-256-CBC +
+  HMAC-SHA256（encrypt-then-MAC、四个方向密钥）加密认证。`role: ui` / `agent` **只能**
+  走加密握手，旧明文形状一律 `unsupported`；唯一例外是 Windows 的 x86 桥（32 位 stdio
+  限制下的字节转发器，回环 + 令牌认证）。
+  能力边界：这保证"链路上没有明文"，挡得住没有令牌的进程与被动抓包；**挡不住同用户的
+  恶意进程**（它能读 `daemon.json`，而 UI 本来就要显示明文密码）。
+- **握手带 `role`**（`ui` / `bridge` / `agent`），核心主动推送 `changed` /
+  `sessionLocked` / `sessionUnlocked` / `coreShuttingDown` 事件；扩展的 9 个动作形状保持不变。
+- **会话分域。** `ui` 与 `bridge` 各自一份密钥与空闲计时，自动锁定由核心执行；UI 锁定会
+  同时锁扩展，UI 解锁不会解锁扩展（刻意如此）。UI 通过 `touchActivity` 节流上报活动。
+- **密钥材料迁入库文件的 `vault_meta`**（`VaultMetaSecretStore`）。旧版存在系统钥匙串里的
+  salt / 校验哈希在首次启动 UI 时一次性交接给核心（`adoptLegacyKeyMaterial`），旧值不删除，
+  便于降级回 2.4.x。
+- **托盘只属于 UI**，菜单三项：`Open EasyPass` / `Exit UI Only` / `Exit UI and Stop Service`。
+  关窗只隐藏到托盘；核心是否退出与窗口、托盘完全解耦。
+- **Windows 核心唯一性**由固定回环端口保证：第二个 `--serve` 立即以退出码 2 退出。
+- 安装布局：核心在 `{app}\core\easypass_core.exe`、运行库在 `{app}\lib\sqlite3.dll`；
+  **保险库坐标不变**（仍是 `{app}\easypass.db`），升级不需要迁移数据。
+- 自启项改为拉起核心（`{app}\core\easypass_core.exe --serve`）。
+
+### Added
+
+- `easypass_core --serve / --bridge / --lock / --shutdown / --status / --version`。
+  `--lock` 只锁库不停核心（托盘"仅退出 UI"先跑它再退 UI）。
+- Linux 自启项改为拉起核心（`<core> --serve`）；AppImage 场景因挂载点每次都是临时路径，
+  仍退回启动 AppImage 本身。
+- `tool/build_core.ps1` / `tool/build_core.sh`（`dart build cli` 封装）与
+  `tool/probe_core.dart`（19 项核心动作面探针）。
+- `test/architecture_boundary_test.dart`：UI 不得碰数据库、核心不得 import Flutter。
+
+### Removed
+
+- Flutter 的 `--service` / `--native-host` 模式、`EasypassDaemon`、`startInProcessDaemon`、
+  `BrowserSessionRegistry`（被核心内会话域取代）。**这同时修掉了 2.4.x 的一个真实缺陷**：
+  `--service` 进程虽然窗口不可见，却照样注册托盘图标，托盘 "Open EasyPass" 能把那个空窗口
+  显示出来（2026-10-17 实测复现）。
+
+---
+## [2.4.0]
 
 ### Added
 

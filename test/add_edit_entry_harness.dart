@@ -2,24 +2,20 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
-import 'package:easypass/core/crypto/crypto_service.dart';
-import 'package:easypass/data/database/database.dart';
+import 'package:easypass/client/api_providers.dart';
 import 'package:easypass/data/models/entry_fields.dart';
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
-import 'package:easypass/data/repositories/vault_repository.dart';
-import 'package:easypass/data/state/session_key.dart';
 import 'package:easypass/features/vault/screens/add_edit_entry_screen.dart';
 import 'package:easypass/features/vault/widgets/entry_type_bits.dart';
 import 'package:easypass/l10n/app_localizations.dart';
 
-import 'fakes.dart';
+import 'fake_vault_api.dart';
 
 /// 文字断言一律用英文串：脚手架把 app locale 钉成 `en`，
 /// 不依赖跑测机器的系统语言。
@@ -46,33 +42,25 @@ String fakeEd25519PublicKey({String comment = 'alice@laptop'}) {
   return 'ssh-ed25519 ${base64.encode(builder.toBytes())} $comment';
 }
 
-/// 表单 widget test 的脚手架：内存库 + 已解锁的会话密钥 + 一个真实的
+/// 表单 widget test 的脚手架：内存版假核心（[FakeVaultApi]）+ 一个真实的
 /// GoRouter（保存后会 `context.pop()`，没有路由就弹不回去）。
+///
+/// M4 起 UI 只跟 `VaultApi` 说话：这里不再有内存 drift 库 / 会话密钥，
+/// "落库"就是"假核心收到了 saveItem"。
 class EntryFormHarness {
   EntryFormHarness() {
-    db = AppDatabase.forTesting(NativeDatabase.memory());
-    crypto = CryptoService(secureStorage: FakeSecureStorage());
-    key = crypto.deriveKey('master', crypto.generateSalt());
+    api = FakeVaultApi(initialStatus: 'unlocked');
     container = ProviderContainer(
-      overrides: [
-        cryptoServiceProvider.overrideWithValue(crypto),
-        databaseProvider.overrideWithValue(db),
-      ],
+      overrides: [vaultApiProvider.overrideWithValue(api)],
     );
-    // 解锁：VaultRepository 每次调用时现读密钥。
-    container.read(encryptionKeyProvider.notifier).state = key;
   }
 
-  late final AppDatabase db;
-  late final CryptoService crypto;
-  late final Uint8List key;
+  late final FakeVaultApi api;
   late final ProviderContainer container;
-
-  VaultRepository get repo => container.read(vaultRepositoryProvider);
 
   Future<void> dispose() async {
     container.dispose();
-    await db.close();
+    api.dispose();
   }
 
   /// 打开"新增条目"。
@@ -197,20 +185,11 @@ class EntryFormHarness {
         .value;
   }
 
-  /// 建一个文件夹 —— 走仓储，和 UI 用的是同一条写入路径。
+  /// 建一个文件夹 —— 走核心，和 UI 用的是同一条写入路径。
   ///
   /// 返回文件夹 id；[folderIds] 里也留了一份名字 → id 的映射。
   Future<String> addFolder(String name) async {
-    final id = 'folder-${folderIds.length + 1}';
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await repo.addFolder(
-      FoldersCompanion.insert(
-        id: id,
-        name: name,
-        createdAt: now,
-        updatedAt: now,
-      ),
-    );
+    final id = await api.addFolder(name);
     folderIds[name] = id;
     return id;
   }

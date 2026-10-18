@@ -220,22 +220,28 @@ void main() {
   group('wrapper 脚本', () {
     test('不会向 stdout 写非协议内容（除 exec 路径）', () {
       final body = BrowserHostInstaller.renderWrapperScript();
-      // 失败兜底走 stderr；stdout 必须只透传给 exec 出的 `easypass`。
+      // 失败兜底走 stderr；stdout 必须只透传给 exec 出的核心。
       expect(body.contains('1>&2'), isTrue);
-      expect(body.contains('--native-host'), isTrue);
+      // 3.0.0 起宿主是**核心**（--bridge），不再是 UI 二进制的 --native-host。
+      expect(body.contains('easypass_core'), isTrue);
+      expect(body.contains('--bridge'), isTrue);
+      expect(body.contains('--native-host'), isFalse);
     });
 
-    test(r'解析顺序：$APPIMAGE → baked → 同目录 → PATH 上的 easypass', () {
+    test(r'解析顺序：$APPDIR → baked → 同目录 → PATH 上的 easypass_core', () {
       // 注意：baked 块仅在 `extraCandidates` 非空时才会出现在 wrapper 里
       // （没候选时 for-loop 整段消失 —— 见下一个测试）。这里给它一条假
       // 候选，确保解析顺序的所有环节都能命中。
+      //
+      // 3.0.0 起宿主是核心：AppImage 用 `$APPDIR/usr/bin/easypass_core`，
+      // baked 候选取其所在目录下的 `easypass_core`，最后是 PATH。
       final body = BrowserHostInstaller.renderWrapperScript(
         extraCandidates: const ['/dummy/candidate/easypass'],
       );
-      final appimageIdx = body.indexOf('APPIMAGE');
+      final appimageIdx = body.indexOf('APPDIR');
       final bakedIdx = body.indexOf('_c in \\');
       final siblingIdx = body.indexOf('HERE');
-      final pathIdx = body.indexOf('command -v easypass');
+      final pathIdx = body.indexOf('command -v easypass_core');
       expect(appimageIdx, greaterThanOrEqualTo(0));
       expect(bakedIdx, greaterThan(appimageIdx));
       expect(siblingIdx, greaterThan(bakedIdx));

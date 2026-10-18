@@ -5,13 +5,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../client/api_providers.dart';
+import '../../../client/vault_api.dart';
 import '../../../core/crypto/ssh_key_service.dart';
 import '../../../core/crypto/totp_service.dart';
 import '../../../data/models/entry_fields.dart';
 import '../../../data/models/entry_type.dart';
 import '../../../data/models/vault_item.dart';
-import '../../../data/repositories/vault_repository.dart';
-import '../../../data/services/master_password_rotation.dart';
 import '../../../l10n/app_localizations.dart';
 import '../providers/entry_item_provider.dart';
 import '../widgets/custom_fields_view.dart';
@@ -31,8 +31,8 @@ import '../widgets/entry_type_bits.dart';
 /// - TOTP 只显示 6 位动态码与倒计时，**永不**把原始密钥当普通字段渲染；
 /// - 复制只发生在用户显式点击之后，且机密值未显示时同样要求先验证主密码。
 ///
-/// 数据来源：[entryItemProvider]（`VaultRepository.getItem`）——详情页不再自己
-/// 解密 `*_encrypted` 列，[VaultItem] 交到 UI 时已经是明文。
+/// 数据来源：[entryItemProvider]（核心 `getItem`）——详情页不再自己解密
+/// `*_encrypted` 列，[VaultItem] 从核心交到 UI 时已经是明文。
 class EntryDetailScreen extends ConsumerWidget {
   final String entryId;
 
@@ -61,7 +61,7 @@ class EntryDetailScreen extends ConsumerWidget {
       ),
       body: entryAsync.when(
         // 刷新期间继续显示上一份数据，**绝不**退回进度圈：
-        // entryItemProvider 是 drift 单行查询的流，写入即推送；只有依赖被重建
+        // entryItemProvider 现在由核心的 `item` 主题驱动重取；只有依赖被重建
         // （例如重新解锁）时才会先来一个带 previous 的 AsyncLoading，这里必须
         // 把它当数据渲染，否则每次刷新整页都会闪一下加载态。
         skipLoadingOnReload: true,
@@ -79,8 +79,9 @@ class EntryDetailScreen extends ConsumerWidget {
 
   void _confirmDelete(BuildContext context, WidgetRef ref) {
     final l10n = AppLocalizations.of(context);
-    // 先把 repository 取出来：弹窗回调里 await 之后不再碰 ref。
-    final repository = ref.read(vaultRepositoryProvider);
+    final messenger = ScaffoldMessenger.of(context);
+    // 先把 api 取出来：弹窗回调里 await 之后不再碰 ref。
+    final api = ref.read(vaultApiProvider);
 
     showDialog<void>(
       context: context,
@@ -92,7 +93,16 @@ class EntryDetailScreen extends ConsumerWidget {
               onPressed: () => Navigator.pop(ctx), child: Text(l10n.cancel)),
           FilledButton(
             onPressed: () async {
-              await repository.deleteItem(entryId);
+              try {
+                await api.deleteItem(entryId);
+              } catch (error) {
+                // 删不掉就明说（对话框留着，用户可以重试）。
+                if (ctx.mounted) Navigator.pop(ctx);
+                messenger.showSnackBar(
+                  SnackBar(content: Text(l10n.failedWithError('$error'))),
+                );
+                return;
+              }
               if (!ctx.mounted) return;
               Navigator.pop(ctx);
               if (context.mounted) Navigator.pop(context);
@@ -377,11 +387,11 @@ class _EntryDetailBody extends ConsumerWidget {
     );
   }
 
-  /// 收藏走 `repo.saveItem(item.copyWith(...))`（UI 不许自己拼
-  /// companion）。
+  /// 收藏走 `vaultApiProvider.saveItem(item.copyWith(...))`（UI 不碰任何
+  /// `*_encrypted` 列，也不自己拼 companion）。
   ///
-  /// **不需要任何手动失效**：[entryItemProvider] 监听的是 drift 的单行查询
-  /// （`repository.watchItem`），这次写入落库后流会自己推新值；旧代码在这里
+  /// **不需要任何手动失效**：核心写完会推 `item` / `items` 主题，
+  /// [entryItemProvider] 立刻重取快照；旧代码在这里
   /// `ref.invalidate(entryItemProvider(...))` 既多余，又会让整页闪一次加载态。
   Future<void> _toggleFavorite(
     BuildContext context,
@@ -389,9 +399,9 @@ class _EntryDetailBody extends ConsumerWidget {
     bool value,
   ) async {
     final l10n = AppLocalizations.of(context);
-    final repository = ref.read(vaultRepositoryProvider);
+    final api = ref.read(vaultApiProvider);
     try {
-      await repository.saveItem(entry.copyWith(isFavorite: value));
+      await api.saveItem(entry.copyWith(isFavorite: value));
     } catch (error) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -728,27 +738,43 @@ class _MasterPasswordDialogState extends ConsumerState<_MasterPasswordDialog> {
       _error = null;
     });
 
-    // 校验走**唯一口径**（MasterPasswordVerifier）：它同时看轮换日志与钥匙串。
-    // 自己比对 secure storage 的 salt/hash 会在"轮换已提交、校验材料还没写进
-    // 钥匙串"的窗口里认旧密码、拒新密码。
-    final verifier = MasterPasswordVerifier(
-      db: ref.read(databaseProvider),
-      cryptoService: ref.read(cryptoServiceProvider),
-    );
+    // 二次校验走**核心的唯一口径**（核心内部的 MasterPasswordVerifier：同时看
+    // 轮换日志与钥匙串）。UI 侧再也读不到 salt/hash，也不该自己比对 ——
+    // "轮换已提交、校验材料还没补写"的窗口里自己比对会认旧密码、拒新密码。
+    final api = ref.read(vaultApiProvider);
 
-    if (await verifier.isCorrect(password)) {
+    final bool ok;
+    try {
+      ok = await api.verifyMasterPassword(password);
+    } on VaultApiException catch (error) {
+      // 例如连续输错后的限速（rateLimited）：把核心的说明原样显示。
       if (!mounted) return;
+      setState(() {
+        _checking = false;
+        _error = error.message;
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    if (ok) {
       Navigator.pop(context, true);
       return;
     }
 
-    final error = await verifier.hasStoredCredential()
-        ? l10n.errorIncorrectMasterPassword
-        : l10n.noMasterPasswordConfigured;
+    // 区分"密码错"与"还没设过主密码"（既有文案）：核心的校验材料状态。
+    var hasAuthMaterial = true;
+    try {
+      hasAuthMaterial = (await api.authSnapshot()).hasAuthMaterial;
+    } on VaultApiException {
+      // 拿不到就按"密码错"提示，不编造另一种状态。
+    }
     if (!mounted) return;
     setState(() {
       _checking = false;
-      _error = error;
+      _error = hasAuthMaterial
+          ? l10n.errorIncorrectMasterPassword
+          : l10n.noMasterPasswordConfigured;
     });
   }
 

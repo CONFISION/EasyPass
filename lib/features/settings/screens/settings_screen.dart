@@ -1,16 +1,13 @@
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app.dart';
+import '../../../client/api_providers.dart';
 import '../../../core/constants/app_constants.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../auth/providers/auth_provider.dart';
-import '../../../data/repositories/vault_repository.dart';
 import '../../../data/services/font_discovery_service.dart';
-import '../../../data/services/export_import_provider.dart';
 import '../../desktop_autostart/desktop_autostart.dart';
 import '../providers/font_settings_provider.dart';
 import '../providers/theme_provider.dart';
@@ -136,7 +133,7 @@ class SettingsScreen extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.info),
                   title: Text(l10n.version),
-                  subtitle: Text('2.4.0'),
+                  subtitle: Text('3.0.0'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.code),
@@ -432,21 +429,19 @@ class SettingsScreen extends ConsumerWidget {
     if (format == null || !context.mounted) return;
 
     try {
-      final service = ref.read(exportImportServiceProvider);
-      final String content;
+      // 文件名与对话框标题仍由 UI 决定；**内容与落盘由核心负责** —— UI 只把
+      // FilePicker 给出的绝对路径传过去（`VaultApi.exportVault`）。
+      // `format` 的取值与核心一致：plain / encrypted / bitwarden。
       final String baseName;
       final String dialogTitle;
       switch (format) {
         case 'plain':
-          content = await service.exportPlainJson();
           baseName = 'easypass_plain';
           dialogTitle = l10n.savePlainExportDialog;
         case 'bitwarden':
-          content = await service.exportBitwardenJson();
           baseName = 'easypass_bitwarden';
           dialogTitle = l10n.saveBitwardenExportDialog;
         default:
-          content = await service.exportEncrypted();
           baseName = 'easypass_backup';
           dialogTitle = l10n.saveEncryptedBackupDialog;
       }
@@ -467,7 +462,7 @@ class SettingsScreen extends ConsumerWidget {
 
       if (path == null || !context.mounted) return;
 
-      await service.writeToFile(content, path);
+      await ref.read(vaultApiProvider).exportVault(format, path);
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
@@ -597,45 +592,44 @@ class SettingsScreen extends ConsumerWidget {
 
       if (result == null || result.files.isEmpty || !context.mounted) return;
 
-      final file = File(result.files.single.path!);
-      final content = await file.readAsString();
-
-      if (!context.mounted) return;
+      final path = result.files.single.path;
+      if (path == null || path.isEmpty) return;
 
       // 走哪条导入路径在**读文件之前**就定了：Bitwarden 的 JSON 若是加密导出，
       // 交给导入器报"请改用未加密导出"，比在这里硬猜更准确。
-      if (!isBitwarden) {
-        final counts =
-            await ref.read(exportImportServiceProvider).importFromJson(content);
-        if (!context.mounted) return;
-        _showImportResult(
-          context,
-          l10n.importedCounts(counts['entries'] ?? 0, counts['folders'] ?? 0),
-        );
-        return;
-      }
-
-      final report = source == 'bitwarden-csv'
-          ? await ref.read(exportImportServiceProvider).importBitwardenCsv(content)
-          : await ref
-              .read(exportImportServiceProvider)
-              .importBitwardenJson(content);
+      // 文件读取、解析、写库全部在核心里；UI 只传绝对路径 + 格式。
+      final report = await ref
+          .read(vaultApiProvider)
+          .importVault(isBitwarden ? _bitwardenFormat(source) : 'easypass', path);
 
       if (!context.mounted) return;
 
+      final entries = _asCount(report['imported'] ?? report['entries']);
+      final folders = _asCount(report['folders']);
+      final skipped = _asCount(report['skipped']);
+      final cardsAsNotes = _asCount(report['cardsAsNotes']);
+      final extraUris = _asCount(report['extraUris']);
+
       final buffer = StringBuffer(
-        l10n.importedSummary(report.entries, report.folders),
+        isBitwarden
+            ? l10n.importedSummary(entries, folders)
+            : l10n.importedCounts(entries, folders),
       );
-      if (report.cardsAsNotes > 0 || report.extraUris > 0) {
+      if (cardsAsNotes > 0 || extraUris > 0) {
         buffer.write(
-          '\n${l10n.importedLossyNotes(report.cardsAsNotes, report.extraUris)}',
+          '\n${l10n.importedLossyNotes(cardsAsNotes, extraUris)}',
         );
       }
-      if (report.hasSkipped) {
-        buffer.write('\n${l10n.importedSkipped(report.skipped.length)}');
-        buffer.write(
-          '\n${l10n.importedSkippedDetails(report.skipped.join('; '))}',
-        );
+      if (skipped > 0) {
+        buffer.write('\n${l10n.importedSkipped(skipped)}');
+        // 核心（M4 起）除了计数还回 `skippedDetails` 明细，有就一并展示 ——
+        // 用户需要读到"为什么这条被跳过"。
+        final details = report['skippedDetails'];
+        if (details is List && details.isNotEmpty) {
+          buffer.write(
+            '\n${l10n.importedSkippedDetails(details.join('; '))}',
+          );
+        }
       }
       _showImportResult(context, buffer.toString());
     } catch (e) {
@@ -648,6 +642,17 @@ class SettingsScreen extends ConsumerWidget {
         );
       }
     }
+  }
+
+  /// 导入来源 → `VaultApi.importVault` 的 `format`。
+  static String _bitwardenFormat(String source) =>
+      source == 'bitwarden-csv' ? 'bitwardenCsv' : 'bitwardenJson';
+
+  /// 核心回的计数一律按 num 容错（缺失 / 类型不对都退化成 0，不抛异常）。
+  static int _asCount(Object? value) {
+    if (value is num) return value.toInt();
+    if (value is List) return value.length;
+    return 0;
   }
 
   /// 导入结果提示。跳过的条目用更长的展示时间 —— 用户需要读到原因。
@@ -820,16 +825,23 @@ class SettingsScreen extends ConsumerWidget {
           ),
           FilledButton(
             onPressed: () async {
-              final db = ref.read(databaseProvider);
-              final entries = await db.getAllEntries();
-              for (final e in entries) {
-                await db.deleteEntry(e.id);
+              // 清库由核心在**一个事务**里完成（`deleteAllData`）；UI 不再自己
+              // 遍历 getAllEntries / deleteEntry / deleteFolder —— 那条旁路既
+              // 绕过了文件夹解绑语义，半途失败还会留下"删了一半"的库。
+              try {
+                await ref.read(vaultApiProvider).deleteAllData();
+              } catch (e) {
+                // 静默失败会看起来像"按钮坏了"，必须显式报错。
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(l10n.failedWithError(e.toString())),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+                return;
               }
-              final folders = await db.getAllFolders();
-              for (final f in folders) {
-                await db.deleteFolder(f.id);
-              }
-              ref.invalidate(vaultRepositoryProvider);
               if (ctx.mounted) Navigator.pop(ctx);
               if (context.mounted) {
                 ScaffoldMessenger.of(

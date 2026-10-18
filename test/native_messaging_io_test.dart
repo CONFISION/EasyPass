@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:easypass/features/browser_bridge/native_messaging_service.dart';
+import 'package:easypass/core_service/native_messaging_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// IO-level tests for the native messaging frame codec. These drive the

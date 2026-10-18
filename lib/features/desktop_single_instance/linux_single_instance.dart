@@ -16,7 +16,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show visibleForTesting;
 
 import '../../core/platform/app_paths.dart';
 import 'desktop_single_instance.dart';

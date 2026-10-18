@@ -17,21 +17,29 @@ CLI (`--install` / `--uninstall` / `--desktop-status`) and browser-host registra
 with the vault moved to `$XDG_DATA_HOME/easypass/`. **2.4.0** adds
 **Bitwarden / Vaultwarden import** (JSON + CSV) and a **Bitwarden-compatible export**,
 makes **master-password rotation atomic** (a rotation journal in the vault database,
-schema **3**), and adds **CI** plus scripted release engineering. **Supported desktops
+schema **3**), and adds **CI** plus scripted release engineering. **3.0.0** turns the
+app into a **core-service architecture**: a standalone, windowless, always-on
+`easypass_core` process owns the vault, the Flutter app is a pure client
+(`lib/client/**` → `VaultApi`), and the tray — which belongs to the UI only — offers
+`Exit UI Only` and `Exit UI and Stop Service`. **Supported desktops
 are Windows and Linux;** Phase 3 (cloud sync, sharing, emergency access, mobile/macOS)
 is still planned.
 
 > **Local-only docs (NOT in a fresh clone — `.gitignore` excludes them):** the
 > roadmap `Plan.md`, the working agreement/pitfalls `HANDOFF.md`, the 2.3.x
-> interface contract `docs/entry-types.md`, the acceptance checklist
-> `docs/acceptance-2.3.0.md`, release notes under `docs/`, and the `dist/` audit /
+> interface contract `docs/entry-types.md`, the acceptance checklists
+> `docs/acceptance-2.3.0.md` / `docs/acceptance-3.0.0.md`, the 3.0.0 design doc
+> `docs/core-service-refactor.md`, release notes under `docs/`, and the `dist/` audit /
 > phase evidence dumps. Never write a committed file that *depends* on them; this
 > file and the READMEs must stand alone.
 
 Security model: the master password is never stored. PBKDF2-HMAC-SHA256
-(100,000 iterations) derives an AES-256-CBC key; only salt + hash are persisted
-via `flutter_secure_storage`. The derived key lives in a Riverpod
-`StateProvider` for the session and is cleared on lock (5-minute auto-lock).
+(100,000 iterations) derives an AES-256-CBC key. **3.0.0 起** salt + verifier live in
+the vault database itself (`vault_meta`, via `VaultMetaSecretStore`) — the old
+`flutter_secure_storage` copy is read **once** during upgrade and handed to the core
+(`adoptLegacyKeyMaterial`). The derived key exists only in the core process
+(`SessionDomains`: separate `ui` / `bridge` sessions) and is cleared on lock
+(auto-lock is enforced by the core).
 
 ## Build / Test / Lint
 
@@ -43,13 +51,25 @@ flutter pub get          # install deps
 dart run build_runner build --delete-conflicting-outputs   # regenerate database.g.dart (drift)
 flutter gen-l10n        # regenerate app_localizations.dart after editing lib/l10n/*.arb
 flutter analyze         # lint (flutter_lints)
-flutter test            # 570 passing / 9 skipped on Windows (the tree declares ~602
+flutter test            # 569 passing / 3 skipped on Windows (the tree declares ~600
                         # cases; Linux-only files register none here, so a Windows run
                         # reports FEWER CASES, not failures — see CONTRIBUTING.md)
 flutter run -d windows  # run desktop app
 flutter build windows   # release build → build\windows\x64\runner\Release\easypass.exe
+pwsh -File tool\build_core.ps1   # 核心服务 → Release\core\easypass_core.exe + Release\lib\sqlite3.dll
 flutter build linux --release   # Linux bundle → build/linux/x64/release/bundle/
 ```
+
+- **核心服务（3.0.0）用 `dart build cli` 构建，不是 `dart compile exe`** —— 后者会以
+  `'dart compile' does not support build hooks` 直接失败（依赖图里 `sqlite3` /
+  `objective_c` 带 build hook）。`tool/build_core.ps1` / `tool/build_core.sh` 已封装：
+  产物摊平到 `<OutDir>\core\easypass_core.exe` + `<OutDir>\lib\sqlite3.dll`。
+  **`package:sqlite3` 的原生库按 `<exe>\..\lib\<name>` 解析**，所以核心必须待在
+  子目录里、库放在 `{app}\lib` —— 这正是那个布局的原因（实测过：与 exe 同目录的
+  `sqlite3.dll` 永远不会被加载）。核心 AOT 构建是纯 Dart、agent 可以自己跑来验证；
+  正式发布产物仍由用户执行（同 `flutter build`）。
+- **核心的输入是空库**：`dart run tool\probe_core.dart --core <path>` 会真正跑一遍
+  会话/文件夹/条目/搜索/健康报告/锁定解锁，但**拒绝在已有主密码的库上执行写操作**。
 
 - **Windows 构建命令固定为 `flutter build windows`** — 每次需要构建 Windows 发布版时都使用这条命令。
 - **C++ runner 改动可以不用 MSBuild 验证** — `windows\runner\check_syntax.bat` 用与真实构建相同的开关
@@ -94,29 +114,60 @@ flutter build linux --release   # Linux bundle → build/linux/x64/release/bundl
 
 - Regenerating code: after editing `lib/data/database/tables.drift`, you **must**
   rerun build_runner — `AppDatabase` and companions in `database.g.dart` are generated.
-- Tests live in `test/` with an in-memory `FakeSecureStorage` (`test/fakes.dart`).
-  `auth_test.dart` / `export_import_test.dart` override `cryptoServiceProvider`
-  and `databaseProvider` with `AppDatabase.forTesting()` and set
-  `driftRuntimeOptions.dontWarnAboutMultipleDatabases`.
+- Tests live in `test/`. **3.0.0 起 UI 测试注入假的 `VaultApi`**（`test/fake_vault_api.dart`），
+  不再构造内存 drift 库；跑在核心侧的数据层测试仍用 `AppDatabase.forTesting()` +
+  `FakeSecureStorage`（`test/fakes.dart`），轮换/加密的真实路径由
+  `test/core_actions_harness.dart` 驱动 `CoreActions`。
 - Linux-only test files (`browser_host_installer_test.dart`, `linux_window_controller_test.dart`,
-  the POSIX-exec-bit cases in `desktop_integration_test.dart`, the SIGTERM path in
-  `easypass_daemon_terminate_test.dart`) detect the platform and **register no cases on
-  Windows** (or `skip:` themselves), so a Windows run reports fewer cases, not failures.
+  the POSIX-exec-bit cases in `desktop_integration_test.dart`) detect the platform and
+  **register no cases on Windows** (or `skip:` themselves), so a Windows run reports fewer
+  cases, not failures.
+- **`test/architecture_boundary_test.dart` 是架构守卫**：`lib/features/**` 不得 import
+  drift / database / repositories / session key；`lib/client/**` 不得碰数据库；
+  `lib/core_service/**` 不得 import Flutter。加了新目录要同步这些规则。
 
 ## Architecture
 
 ```
-lib/main.dart                  Entry: ProviderScope + portrait lock; CLI dispatch (--service, --native-host,
-                               --install/--uninstall/--desktop-status, --install-browser-host/…)
-lib/app.dart                   MaterialApp.router; go_router routes + auth redirect logic
+bin/easypass_core.dart         核心服务入口（--serve/--bridge/--lock/--shutdown/--status/--version）
+                               **不得 import Flutter**：`dart build cli` 出的 AOT 控制台程序
+lib/main.dart                  UI 入口：ProviderScope + portrait lock；CLI dispatch
+                               (--install/--uninstall/--desktop-status, --install-browser-host/…)
+                               —— 3.0.0 起 **没有** --service / --native-host 模式
+lib/app.dart                   MaterialApp.router; go_router routes + auth redirect + 活动上报
+lib/client/                    UI 的唯一数据通道（3.0.0 新增）
+│   ├── vault_api.dart         VaultApi 抽象（UI 只依赖它；测试注入假实现）
+│   ├── core_session.dart      CoreSession：发现/拉起核心、握手、自动重连、事件转发
+│   └── api_providers.dart     vaultApiProvider / coreSessionProvider / coreChangesProvider
+lib/protocol/                  协议 5 的线格式（核心与客户端共用，纯 Dart）
+│   ├── frames.dart            4 字节长度前缀 + JSON 的唯一编解码实现
+│   ├── secure_channel.dart    nonce/HMAC 互相证明 + AES-CBC/HMAC 帧加密（通道加密）
+│   ├── actions.dart           动作名常量 + ui/bridge 白名单
+│   ├── events.dart            推送事件与主题（changed / sessionLocked / …）
+│   ├── codecs.dart            bridge JSON（冻结）与 UI JSON（完整明文）+ WireFolder
+│   └── errors.dart            错误码（error 仍是字符串，errorCode 是结构化补充）
+lib/core_service/              核心服务实现（纯 Dart，**不得 import Flutter**，有测试守着）
+│   ├── core_service.dart      组装 + 监听 + 分发 + 事件广播 + shutdown
+│   ├── core_actions.dart      UI 域动作（会话/条目/文件夹/导出导入/迁移）
+│   ├── session_domains.dart   ui / bridge 两个会话域与锁定传播规则
+│   ├── core_singleton.dart    固定端口单实例闸门
+│   ├── core_info.dart         daemon.json 读写与清理
+│   ├── core_client.dart       客户端连接 + 握手 + --shutdown 实现
+│   ├── bridge_forwarder.dart  --bridge：stdio ↔ 回环 TCP（Linux 宿主）
+│   ├── native_messaging_service.dart  bridge 域动作（协议 3 起形状冻结）
+│   ├── vault_session.dart     会话（密钥 + 空闲过期）
+│   └── url_matcher.dart       URL↔条目匹配
 ├── core/
-│   ├── constants/app_constants.dart    PBKDF2/AES parameters, secure-storage keys, bridgeProtocolVersion
+│   ├── constants/app_constants.dart    PBKDF2/AES 参数、钥匙串键名、bridgeProtocolVersion、
+│   │                                   coreVersion、coreFixedPort
 │   ├── crypto/
-│   │   ├── crypto_service.dart         Manual PBKDF2, AES-256-CBC (IV||cipher, base64), secure storage
+│   │   ├── crypto_service.dart         Manual PBKDF2, AES-256-CBC (IV||cipher, base64)
 │   │   ├── totp_service.dart           RFC 6238 TOTP (SHA-1, base32 secret, 30s/6-digit)
 │   │   └── ssh_key_service.dart        OpenSSH public-key parsing + SHA256/MD5 fingerprints (pure)
-│   └── platform/app_paths.dart         Data dir + file paths per platform (XDG on Linux, exe dir on Windows),
-│                                       permission tightening (0700/0600), legacy-DB migration
+│   ├── storage/                        SecretStore 抽象 + VaultMetaSecretStore（库内校验材料）
+│   └── platform/app_paths.dart         Data dir + file paths per platform (XDG on Linux, exe dir on
+│                                       Windows; 核心在子目录时取父目录), 0700/0600, legacy-DB migration
+lib/adapters/flutter_secret_store.dart  唯一允许 import flutter_secure_storage 的"保险库路径"
 ├── data/
 │   ├── database/
 │   │   ├── tables.drift                Schema: folders, password_entries, vault_meta (schemaVersion 3)
@@ -125,22 +176,20 @@ lib/app.dart                   MaterialApp.router; go_router routes + auth redir
 │   ├── models/                         Entry types + payload models (2.3.0)
 │   │   ├── entry_type.dart             EntryType enum (login/secure_note/identity/ssh_key) + wire names
 │   │   ├── entry_fields.dart           LoginData / IdentityData / SshKeyData / CustomField / EntryPayload
-│   │   ├── vault_item.dart             VaultItem: the single decrypted domain model used by UI/bridge/export
+│   │   ├── vault_item.dart             VaultItem: the single decrypted domain model used by core/UI/export
 │   │   └── vault_item_mapper.dart      VaultItem ↔ DB row: the ONLY place that encrypts/decrypts entry fields
-│   ├── repositories/vault_repository.dart  Item API (watchItems/saveItem/searchItems/reencryptAll) + legacy row API
-│   ├── state/session_key.dart          encryptionKeyProvider (data layer so the repo can read the key)
+│   ├── repositories/vault_repository.dart  Item API (getItems/saveItem/searchItems/reencryptAll)
 │   └── services/                       export_import_service.dart (JSON + encrypted export/import),
 │                                       bitwarden_importer.dart (Bitwarden JSON/CSV import),
 │                                       master_password_rotation.dart (atomic rotation journal)
-└── features/                           Feature-first UI layer
-    ├── auth/     auth_provider.dart (AuthState/AuthNotifier), lock/set-master-password screens
-    ├── vault/    vault_provider.dart (stream/future providers), vault CRUD screens,
-    │             widgets/{entry_card,entry_type_bits,custom_fields_editor,custom_fields_view}.dart
+└── features/                           UI only（不得直接碰 DB/仓储/密钥，见 test/architecture_boundary_test.dart）
+    ├── auth/     auth_provider.dart (AuthState/AuthNotifier，全部经 VaultApi), lock/set-master-password screens
+    ├── vault/    providers/{vault_provider,entry_item_provider,core_stream}.dart（快照 + 主题重取）,
+    │             vault CRUD screens, widgets/{entry_card,entry_type_bits,custom_fields_editor,…}.dart
     ├── generator/ generator_provider.dart, generator_screen.dart
-    ├── settings/ settings_screen.dart, providers/{font_settings,theme}_provider.dart
-    ├── browser_bridge/  native_messaging_service.dart (protocol), vault_session.dart (session),
-    │                    url_matcher.dart (URL↔entry), browser_session_registry.dart, easypass_daemon.dart,
-    │                    browser_host_installer.dart (per-browser native-messaging manifests),
+    ├── health/   health_service.dart（纯函数，核心也在用）, health_provider.dart
+    ├── settings/ settings_screen.dart（导出/导入/清库全走 VaultApi）, providers/{font_settings,theme}_provider.dart
+    ├── browser_bridge/  browser_host_installer.dart (per-browser native-messaging manifests),
     │                    browser_host_prompt.dart (first-run registration prompt)
     ├── desktop_integration/  desktop_integration.dart (facade) + linux_desktop_integration.dart
     │                         (desktop entry / icon / --desktop-status), windows_desktop_integration.dart
@@ -148,21 +197,47 @@ lib/app.dart                   MaterialApp.router; go_router routes + auth redir
     │                    linux_window_controller.dart (MethodChannel `com.easypass.app/window`)
     ├── desktop_autostart/  desktop_autostart.dart + linux_autostart.dart (XDG), windows_autostart.dart
     └── desktop_single_instance/  desktop_single_instance.dart + linux_single_instance.dart
-                                  (easypass.db.lock + unix socket), windows_single_instance.dart (no-op)
+                                  (easypass.lock + unix socket), windows_single_instance.dart (no-op)
+tool/build_core.ps1 / .sh                核心服务构建（dart build cli + 摊平产物）
+tool/probe_core.dart                     核心功能探针（19 项；只跑空库）
 browser_extension/                      Chrome MV3 extension (see below)
 docs/entry-types.md                     2.3.x interface contract (LOCAL ONLY — gitignored)
-docs/acceptance-2.3.0.md                Manual acceptance checklist (LOCAL ONLY — gitignored)
+docs/acceptance-3.0.0.md                3.0.0 真机验收清单 (LOCAL ONLY — gitignored)
 windows/                                Flutter Windows runner (CMake) + the tray/single-instance glue
 linux/                                  Flutter Linux runner (CMake): my_application.cc (window + method
                                         channel), easypass_tray.cc (libayatana-appindicator + a
-                                        StatusNotifierWatcher host probe)
+                                        StatusNotifierWatcher host probe; 三项菜单)
 ```
 
-**Data flow (app):** master password → PBKDF2 key → hash verify → key stored in
-`encryptionKeyProvider` (defined in `lib/data/state/session_key.dart`) → UI calls
-providers → `VaultRepository` → `VaultItemMapper` → `CryptoService` encrypts
-sensitive fields → drift/SQLite (`easypass.db`: next to the executable on Windows,
-`$XDG_DATA_HOME/easypass/easypass.db` on Linux).
+**Data flow (3.0.0 — 核心服务架构):** 保险库只有一个所有者：**核心服务进程**
+（`easypass_core`）。UI 是纯客户端，自己不开库、不持密钥。
+
+```
+浏览器扩展 ─ native messaging ─▶ 桥(x86) ─┐
+                                            │ 回环 TCP，协议 5：加密 + 双向证明
+                                            ▼
+                                      easypass_core  ──▶ VaultRepository ──▶ VaultItemMapper
+  Flutter UI ── VaultApi(lib/client) ────────┘                │              （唯一加解密口）
+  （托盘 / 窗口 / 两档退出）                                            ▼
+                                                              加密 SQLite（easypass.db）
+```
+
+- 会话域：`ui` 与 `bridge` 各自一份密钥副本与空闲计时器。**UI 锁定会同时锁
+  bridge 域；UI 解锁不会解锁扩展，扩展解锁也不影响 UI**（刻意如此）。
+- 空闲自动锁定在**核心**（`SessionDomains`），UI 只上报活动（`touchActivity`，
+  节流 20s）并订阅 `sessionLocked/sessionUnlocked` 事件。
+- 明文边界：核心把**明文 `VaultItem`** 发给 UI（`ui` 域动作）；扩展拿到的是
+  受限 JSON（`hasTotp`、无 TOTP 种子）。导出/导入由**核心读写文件**，UI 只传路径。
+- **通道加密（协议 5）**：`lib/protocol/secure_channel.dart`。握手用
+  「nonce + 双向 HMAC 证明」，**令牌永不上线**；握手末帧起所有帧用
+  AES-256-CBC + HMAC-SHA256（encrypt-then-MAC，四把方向密钥）加密。
+  **`role: ui` / `agent` 只能走加密握手**，传 v4 明文形状一律 `unsupported`；
+  唯一例外是 Windows 的 x86 C++ 桥（`role` 缺省 = bridge），它是 32 位 stdio
+  限制下的字节转发器，与核心之间仍是回环 + 令牌认证 —— 这是**已知的、
+  有意的**信任边界，不是遗漏。
+  边界要说清楚：加密保证"链路上没有明文"，挡得住没有令牌的进程与被动的
+  抓包者；**挡不住同用户的恶意进程**（它能读 `daemon.json`，而 UI 本来就要
+  显示明文密码）。真正的边界是"同一用户账户"。
 
 **Entry types (2.3.x):** one row can be `login`, `secure_note`, `identity` or
 `ssh_key`. Login fields stay in the legacy columns (`url`, `username`,
@@ -172,24 +247,26 @@ serialised as `EntryPayload` JSON and stored encrypted in `data_encrypted`.
 
 **Browser bridge flow:** content-script/popup → `chrome.runtime` message →
 `background.js` service worker → native messaging (4-byte length prefix + JSON,
-host id `com.easypass.app`) → bridge exe → daemon (`easypass.exe --service`) →
-`NativeMessagingService` → repository queries. Actions: `getStatus`, `unlock`,
-`lock`, `getCredentials`, `getAllCredentials`, `searchCredentials`,
-`generatePassword`, `getTotp`, `getHealthReport`. Response always echoes
-`requestId`; errors come back in an `error` field. Since protocol 3 the entry JSON
-carries `type` + per-type blocks (`identity` / `sshKey` / `customFields`);
-`hasTotp` replaces the TOTP secret, and `getCredentials` (autofill candidates)
-returns **login entries only**.
-**On Linux the native-messaging host is the app binary itself** (`easypass
---native-host`, invoked by the generated wrapper script) — there is no separate
-x86 bridge there.
+host id `com.easypass.app`) → bridge → **loopback TCP + token handshake to the
+core** → `NativeMessagingService`（动作形状与 2.x 冻结不变）→ repository。
+Actions: `getStatus`, `unlock`, `lock`, `getCredentials`, `getAllCredentials`,
+`searchCredentials`, `generatePassword`, `getTotp`, `getHealthReport`. Response
+always echoes `requestId`; errors come back in an `error` **string** field.
+Since protocol 3 the entry JSON carries `type` + per-type blocks; `hasTotp`
+replaces the TOTP secret, and `getCredentials` returns **login entries only**.
+**Windows** 用独立的 32 位桥 `easypass_native_host.exe`（32 位浏览器的 stdio
+句柄问题，Dart AOT 出不了 ia32）；**Linux** 由 wrapper `exec easypass_core
+--bridge`，宿主就是核心二进制的转发模式。
 
-**Desktop lifecycle (both platforms):** a windowless daemon (`--service`) is
-cold-started on demand by the native host and exits after 10 minutes idle; the tray
-icon hides the window on close **only when the icon was really registered**
-(`check_integrity.bat` exists because a Low integrity label makes that registration
-fail silently). On Linux a second launch takes `easypass.db.lock` and wakes the
-running instance over a unix socket; Windows has no single-instance gate yet.
+**Desktop lifecycle (both platforms):** 核心是**独立、常驻、无窗口无托盘**的
+进程，唯一性由固定回环端口（`AppConstants.coreFixedPort`）保证；**没有空闲自
+退** —— 只有 `shutdownCore` 动作 / `--shutdown` 才退出。UI 启动时按需拉起核心，
+从不开库。托盘**只属于 UI**，菜单三项：`Open EasyPass` / `Exit UI Only` /
+`Exit UI and Stop Service`；关窗只隐藏到托盘（且仅在托盘图标真的注册成功时）。
+核心 exe 位于 `{app}\core\easypass_core.exe`（原生资产按 `<exe>\..\lib` 解析，
+所以库在 `{app}\lib`；数据目录仍取父目录 —— 见 `app_paths.dart` 的判据）。
+On Linux a second launch takes `easypass.lock` and wakes the running instance over
+a unix socket; Windows still has no single-instance gate for the *UI*.
 
 **Routing / auth gating** is centralized in `lib/app.dart` (`_routerProvider`
 redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
@@ -202,12 +279,24 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
   `bridgeProtocolVersion`. Changing these breaks stored data or the extension.
 - **`lib/core/platform/app_paths.dart`** — every platform-dependent path in one
   place (XDG dirs, exe dir, daemon.json, native-host wrapper, autostart/desktop
-  entry, migration temporaries). Diagnostics go to **stderr** (`stdout` is the
-  native-messaging channel in `--native-host` mode).
+  entry, migration temporaries). `dataDirectory` 有一个**父目录判据**：非 Linux 上
+  若 exe 的父目录里存在 `easypass[.exe]`，数据目录取父目录 —— 这样核心被放在
+  `{app}\core\` 时保险库坐标仍是 `{app}`，不需要迁移数据。
+- **`lib/protocol/**`** — 协议 5 的线格式。**帧编解码只有一份实现**
+  （`frames.dart` 的 `NativeMessageReader` / `encodeMessage` / `encodePayload`），
+  核心、桥、探针、测试共用；`secure_channel.dart` 是**通道加密**的唯一实现
+  （握手证明 + 四把方向密钥 + encrypt-then-MAC）。`actions.dart` 是动作名的单一来源。
+- **`lib/core_service/native_messaging_service.dart`** — bridge 域动作的实现
+  （`getCredentials` 等 9 个，协议 3 起形状冻结）；UI 域动作在
+  `core_actions.dart`，两者共用同一个仓储与会话密钥口径。
+- **`lib/core/storage/secret_store.dart`** — 密钥材料存储抽象。核心注册
+  `VaultMetaSecretStore`（写库内 `vault_meta`），UI 注册 `FlutterSecretStore`
+  （只在迁移期读旧钥匙串）。未注册时任何存储操作都会**明确抛错**，不会静默退化。
 - **`lib/data/database/tables.drift`** — the schema (folders, password_entries).
   Sensitive columns are `*_encrypted` TEXT; plaintext never touches the DB.
-- **`lib/features/browser_bridge/native_messaging_service.dart`** — the native
-  messaging host implementation; the bridge contract lives here.
+- **`lib/features/browser_bridge/browser_host_installer.dart`** — Linux 的宿主
+  注册（生成 wrapper + 各浏览器 manifest）。wrapper 现在 `exec easypass_core
+  --bridge`。
 - **`browser_extension/manifest.json`** — MV3 manifest; `nativeMessaging` permission.
 - **`browser_extension/native_host/com.easypass.app.json`** — host registration
   pointing at `easypass_native_host.exe`; the installer rewrites the equivalent
@@ -231,14 +320,16 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
   produced nothing here, and `custom_lint ^0.7` pinned `analyzer ^7`, which is what broke
   drift code generation on the current Dart SDK. Re-adding them means upgrading the whole
   riverpod family and re-checking codegen — see the comments in `pubspec.yaml`.)
-- **Layering:** `core` = pure logic (no widgets), `data` = persistence, `features`
-  = UI + providers. Features import down into `core`/`data`; `core`/`data` never
-  import `features`.
+- **Layering (3.0.0):** `core` = pure logic (no widgets), `data` = persistence,
+  `protocol` = 线格式, `core_service` = 核心进程（不得 import Flutter）,
+  `client` = UI 的数据通道, `features` = UI。**UI 不得直接 import drift /
+  database / repositories / session key** —— 由 `test/architecture_boundary_test.dart`
+  强制（它同时守着"核心不得 import Flutter"）。
 - **Naming:** feature folders contain `screens/`, `providers/`, `widgets/`;
   providers are named `*Provider`; DB companions use Drift naming.
 - **Encryption discipline:** passwords/notes/TOTP secrets are always encrypted
-  via `CryptoService` before persistence; derive the key from
-  `encryptionKeyProvider`; never log or print secrets.
+  via `CryptoService` before persistence; the key comes from the session
+  (`SessionDomains` in the core — **UI never holds it**); never log or print secrets.
 - **Comments:** mixed Chinese/English comments throughout — **except
   `windows/runner/**`, which must stay pure ASCII** (see Build/Test/Lint).
 - **Formatting:** do **not** run `dart format` on this repo. It predates Dart 3.13's
@@ -253,9 +344,10 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
   exceptions caught by callers (native messaging returns `error` field).
 - **Auth errors** are error codes (`AuthErrorCodes` in `auth_provider.dart`);
   map them to localized text with `authErrorMessage(l10n, code)`.
-- **Auth provider** adds `changeMasterPassword()` (verifies the current password,
-  re-encrypts all entries with a fresh key) and `setAutoLockMinutes()` (persisted
-  via secure storage); `AuthState.autoLockMinutes` drives the settings UI.
+- **Auth provider** adds `changeMasterPassword()` (verifies the current password
+  through the core, which re-encrypts all entries with a fresh key and then locks)
+  and `setAutoLockMinutes()` (persisted by the core); `AuthState.autoLockMinutes`
+  drives the settings UI. 全部经 `VaultApi`，UI 不自己校验、不自己定时。
 - **Export/import** distinguishes `format: 'encrypted'` backups (restorable) from
   plain JSON; plain imports are re-encrypted with the session key on import.
 - **Platform split:** `features/desktop_*/` and `core/platform/` hold the platform
@@ -332,24 +424,21 @@ prose. The version comes from `pubspec.yaml` only. Runbook: `installer/release/R
   write the key material": that ordering is what could leave neither password able to open
   the vault. Regression net: `test/master_password_rotation_atomicity_test.dart` and
   `test/change_password_then_lock_test.dart`.
-- **Password verification has exactly ONE implementation: `MasterPasswordVerifier`.** It used
-  to exist three times (`AuthNotifier.unlock`, `NativeMessagingService._unlock`,
-  `EntryDetailScreen._verify`), and only one copy knew about the rotation journal — which is
-  how "the old master password still works after changing it" shipped in 2.4.0. Any new
-  place that needs to check a master password must use the verifier (or
-  `masterPasswordVerifierProvider`), never compare stored salt/hash by hand. Its rule is
-  "a journal exists ⇒ only the journal's target password is valid; the keychain copy is
-  stale".
-- **Changing the master password leaves the vault LOCKED** (`changeMasterPassword` clears the
-  session key and sets `AuthStatus.locked`; the router then redirects to `/lock`). That is
-  deliberate: it forces the user to prove the new password works, and it re-authenticates
-  after a security-sensitive key change. Do not "helpfully" restore the old auto-unlocked
-  state — that is exactly the state in which a broken rotation stays invisible.
-- **SQLite file location gotcha:** the DB opens through `app_paths.dart`
-  (exe dir on Windows, `$XDG_DATA_HOME/easypass/` on Linux). Widget/unit tests that
-  construct `AppDatabase()` will hit the real file — use `AppDatabase.forTesting()`
-  with `NativeDatabase.memory()` and override `cryptoServiceProvider` with
-  `FakeSecureStorage` (`test/fakes.dart`).
+- **Password verification has exactly ONE implementation: `MasterPasswordVerifier`.**
+  It used to exist three times and only one copy knew about the rotation journal — which is
+  how "the old master password still works after changing it" shipped in 2.4.0. 3.0.0 起它
+  **只跑在核心里**（`CoreActions._unlock` / `_changeMasterPassword` / `verifyMasterPassword`
+  都走它）；UI 通过 `verifyMasterPassword` 动作二次校验，**任何地方都不许自己比对
+  salt/hash**。判据仍是"日志存在 ⇒ 只有日志里的目标密码有效"。
+- **Changing the master password leaves the vault LOCKED**（核心 `lockAll()` + UI 置
+  `AuthStatus.locked`；路由回 `/lock`）。That is deliberate: it forces the user to prove
+  the new password works, and it re-authenticates after a security-sensitive key change.
+  Do not "helpfully" restore the old auto-unlocked state — that is exactly the state in
+  which a broken rotation stays invisible.
+- **SQLite 只由核心打开。** 3.0.0 起 UI 进程**没有**数据库句柄；测试若要真库，用
+  `AppDatabase.forTesting()` + `NativeDatabase.memory()` 并注册
+  `InMemorySecretStore`（`lib/core/storage/secret_store.dart`）。实机排查"库里到底有什么"
+  请用 `easypass_core --status`，不要从 UI 进程去读文件。
 - **`pubspec.yaml`'s sqlite3 hook must stay Linux-scoped.** It reads
   `hooks: user_defines: sqlite3: source: {linux: system}` — the `linux:` key, with **no
   `default:`**. Removing the hook or adding a default makes the Windows build download
@@ -373,23 +462,28 @@ prose. The version comes from `pubspec.yaml` only. Runbook: `installer/release/R
   desktop session that lacks a tray. The CLI surface for scripted checks is
   `--install`, `--uninstall`, `--desktop-status`, `--install-browser-host`,
   `--uninstall-browser-host`, `--browser-host-status`.
-- **Plan.md** (local-only) holds the roadmap: v2.4 = master-password rotation atomicity (the only
-  data-losing item) + extension store listing + Bitwarden import + CI + release engineering;
-  v3.0 = key-hierarchy rework + self-hosted sync. Sync is **not** implemented, and the
+- **Plan.md** (local-only) holds the roadmap: v2.4 = master-password rotation atomicity + Bitwarden
+  import + CI + release engineering；**v3.0 = 核心服务化（本版已实现）**；再往后才是
+  自部署同步 / 密钥体系改造（orgKey 分层）。Sync is **not** implemented, and the
   health report is (login entries only). 2.3.3 has shipped and passed the Linux hardware
   acceptance run.
-- **Protocol versioning (2.2.1+):** the daemon stamps `protocolVersion` + `pid` into
-  `daemon.json` and returns `protocolVersion` from `getStatus`.
+- **Protocol versioning (2.2.1+):** 核心把 `protocolVersion` + `pid` + `coreVersion` + `exe`
+  写进 `daemon.json`，`getStatus` 也回 `protocolVersion`。
   `AppConstants.bridgeProtocolVersion` (`lib/core/constants/app_constants.dart`) and
   `EXPECTED_PROTOCOL_VERSION` (`browser_extension/background.js`) **must be bumped
-  together** whenever the bridge protocol changes incompatibly. This is what lets the app
-  retire a stale daemon after an upgrade — without it the extension keeps talking to the
-  old process and reports `Unknown action: …`.
+  together** whenever the protocol changes incompatibly. **协议 5 = 3.0.0**：握手带
+  `role` 且**全程加密**（令牌不上线），核心推送 `changed` / `sessionLocked` 等事件；
+  v5 核心拒绝 v4 及更旧的客户端（明文握手只留给 x86 桥的 bridge 角色）。
+- **`easypass_core --lock`**：连上运行中的核心并锁定保险库，**不停核心**；
+  没有核心在跑时退 0（无事可做）。托盘"仅退出 UI"就是先跑它再退 UI ——
+  `windows/runner/flutter_window.cpp` 的 `LockVaultBeforeExit()` /
+  `linux/runner/easypass_tray.cc` 的 `lock_vault_before_exit()`，锁定失败只提示、
+  仍然退出（不能把用户困在界面里）。
 - **Debug tools (no browser needed):** `node browser_extension/tools/probe_bridge.mjs`
-  (end-to-end: spawns the bridge, talks to the real daemon) and
-  `node browser_extension/tools/probe_daemon.mjs` (talks to an already-running daemon)
-  tell you whether the bridge, the daemon or the extension is at fault. The jsdom smoke
-  scripts plus `check_extension.mjs` are the regression net for extension changes.
+  （端到端：拉起桥，桥再去找/拉起核心）、`probe_daemon.mjs`（直连已在跑的核心），
+  以及 `dart run tool\probe_core.dart --core <path>`（19 项核心动作面，只跑空库）。
+  三者配合能判断问题在扩展、桥还是核心。jsdom smoke + `check_extension.mjs` 是扩展
+  改动的回归网。
 - **Store upload package:** `node browser_extension/tools/build_extension_zip.mjs`
   (`--dry-run` validates and lists what would ship; without it writes
   `dist/easypass-extension-<version>.zip`). It packs a **whitelist** (manifest,
@@ -425,11 +519,12 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
   **unconditional**, so it fails even when the file contents are unchanged. A running
   `easypass.exe` keeps `MSVCP140.dll` / `VCRUNTIME140.dll` / `VCRUNTIME140_1.dll` mapped
   and therefore locked ("The process cannot access the file because it is being used by
-  another process"), `copy` returns 1, and MSBuild aborts the whole build. The app is
-  also its own daemon (`daemon.json` carries the same pid), so closing the window is not
-  always enough — the process can outlive it.
-  **Before building, stop it:** `Get-Process easypass -ErrorAction SilentlyContinue | Stop-Process -Force`
-  (then delete a stale `%LOCALAPPDATA%\EasyPass\daemon.json`). MSBuild's `MSB3073`
+  another process"), `copy` returns 1, and MSBuild aborts the whole build. **3.0.0 起还有
+  第二个进程会锁文件**：`core\easypass_core.exe`（常驻核心）以及它的
+  `lib\sqlite3.dll`。
+  **Before building, stop them:** `Get-Process easypass,easypass_core -ErrorAction
+  SilentlyContinue | Stop-Process -Force`（或先跑 `core\easypass_core.exe --shutdown`），
+  再删掉陈旧的 `%LOCALAPPDATA%\EasyPass\daemon.json`。MSBuild's `MSB3073`
   output does **not** include the script's own message, so run the two `.bat` files by
   hand with the output dir as the argument to see the real error.
 - **A Low mandatory integrity label on the workspace breaks the app in ways that look like
@@ -498,10 +593,19 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
   The 2.3.1 user-visible bugs (the folder picker offering only the first folder; the detail
   page still showing the old entry — and therefore no new custom field — after an edit) both
   came from `FutureProvider` caches that some write path forgot to invalidate.
-  `foldersProvider`, `entryItemProvider`, `searchResultsProvider` and `healthReportProvider`
-  are `StreamProvider`s over drift (`watchFolders` / `watchItem` / `watchSearch` /
-  `watchItems`): a write pushes, so "forgot to invalidate" cannot happen. Give any new read
-  provider a stream too.
+  **3.0.0 的写法**：`lib/features/vault/providers/core_stream.dart` 的
+  `coreSnapshotStream` = 取快照 + 订阅核心推送的主题重取；四个读 provider
+  （`filteredVaultEntriesProvider` / `entryItemProvider` / `searchResultsProvider` /
+  `foldersProvider`）全走它。**不要**在写操作后手动 `ref.invalidate`，也不要订阅
+  `coreChangesProvider.stream`（Riverpod 2.6 已 deprecated，且 `AsyncValue` 会把
+  连续相同的主题去重掉）—— 用 `VaultApi.changes`。
+- **核心锁了自己，UI 必须跟着锁。** 空闲超时发生在核心里，会广播 `sessionLocked`；
+  `CoreSession` 把它转成 `sessionEvents`，`authProvider` 订阅后置为 locked。
+  任何"直接读 `authSnapshot` 而不订阅事件"的写法都会留下"界面可用、动作全报
+  locked"的窗口。
+- **用户活动要续期。** 核心只对"读写数据的动作" `touch()`；UI 靠 `app.dart` 的
+  `_ActivityTouchHost` 节流上报 `touchActivity`。删掉它，用户停在生成器/设置页时
+  会被自动锁定。
 - **A dropdown whose choice can be rejected must be controlled.** `DropdownButtonFormField`
   holds its own state, so "pick a new value → confirm dialog → cancel" leaves the control
   showing the value the user just rejected while the form still has the old one.
@@ -529,3 +633,7 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
   is gone"). Close-to-tray now requires a *successful* icon registration (and a
   `TaskbarCreated` re-add after an Explorer restart); on Linux the tray degrades to "close
   quits" when no StatusNotifier host is registered.
+- **3.0.0：无 UI 形态绝不能有 UI 表面。** 2.4 的 `--service` 虽然窗口不可见，但它
+  **照样注册了托盘图标**，托盘菜单的 "Open EasyPass" 能把那个空窗口 `ShowWindow` 出来
+  （2026-10-17 用 `WM_COMMAND(1001)` 实测复现）。3.0.0 的修法不是加门控，而是**根本
+  没有无 UI 的 Flutter 进程**：核心是纯 Dart 控制台程序，托盘只属于 UI。

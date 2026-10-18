@@ -53,8 +53,13 @@ abstract class LinuxAutostartBackend {
   /// 关闭：删文件（不存在 = no-op）。
   Future<void> disable();
 
-  /// 解析 `Exec=` 字段将写入的二进制绝对路径。
-  Future<String> resolveExecutableForDesktopEntry();
+  /// 解析 `Exec=` 字段将写入的**命令行**（程序 + 参数，已按 Desktop Entry
+  /// Spec 的规则转义）。
+  ///
+  /// 3.0.0 核心服务化后，自启的目标是**核心**（`<easypass_core> --serve`）而不是
+  /// UI；核心不可用（开发态 / AppImage 挂载点不可持久）时退回 UI 二进制，自启项
+  /// 不因此失效 —— 降级细节见 `LinuxAutostart.resolveCoreServicePath()`。
+  Future<String> resolveExecCommandForDesktopEntry();
 }
 
 /// 启动自启出错时抛 —— UI 层捕获后用 SnackBar 提示。

@@ -1,8 +1,13 @@
+import 'package:easypass/core/storage/secret_store.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// In-memory [FlutterSecureStorage] for tests. Only the methods used by
 /// [CryptoService] are overridden.
-class FakeSecureStorage extends FlutterSecureStorage {
+///
+/// 同时 `implements SecretStore`：`CryptoService` 现在的存储参数类型是
+/// [SecretStore]（核心侧要换成写进 `vault_meta` 的实现），这让既有测试
+/// `CryptoService(secureStorage: FakeSecureStorage())` 一行都不用改。
+class FakeSecureStorage extends FlutterSecureStorage implements SecretStore {
   final Map<String, String> store = {};
 
   /// When non-null, every [read] call throws this exception. Used by the

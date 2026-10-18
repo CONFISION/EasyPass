@@ -1,55 +1,10 @@
 import 'dart:typed_data';
 
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import '../../core/crypto/crypto_service.dart';
 import '../database/database.dart';
 import '../models/entry_type.dart';
 import '../models/vault_item.dart';
 import '../models/vault_item_mapper.dart';
-import '../state/session_key.dart';
-
-/// 全局唯一的默认 [AppDatabase] 实例。Riverpod 容器里所有依赖此 provider
-/// 的对象（仓储、TOTP、UI 状态等）都会拿到**同一个** `AppDatabase` 实例，
-/// 这是此前修过的"AppDatabase created multiple times"警告的根因（多个
-/// provider 各自构造 → 每个一份 drift executor）。
-///
-/// 配合 `main.dart` 的「只在不可用时
-/// override」读：
-///   - **本进程守护**（首次冷启 / 旧 daemon 已被收回）：`main.dart` 走
-///     `if (uiDatabase != null) databaseProvider.overrideWithValue(...)`，
-///     **这层 provider 不再构造** —— 这次构造是"主控"路径。
-///   - **复用别进程 daemon**：本进程的 `main.dart` 不传 override，
-///     `databaseProvider` 才被首次访问，作为 UI 端的读入口。
-///
-///   - 两种路径在本进程同一瞬时各持一份 `easypass.db` 的 SQLite 句柄
-///     —— SQLite 支持，但加重写锁竞争；不可调和（跨进程）。要解这个局
-///     得做 IPC（如 loopback query 转发），属 v3.0 路线图。
-///
-/// **本轮不做架构改造**：注释说明清楚现状、后果、不在本轮处置的理由。
-/// 不改行为，不加新代码路径。
-final databaseProvider = Provider<AppDatabase>((ref) {
-  return AppDatabase();
-});
-
-final cryptoServiceProvider = Provider<CryptoService>((ref) {
-  return CryptoService();
-});
-
-/// 条目模型 ↔ DB 行的映射器（加密 / 解密都在里面）。
-final vaultItemMapperProvider = Provider<VaultItemMapper>((ref) {
-  return VaultItemMapper(ref.watch(cryptoServiceProvider));
-});
-
-final vaultRepositoryProvider = Provider<VaultRepository>((ref) {
-  return VaultRepository(
-    db: ref.watch(databaseProvider),
-    cryptoService: ref.watch(cryptoServiceProvider),
-    // 每次调用时**现读**密钥：解锁/锁定不需要重建 repository，
-    // 未解锁时读到的就是 null（写操作会抛 VaultLockedException）。
-    keyReader: () => ref.read(encryptionKeyProvider),
-  );
-});
 
 /// 保险库仓储：UI、健康报告与浏览器桥接共用的唯一数据入口。
 ///

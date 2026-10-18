@@ -4,15 +4,22 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart' as encrypt;
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../constants/app_constants.dart';
+import '../storage/secret_store.dart';
 
 class CryptoService {
-  final FlutterSecureStorage _secureStorage;
+  /// 密钥材料的存储。
+  ///
+  /// 默认取进程级注册表（`SecretStoreRegistry`）：UI 启动时注册
+  /// `FlutterSecretStore`（系统钥匙串），核心服务启动时注册
+  /// `VaultMetaSecretStore`（写进库文件）。这样既让核心摆脱 Flutter 插件，
+  /// 又不必改动 48 处既有构造点。未注册时任何存储操作都会明确抛错，
+  /// 不会静默退化成内存存储。
+  final SecretStore _store;
 
-  CryptoService({FlutterSecureStorage? secureStorage})
-      : _secureStorage = secureStorage ?? const FlutterSecureStorage();
+  CryptoService({SecretStore? secureStorage})
+      : _store = secureStorage ?? SecretStoreRegistry.instance;
 
   /// Generate a random salt for PBKDF2
   String generateSalt() {
@@ -125,11 +132,11 @@ class CryptoService {
 
   /// Store the encryption key material securely
   Future<void> storeKeyMaterial(String salt, String passwordHash) async {
-    await _secureStorage.write(
+    await _store.write(
       key: '${AppConstants.secureStorageKey}_salt',
       value: salt,
     );
-    await _secureStorage.write(
+    await _store.write(
       key: AppConstants.masterPasswordHashKey,
       value: passwordHash,
     );
@@ -137,21 +144,21 @@ class CryptoService {
 
   /// Retrieve the stored salt
   Future<String?> getStoredSalt() async {
-    return await _secureStorage.read(
+    return await _store.read(
       key: '${AppConstants.secureStorageKey}_salt',
     );
   }
 
   /// Retrieve the stored password hash
   Future<String?> getStoredPasswordHash() async {
-    return await _secureStorage.read(
+    return await _store.read(
       key: AppConstants.masterPasswordHashKey,
     );
   }
 
   /// Check if this is the first run (no master password set)
   Future<bool> isFirstRun() async {
-    final hash = await _secureStorage.read(
+    final hash = await _store.read(
       key: AppConstants.masterPasswordHashKey,
     );
     return hash == null;
@@ -159,10 +166,10 @@ class CryptoService {
 
   /// Clear all stored key material
   Future<void> clearKeyMaterial() async {
-    await _secureStorage.delete(
+    await _store.delete(
       key: '${AppConstants.secureStorageKey}_salt',
     );
-    await _secureStorage.delete(
+    await _store.delete(
       key: AppConstants.masterPasswordHashKey,
     );
   }
@@ -170,7 +177,7 @@ class CryptoService {
   /// Get the configured auto-lock timeout in minutes (defaults to 5).
   Future<int> getAutoLockMinutes() async {
     final value =
-        await _secureStorage.read(key: AppConstants.autoLockStorageKey);
+        await _store.read(key: AppConstants.autoLockStorageKey);
     final parsed = int.tryParse(value ?? '');
     if (parsed == null || parsed <= 0) {
       return AppConstants.autoLockTimeoutMinutes;
@@ -181,7 +188,7 @@ class CryptoService {
   /// Persist the auto-lock timeout in minutes.
   Future<void> setAutoLockMinutes(int minutes) async {
     final clamped = minutes.clamp(1, 60).toInt();
-    await _secureStorage.write(
+    await _store.write(
       key: AppConstants.autoLockStorageKey,
       value: clamped.toString(),
     );

@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:easypass/data/models/entry_fields.dart';
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
-import 'package:easypass/features/browser_bridge/url_matcher.dart';
+import 'package:easypass/core_service/url_matcher.dart';
 
 /// [UrlMatcher] 单测：hostOf 规范化规则、三条匹配规则、
 /// 排序优先级，空/不可解析 URL 的处理，以及 2.3.0 的"只有登录条目参与匹配"。

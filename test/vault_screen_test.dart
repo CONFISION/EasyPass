@@ -1,25 +1,20 @@
-import 'package:drift/drift.dart' show Value, driftRuntimeOptions;
-import 'package:drift/native.dart';
 import 'package:flutter/gestures.dart' show kSecondaryMouseButton;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:uuid/uuid.dart';
 
-import 'package:easypass/core/crypto/crypto_service.dart';
-import 'package:easypass/data/database/database.dart';
+import 'package:easypass/client/api_providers.dart';
 import 'package:easypass/data/models/entry_fields.dart';
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
-import 'package:easypass/data/repositories/vault_repository.dart';
-import 'package:easypass/data/state/session_key.dart';
 import 'package:easypass/features/vault/providers/vault_provider.dart';
 import 'package:easypass/features/vault/screens/vault_screen.dart';
 import 'package:easypass/features/vault/widgets/entry_card.dart';
 import 'package:easypass/l10n/app_localizations.dart';
+import 'package:easypass/protocol/codecs.dart' show WireFolder;
 
-import 'fakes.dart';
+import 'fake_vault_api.dart';
 
 /// 保险库页布局回归：
 /// 1) 侧边栏占满全高、**没有顶层 AppBar**，"EasyPass" 只在侧边栏顶部出现一次；
@@ -33,47 +28,39 @@ import 'fakes.dart';
 /// 2.3.0 追加（多类型 + 类型筛选 + 文件夹图标）：
 /// 6) 工具栏下方常驻类型筛选 chips，选中类型后只显示该类型条目；
 /// 7) 类型筛选下空列表的文案走 `entryTypeEmptyForType`；
-/// 8) 长按文件夹可重命名（走 `repository.updateFolder`）；
+/// 8) 长按文件夹可重命名（走 `VaultApi.updateFolder`）；
 /// 9) 新建文件夹可选图标，侧边栏渲染 `folders.icon` 而不是写死的 Icons.folder；
-/// 10) 搜索走 `repository.searchItems`，空查询给前缀提示；
+/// 10) 搜索把查询词原样交给核心的 `searchItems`，空查询给前缀提示；
 /// 11) 四种类型同屏（含超长名字）时 900×600 依旧不溢出、侧边栏依旧 248。
 ///
 /// 2.3.1 追加（"写入后不刷新"的 bug 修复）：
-/// 12) 侧边栏文件夹列表全部由 `foldersProvider`（drift 流）推送：新建 / 改名 /
-///     删除都不再调用 `ref.invalidate`，新建对话框与删除确认框里的两处死代码已删；
+/// 12) 侧边栏文件夹列表由核心推的 `folders` 主题驱动：新建 / 改名 / 删除都不再
+///     调用 `ref.invalidate`；
 /// 13) 重命名后**标题栏**（`selectedFolderNameProvider`）与侧边栏同步更新。
+///
+/// M4 追加（UI 是核心的客户端）：
+/// 14) 数据全部经 `VaultApi`（注入 [FakeVaultApi]），UI 不再持有数据库 / 仓储；
+/// 15) 未解锁（核心抛 `locked`）时是**空列表**，不是红屏；解锁后自动恢复。
 void main() {
-  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
-
   /// 与原生层的最小窗口尺寸保持一致（`windows/runner/win32_window.cpp` 的
   /// WM_GETMINMAXINFO，kMinWindowWidth/kMinWindowHeight = 900×600 逻辑像素）。
   /// 测试就在这个尺寸下跑，等于守住"最小窗口不溢出"的底线。
   const minWindow = Size(900, 600);
 
-  // PBKDF2（100k 次）很慢：整个文件只派生一把会话密钥，所有测试复用。
-  // 加密 / 解密只依赖密钥本身，与 CryptoService 实例无关。
-  final seedCrypto = CryptoService(secureStorage: FakeSecureStorage());
-  late final Uint8List sessionKey =
-      seedCrypto.deriveKey('master-password', seedCrypto.generateSalt());
-
+  late FakeVaultApi api;
   late ProviderContainer container;
 
   setUp(() {
+    api = FakeVaultApi(initialStatus: 'unlocked');
     container = ProviderContainer(
-      overrides: [
-        cryptoServiceProvider.overrideWithValue(
-          CryptoService(secureStorage: FakeSecureStorage()),
-        ),
-        databaseProvider.overrideWithValue(
-          AppDatabase.forTesting(NativeDatabase.memory()),
-        ),
-      ],
+      overrides: [vaultApiProvider.overrideWithValue(api)],
     );
-    // 解锁：条目流否则会返回空列表（仓储在未解锁时读不到任何东西）。
-    container.read(encryptionKeyProvider.notifier).state = sessionKey;
   });
 
-  tearDown(() => container.dispose());
+  tearDown(() {
+    container.dispose();
+    api.dispose();
+  });
 
   Future<AppLocalizations> pumpVaultScreen(
     WidgetTester tester, {
@@ -157,11 +144,23 @@ void main() {
     );
   }
 
-  /// 一把梭写入四种类型的测试条目（走生产的加密路径）。
+  /// 直接往假核心里塞一个文件夹（夹具，不走 UI）。
+  WireFolder seedFolder(String id, String name, {String icon = 'folder'}) {
+    final folder = WireFolder(
+      id: id,
+      name: name,
+      icon: icon,
+      createdAt: 0,
+      updatedAt: 0,
+    );
+    api.folders[id] = folder;
+    return folder;
+  }
+
+  /// 一把梭写入四种类型的测试条目（经假核心，等价于真核心写库）。
   Future<void> seedFourTypes() async {
-    final repo = container.read(vaultRepositoryProvider);
-    await repo.saveItem(loginItem(id: 'login-1', name: 'GitHub 登录'));
-    await repo.saveItem(VaultItem(
+    await api.saveItem(loginItem(id: 'login-1', name: 'GitHub 登录'));
+    await api.saveItem(VaultItem(
       id: 'note-1',
       type: EntryType.secureNote,
       name: 'WiFi 笔记',
@@ -169,7 +168,7 @@ void main() {
       createdAt: 0,
       updatedAt: 0,
     ));
-    await repo.saveItem(VaultItem(
+    await api.saveItem(VaultItem(
       id: 'id-1',
       type: EntryType.identity,
       name: '身份证',
@@ -177,7 +176,7 @@ void main() {
       createdAt: 0,
       updatedAt: 0,
     ));
-    await repo.saveItem(VaultItem(
+    await api.saveItem(VaultItem(
       id: 'ssh-1',
       type: EntryType.sshKey,
       name: 'server key',
@@ -268,15 +267,7 @@ void main() {
   });
 
   testWidgets('超长文件夹名被 ellipsis 截断而不是溢出', (tester) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await container.read(vaultRepositoryProvider).addFolder(
-          FoldersCompanion.insert(
-            id: const Uuid().v4(),
-            name: '这是一个特别特别长的文件夹名称' * 12,
-            createdAt: now,
-            updatedAt: now,
-          ),
-        );
+    seedFolder('f-long', '这是一个特别特别长的文件夹名称' * 12);
 
     final l10n = await pumpVaultScreen(tester);
 
@@ -333,8 +324,7 @@ void main() {
   });
 
   testWidgets('类型筛选下空列表用 entryTypeEmptyForType 说明"哪个类型是空的"', (tester) async {
-    final repo = container.read(vaultRepositoryProvider);
-    await repo.saveItem(loginItem());
+    await api.saveItem(loginItem());
     final l10n = await pumpVaultScreen(tester);
 
     await tapTypeChip(tester, 'ssh_key');
@@ -351,8 +341,7 @@ void main() {
 
   testWidgets('四种类型 + 超长名字在最小窗口下不溢出，侧边栏仍是 248', (tester) async {
     await seedFourTypes();
-    final repo = container.read(vaultRepositoryProvider);
-    await repo.saveItem(loginItem(
+    await api.saveItem(loginItem(
       id: 'long-1',
       name: '这是一个特别特别长的登录条目名称' * 8,
       url: 'https://example.com/${'path/' * 20}',
@@ -409,28 +398,22 @@ void main() {
     await tester.pumpAndSettle();
 
     // 新建对话框里已经**没有** ref.invalidate(foldersProvider)（2.3.1 删掉的
-    // 死代码）：这一行断言同时也是"写入即推送"的回归守卫。
+    // 死代码）：这一行断言同时也是"核心推送即刷新"的回归守卫。
     expect(find.text('服务器'), findsOneWidget, reason: '文件夹出现在侧边栏');
     expect(find.byIcon(Icons.vpn_key_outlined), findsOneWidget,
         reason: '侧边栏用的是存储下来的图标');
     expect(find.byIcon(Icons.folder), findsNothing,
         reason: '不再硬编码 Icons.folder');
 
-    final folders = await container.read(vaultRepositoryProvider).getFolders();
-    expect(folders.single.icon, 'key', reason: '图标经 FoldersCompanion.icon 落库');
+    final folders = await api.listFolders();
+    expect(folders.single.icon, 'key', reason: '图标经 VaultApi.addFolder 交给核心');
+    expect(api.called('addFolder'), isTrue,
+        reason: '新建文件夹必须走核心动作，不能自己造 id / 时间戳');
   });
 
   testWidgets('长按文件夹 → 重命名：对话框预填旧名，保存后侧边栏与标题栏都更新',
       (tester) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await container.read(vaultRepositoryProvider).addFolder(
-          FoldersCompanion.insert(
-            id: const Uuid().v4(),
-            name: '工作',
-            createdAt: now,
-            updatedAt: now,
-          ),
-        );
+    seedFolder('f-work', '工作');
     final l10n = await pumpVaultScreen(tester);
 
     // 先选中它：标题栏显示文件夹名，于是 find.text('工作') 有侧边栏 + 标题两份。
@@ -463,26 +446,19 @@ void main() {
     expect(find.text(l10n.folderRenamed), findsOneWidget,
         reason: '重命名走的是 updateFolder 分支（不是新建）');
 
-    final folders = await container.read(vaultRepositoryProvider).getFolders();
-    expect(folders.single.name, '公司', reason: '走 repository.updateFolder 落库');
-    expect(folders.single.id, isNotNull);
+    final folders = await api.listFolders();
+    expect(folders.single.name, '公司', reason: '重命名走 VaultApi.updateFolder');
+    expect(folders.single.id, 'f-work', reason: 'id 由核心维护，UI 不改');
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('回归：文件夹写入由流推送 —— 新建 / 改名 / 删除都无需手动 invalidate',
+  testWidgets('回归：文件夹写入由核心主题推送 —— 新建 / 改名 / 删除都无需手动 invalidate',
       (tester) async {
-    final repo = container.read(vaultRepositoryProvider);
     final l10n = await pumpVaultScreen(tester);
-    final now = DateTime.now().millisecondsSinceEpoch;
 
-    // 模拟"别处写入"（另一个窗口 / 表单）：只碰仓储，不碰任何 provider，
+    // 模拟"别处写入"（另一个客户端 / 表单）：只碰核心，不碰任何 provider，
     // 也不调用 ref.invalidate(foldersProvider)（2.3.1 已删掉那两处死代码）。
-    await repo.addFolder(FoldersCompanion.insert(
-      id: 'f-live',
-      name: '工作',
-      createdAt: now,
-      updatedAt: now,
-    ));
+    await api.addFolder('工作');
     await tester.pumpAndSettle();
     expect(find.text('工作'), findsOneWidget,
         reason: '新建的文件夹必须自己出现在侧边栏');
@@ -493,18 +469,15 @@ void main() {
     expect(find.text('工作'), findsNWidgets(2), reason: '侧边栏 + 工具栏标题');
 
     // 改名：侧边栏与标题栏必须同时更新。
-    await repo.updateFolder(
-      'f-live',
-      FoldersCompanion(name: const Value('公司'), updatedAt: Value(now)),
-    );
+    await api.updateFolder('folder-1', name: '公司');
     await tester.pumpAndSettle();
     expect(find.text('公司'), findsNWidgets(2),
         reason: '重命名后侧边栏与标题栏都是新名字');
     expect(find.text('工作'), findsNothing, reason: '旧名字不允许残留');
 
     // 夹内条目：当前选中的就是"公司"这个夹。
-    await repo.saveItem(
-        loginItem(id: 'in-live', name: '夹内条目', folderId: 'f-live'));
+    await api.saveItem(
+        loginItem(id: 'in-live', name: '夹内条目', folderId: 'folder-1'));
     await tester.pumpAndSettle();
     expect(find.text('夹内条目'), findsOneWidget, reason: '选中文件夹时显示夹内条目');
 
@@ -518,28 +491,21 @@ void main() {
         find.widgetWithText(FilledButton, l10n.deleteFolderKeepEntries));
     await tester.pumpAndSettle();
 
-    expect(find.text('公司'), findsNothing, reason: '侧边栏里的文件夹必须随流消失');
+    expect(find.text('公司'), findsNothing, reason: '侧边栏里的文件夹必须随主题推送消失');
     expect(find.text(l10n.allItems), findsNWidgets(2),
         reason: '删掉选中的文件夹后标题回到"全部条目"');
     expect(find.text('夹内条目'), findsOneWidget, reason: '删文件夹不删条目');
     expect(container.read(selectedFolderIdProvider), isNull,
         reason: '被删掉的文件夹不能继续被选中');
-    expect((await repo.getItems()).single.folderId, isNull,
-        reason: 'removeFolder 会先解除归属');
+    expect((await api.listItems()).single.folderId, isNull,
+        reason: 'removeFolder 会先解除归属（核心侧完成）');
+    expect(api.called('removeFolder'), isTrue);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('长按文件夹 → 删除：条目保留但解除归属，选中态回到"全部条目"', (tester) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final folderId = const Uuid().v4();
-    final repo = container.read(vaultRepositoryProvider);
-    await repo.addFolder(FoldersCompanion.insert(
-      id: folderId,
-      name: '临时',
-      createdAt: now,
-      updatedAt: now,
-    ));
-    await repo.saveItem(loginItem(id: 'in-folder', name: '夹内条目', folderId: folderId));
+    seedFolder('f-temp', '临时');
+    await api.saveItem(loginItem(id: 'in-folder', name: '夹内条目', folderId: 'f-temp'));
 
     final l10n = await pumpVaultScreen(tester);
 
@@ -567,22 +533,21 @@ void main() {
     expect(find.text('夹内条目'), findsOneWidget, reason: '删文件夹不能删条目');
     expect(container.read(selectedFolderIdProvider), isNull,
         reason: '删掉的文件夹不能继续被选中（标题否则会挂着一个不存在的名字）');
-    final items = await repo.getItems();
+    final items = await api.listItems();
     expect(items.single.folderId, isNull, reason: 'removeFolder 会先解除归属');
     expect(tester.takeException(), isNull);
   });
 
   // ─── 搜索（2.3.0）────────────────────────────────────────
 
-  testWidgets('搜索：字段 hint、空前缀提示、结果走 searchItems 且用同一张卡片', (tester) async {
-    final repo = container.read(vaultRepositoryProvider);
-    await repo.saveItem(loginItem(
+  testWidgets('搜索：字段 hint、空前缀提示、查询词原样交给核心且用同一张卡片', (tester) async {
+    await api.saveItem(loginItem(
       id: 'gh',
       name: 'GitHub 登录',
       url: 'https://github.com',
       username: 'alice',
     ));
-    await repo.saveItem(VaultItem(
+    await api.saveItem(VaultItem(
       id: 'ssh',
       type: EntryType.sshKey,
       name: 'server key',
@@ -605,16 +570,19 @@ void main() {
     expect(find.text(l10n.searchPrefixesHint), findsOneWidget,
         reason: '空查询给前缀提示，而不是"没有结果"');
     expect(find.text(l10n.noResultsFound), findsNothing);
+    expect(api.searchQueries, isEmpty, reason: '空查询连请求都不发');
 
-    // 类型前缀由仓储的 searchItems 解释（非登录类型也能被搜到）。
-    await tester.enterText(find.byType(TextField), 'type:ssh');
+    // 命中非登录类型（搜索范围 / 前缀语义是**核心**的事，UI 只把查询词原样转发）。
+    await tester.enterText(find.byType(TextField), 'root@server');
     await tester.pumpAndSettle();
     expect(find.text('server key'), findsOneWidget);
     expect(find.text('GitHub 登录'), findsNothing);
+    expect(api.searchQueries.last, 'root@server',
+        reason: '查询词原样过线：UI 不解析前缀、不自己过滤');
     expect(find.byTooltip(l10n.copyPasswordTooltip), findsNothing,
         reason: 'SSH 卡片没有"复制密码"按钮');
 
-    // 身份 / SSH / 自定义字段也在搜索范围内；搜不到时保持原行为。
+    // 搜不到时保持原行为。
     await tester.enterText(find.byType(TextField), 'zzz-not-exist');
     await tester.pumpAndSettle();
     expect(find.text(l10n.noResultsFound), findsOneWidget);
@@ -622,8 +590,7 @@ void main() {
   });
 
   testWidgets('复制密码：登录条目把密码写进剪贴板并提示，搜索结果也用同一张卡片', (tester) async {
-    final repo = container.read(vaultRepositoryProvider);
-    await repo.saveItem(loginItem(
+    await api.saveItem(loginItem(
       id: 'gh',
       name: 'GitHub 登录',
       url: 'https://github.com',
@@ -662,11 +629,8 @@ void main() {
   }
 
   testWidgets('每个文件夹都有看得见的操作入口（⋮ / 右键 / 长按三条路都通）', (tester) async {
-    final repo = container.read(vaultRepositoryProvider);
-    await repo.addFolder(FoldersCompanion.insert(
-        id: 'f1', name: '邮箱', createdAt: 0, updatedAt: 0));
-    await repo.addFolder(FoldersCompanion.insert(
-        id: 'f2', name: '工作', createdAt: 0, updatedAt: 0));
+    seedFolder('f1', '邮箱');
+    seedFolder('f2', '工作');
 
     final l10n = await pumpVaultScreen(tester);
 
@@ -687,9 +651,7 @@ void main() {
   });
 
   testWidgets('删除空文件夹：普通确认即可，删完侧边栏立刻少一个', (tester) async {
-    final repo = container.read(vaultRepositoryProvider);
-    await repo.addFolder(FoldersCompanion.insert(
-        id: 'f-empty', name: '空文件夹', createdAt: 0, updatedAt: 0));
+    seedFolder('f-empty', '空文件夹');
 
     final l10n = await pumpVaultScreen(tester);
     await openFolderActions(tester, '空文件夹');
@@ -705,16 +667,15 @@ void main() {
 
     expect(find.text('空文件夹'), findsNothing);
     expect(find.text(l10n.folderDeleted('空文件夹')), findsOneWidget);
-    expect(await repo.getFolders(), isEmpty);
+    expect(await api.listFolders(), isEmpty);
+    expect(api.called('removeFolder'), isTrue);
   });
 
   testWidgets('删除有条目的文件夹：必须报出条目数 + 明说条目不会被删，且删完条目仍在',
       (tester) async {
-    final repo = container.read(vaultRepositoryProvider);
-    await repo.addFolder(FoldersCompanion.insert(
-        id: 'f-work', name: '工作', createdAt: 0, updatedAt: 0));
+    seedFolder('f-work', '工作');
     for (var i = 0; i < 3; i++) {
-      await repo.saveItem(loginItem(
+      await api.saveItem(loginItem(
         id: 'w$i',
         name: '条目 $i',
         folderId: 'f-work',
@@ -741,18 +702,16 @@ void main() {
     await tester.pumpAndSettle();
 
     // 文件夹没了，但条目一条不少，只是不再属于任何文件夹
-    expect(await repo.getFolders(), isEmpty);
-    final items = await repo.getItems();
+    expect(await api.listFolders(), isEmpty);
+    final items = await api.listItems();
     expect(items, hasLength(3), reason: '删文件夹绝不删条目');
     expect(items.every((i) => i.folderId == null), isTrue,
         reason: '条目被移到"无文件夹"，而不是留在指向已删文件夹的幽灵状态');
   });
 
   testWidgets('点取消：文件夹与条目都原封不动', (tester) async {
-    final repo = container.read(vaultRepositoryProvider);
-    await repo.addFolder(FoldersCompanion.insert(
-        id: 'f1', name: '工作', createdAt: 0, updatedAt: 0));
-    await repo.saveItem(loginItem(id: 'w0', name: '条目', folderId: 'f1'));
+    seedFolder('f1', '工作');
+    await api.saveItem(loginItem(id: 'w0', name: '条目', folderId: 'f1'));
 
     final l10n = await pumpVaultScreen(tester);
     await openFolderActions(tester, '工作');
@@ -761,8 +720,53 @@ void main() {
     await tester.tap(find.text(l10n.cancel));
     await tester.pumpAndSettle();
 
-    expect(await repo.getFolders(), hasLength(1));
-    expect((await repo.getItems()).single.folderId, 'f1');
+    expect(await api.listFolders(), hasLength(1));
+    expect((await api.listItems()).single.folderId, 'f1');
     expect(find.text('工作'), findsOneWidget);
+  });
+
+  // ─── 未解锁（M4：核心抛 locked 不能是红屏）─────────────────
+
+  testWidgets('未解锁：空列表 + 空状态，而不是错误红屏；解锁后自动恢复', (tester) async {
+    await seedFourTypes();
+    api.lockEnforcedReads = true;
+    api.forceStatus('locked');
+
+    final l10n = await pumpVaultScreen(tester);
+
+    expect(tester.takeException(), isNull);
+    expect(find.byIcon(Icons.error_outline), findsNothing,
+        reason: 'locked 不是错误：不该出现加载失败 + 重试那一屏');
+    expect(find.text(l10n.retry), findsNothing);
+    expect(find.text(l10n.emptyVaultTitle), findsOneWidget,
+        reason: '未解锁 = 空列表（路由本来也会把用户挡在 /lock，这里只是不崩）');
+
+    // 解锁（核心的 authSnapshot 改口）→ 轮询把数据接回来，无需 invalidate。
+    // 必须让轮询跑完：否则测试结束时还挂着一个未触发的 Timer。
+    api.forceStatus('unlocked');
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+
+    expect(find.text('GitHub 登录'), findsOneWidget, reason: '解锁后列表自动回来');
+    expect(find.text(l10n.emptyVaultTitle), findsNothing);
+  });
+
+  testWidgets('核心读不出来（连不上 / 挂了）：显示错误 + 重试，重试能自愈', (tester) async {
+    await api.saveItem(loginItem(id: 'gh', name: 'GitHub 登录'));
+    api.readFailure = StateError('核心不可达');
+
+    final l10n = await pumpVaultScreen(tester);
+
+    expect(find.byIcon(Icons.error_outline), findsOneWidget,
+        reason: '核心不可达必须显示错误屏（不能伪装成"空保险库"）');
+    expect(find.text(l10n.retry), findsOneWidget);
+
+    // 核心回来了 → 点重试真的重新取数。
+    api.readFailure = null;
+    await tester.tap(find.text(l10n.retry));
+    await tester.pumpAndSettle();
+
+    expect(find.text('GitHub 登录'), findsOneWidget);
+    expect(find.byIcon(Icons.error_outline), findsNothing);
   });
 }

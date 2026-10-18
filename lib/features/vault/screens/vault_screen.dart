@@ -1,15 +1,13 @@
-import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:uuid/uuid.dart';
 
-import '../../../data/database/database.dart';
+import '../../../client/api_providers.dart';
 import '../../../data/models/entry_type.dart';
 import '../../../data/models/vault_item.dart';
-import '../../../data/repositories/vault_repository.dart';
 import '../../../l10n/app_localizations.dart';
+import '../../../protocol/codecs.dart' show WireFolder;
 import '../../auth/providers/auth_provider.dart';
 import '../providers/vault_provider.dart';
 import '../widgets/entry_card.dart';
@@ -549,11 +547,11 @@ class VaultScreen extends ConsumerWidget {
   /// 新建 / 编辑文件夹对话框（共用一套：名字 + 图标选择器）。
   ///
   /// [folder] 为 null = 新建；否则是重命名 / 改图标，走
-  /// [VaultRepository.updateFolder]。
+  /// [VaultApi.updateFolder]（id 由核心维护，UI 不再自己造 id / 时间戳）。
   void _showFolderDialog(
     BuildContext context,
     WidgetRef ref, {
-    Folder? folder,
+    WireFolder? folder,
   }) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
@@ -613,31 +611,30 @@ class VaultScreen extends ConsumerWidget {
               onPressed: () async {
                 final name = nameController.text.trim();
                 if (name.isEmpty) return;
-                final repo = ref.read(vaultRepositoryProvider);
-                final now = DateTime.now().millisecondsSinceEpoch;
-
-                if (isEdit) {
-                  await repo.updateFolder(
-                    folder.id,
-                    FoldersCompanion(
-                      name: Value(name),
-                      icon: Value(selectedIcon),
-                      updatedAt: Value(now),
-                    ),
-                  );
-                } else {
-                  await repo.addFolder(
-                    FoldersCompanion.insert(
-                      id: const Uuid().v4(),
+                // 文件夹 id / 时间戳由核心生成，UI 只给名字与图标。
+                final api = ref.read(vaultApiProvider);
+                try {
+                  if (isEdit) {
+                    await api.updateFolder(
+                      folder.id,
                       name: name,
-                      icon: Value(selectedIcon),
-                      createdAt: now,
-                      updatedAt: now,
-                    ),
-                  );
+                      icon: selectedIcon,
+                    );
+                  } else {
+                    await api.addFolder(name, icon: selectedIcon);
+                  }
+                } catch (error) {
+                  // 写不进去就明说，对话框留着让用户重试 —— 否则界面看起来像
+                  // "点了没反应"（核心没起、恰好锁上等都会走到这里）。
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(l10n.failedWithError('$error'))),
+                    );
+                  }
+                  return;
                 }
-                // 不需要 invalidate：foldersProvider 监听 drift（watchFolders），
-                // 上面这次写入落库后侧边栏会自己刷新（2.3.1 起）。
+                // 不需要 invalidate：核心写完会推 `folders` 主题，
+                // foldersProvider 自己重取（2.3.1 起）。
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (isEdit && context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -682,7 +679,7 @@ class VaultScreen extends ConsumerWidget {
   ///
   /// 用 bottom sheet 而不是对话框：桌面窄窗下它天然不会溢出，条目也是
   /// 定宽列表项。
-  void _showFolderActions(BuildContext context, WidgetRef ref, Folder folder) {
+  void _showFolderActions(BuildContext context, WidgetRef ref, WireFolder folder) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
 
@@ -743,17 +740,15 @@ class VaultScreen extends ConsumerWidget {
   /// **不暴力删除**：先把里面的条目数查出来。空文件夹给普通确认；有条目的
   /// 必须明确告诉用户"有多少条、条目不会被删、会被移到『无文件夹』"，
   /// 确认按钮也换成带"保留条目"字样的措辞，避免误点。
-  /// 真正的删除走 `removeFolder`（先把条目的 folder_id 清空，再删文件夹），
+  /// 真正的删除走核心的 `removeFolder`（先把条目的 folder_id 清空，再删文件夹），
   /// 任何情况下都不会删除条目本身。
   Future<void> _confirmDeleteFolder(
-      BuildContext context, WidgetRef ref, Folder folder) async {
+      BuildContext context, WidgetRef ref, WireFolder folder) async {
     final l10n = AppLocalizations.of(context);
 
     final int entryCount;
     try {
-      entryCount = await ref
-          .read(vaultRepositoryProvider)
-          .countItemsInFolder(folder.id);
+      entryCount = await ref.read(vaultApiProvider).countItemsInFolder(folder.id);
     } catch (error) {
       // 连数都数不出来时不要装作成功：直接告诉用户失败原因。
       if (context.mounted) {
@@ -781,10 +776,10 @@ class VaultScreen extends ConsumerWidget {
             onPressed: () async {
               try {
                 // removeFolder 会先把条目的 folder_id 清空（否则留下幽灵条目）。
-                await ref.read(vaultRepositoryProvider).removeFolder(folder.id);
+                await ref.read(vaultApiProvider).removeFolder(folder.id);
                 // 选中态是本页的 UI 状态，必须显式清掉：文件夹已经从库里消失，
-                // 继续"选中"它会让标题挂着不存在的名字。列表本身由 foldersProvider
-                // 的流推送，不需要（也不能）手动 invalidate。
+                // 继续"选中"它会让标题挂着不存在的名字。列表本身由核心推
+                // `folders` 主题，不需要（也不能）手动 invalidate。
                 if (ref.read(selectedFolderIdProvider) == folder.id) {
                   ref.read(selectedFolderIdProvider.notifier).state = null;
                 }

@@ -18,7 +18,10 @@ import 'dart:typed_data';
 /// 读取都会先检查是否已空闲超时，超时则立刻 [lock]。
 class VaultSession {
   /// 空闲多久后自动锁定。
-  final Duration idleTimeout;
+  ///
+  /// 可变：核心服务在用户改"自动锁定分钟数"时要**就地**更新两个会话域的
+  /// 超时；重建 [VaultSession] 会把已解锁的钥匙丢掉。
+  Duration idleTimeout;
 
   /// 可注入时钟，便于单测过期逻辑；默认 [DateTime.now]。
   final DateTime Function() _clock;

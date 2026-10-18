@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:easypass/features/browser_bridge/vault_session.dart';
+import 'package:easypass/core_service/vault_session.dart';
 
 /// [VaultSession] 单测：解锁/锁定生命周期、惰性空闲过期、可注入时钟、
 /// 以及 lock() 对密钥字节的清零（C 方案的安全下限）。

@@ -12,7 +12,9 @@
 #   easypass.desktop          -> desktop entry (Exec=easypass, Icon=easypass)
 #   easypass.png              -> window/tray icon (same PNG as the bundled asset)
 #   usr/bin/easypass          -> runner binary
-#   usr/bin/{assets,data,lib} -> flutter bundle
+#   usr/bin/core/easypass_core -> core service (`dart build cli`, tool/build_core.sh)
+#   usr/bin/{assets,data,lib} -> flutter bundle (lib/ doubles as the core's
+#                                library dir: usr/bin/core/../lib)
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then

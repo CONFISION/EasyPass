@@ -1,18 +1,12 @@
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../adapters/flutter_secret_store.dart';
+import '../../../client/api_providers.dart';
+import '../../../client/vault_api.dart';
 import '../../../core/constants/app_constants.dart';
-import '../../../core/crypto/crypto_service.dart';
-import '../../../data/repositories/vault_repository.dart';
-import '../../../data/services/master_password_rotation.dart';
-import '../../../data/state/session_key.dart';
+import '../../../core/storage/secret_store.dart';
 import '../../../l10n/app_localizations.dart';
-import '../../browser_bridge/browser_session_registry.dart';
-
-// `encryptionKeyProvider` 的**定义**搬到了 data 层（VaultRepository 需要它，
-// 而 data 不能反向 import features）。这里 re-export，保持既有 import 不变。
-export '../../../data/state/session_key.dart' show encryptionKeyProvider;
+import '../../../protocol/protocol.dart';
 
 /// Error codes stored in [AuthState.errorMessage]. UI layers map these to
 /// localized strings via `AppLocalizations`.
@@ -29,13 +23,20 @@ abstract final class AuthErrorCodes {
   static const storageUnavailable = 'storageUnavailable';
   static const failedToSaveSettings = 'failedToSaveSettings';
 
-  /// 上一次改主密码已经生效（整库已换钥匙），但校验材料没写进钥匙串；
-  /// 用户输入的是旧密码，无法派生新钥匙 —— 必须改用新密码。
+  /// 轮换已生效（整库已是新钥匙的密文），用户输入的旧密码无法派生新钥匙 ——
+  /// 必须改用新密码。
+  ///
+  /// 注意：`VaultApi.unlock` / `changeMasterPassword` 目前对"密码错"与"必须改用
+  /// 新密码"回的是**同一个** `unauthorized` 错误码，只能按核心文案细化（见
+  /// `_newPasswordRequired`）。核心若给出结构化原因，这里应改为看错误码。
   static const useNewMasterPassword = 'useNewMasterPassword';
 
-  /// 主密码已改成功，但新的校验材料没写进系统钥匙串（Linux Secret Service
-  /// 不可用 / 钥匙串上锁）。新密码**仍然有效**（依据是库里的轮换日志），
-  /// 所以这只是提示，不是失败。
+  /// 主密码已改成功，但新的校验材料没能落盘。
+  ///
+  /// **M4 之后不再可达**：校验材料现在由核心写进库文件的 `vault_meta`，与整库
+  /// 重加密同一个事务域（`MasterPasswordRotation.completeRotation`），而
+  /// `VaultApi.changeMasterPassword` 是 `Future<void>`，不把
+  /// `keyMaterialPersisted` 带出来。保留常量与文案，供核心将来回传该字段时使用。
   static const masterPasswordChangedStorageWarning =
       'masterPasswordChangedStorageWarning';
 }
@@ -54,10 +55,17 @@ class AuthState {
   final String? errorMessage;
   final int autoLockMinutes;
 
+  /// 核心报告的空闲剩余秒数（仅用于显示倒计时）。
+  ///
+  /// **自动锁定的权威在核心**：UI 不再自己起定时器，也不自己判定超时 ——
+  /// 锁定时核心会广播会话事件，UI 通过 [AuthNotifier.refreshSnapshot] 同步。
+  final int? remainingSeconds;
+
   const AuthState({
     this.status = AuthStatus.loading,
     this.errorMessage,
     this.autoLockMinutes = AppConstants.autoLockTimeoutMinutes,
+    this.remainingSeconds,
   });
 
   bool get isLocked => status == AuthStatus.locked;
@@ -68,6 +76,7 @@ class AuthState {
     AuthStatus? status,
     Object? errorMessage = _unset,
     int? autoLockMinutes,
+    Object? remainingSeconds = _unset,
   }) {
     return AuthState(
       status: status ?? this.status,
@@ -75,60 +84,128 @@ class AuthState {
           ? this.errorMessage
           : errorMessage as String?,
       autoLockMinutes: autoLockMinutes ?? this.autoLockMinutes,
+      remainingSeconds: identical(remainingSeconds, _unset)
+          ? this.remainingSeconds
+          : remainingSeconds as int?,
     );
   }
 }
 
-/// Holds the derived AES encryption key for the current session.
-/// Cleared on lock.
+/// 认证状态机。**UI 侧的会话权威是核心**：这里只把核心的会话状态翻译成
+/// [AuthState]，并把核心的错误码翻译成 [AuthErrorCodes]。
 ///
-/// 定义见 `lib/data/state/session_key.dart`（本文件 import + re-export）。
-
+/// 三条纪律：
+/// 1. **不持有任何密钥**。密钥只存在于核心进程；UI 一个字节都拿不到。
+/// 2. **不自己校验主密码**。`unlock` / `changeMasterPassword` 全交给核心的
+///    `MasterPasswordVerifier`（唯一口径）。
+/// 3. **不自己定时锁定**。空闲计时器在核心（`SessionDomains`）。
 class AuthNotifier extends StateNotifier<AuthState> {
-  final CryptoService _cryptoService;
-  final Ref _ref;
-  Timer? _autoLockTimer;
-  int _autoLockMinutes = AppConstants.autoLockTimeoutMinutes;
-
-  AuthNotifier(this._cryptoService, this._ref) : super(const AuthState()) {
+  AuthNotifier(this._api, this._legacyStore) : super(const AuthState()) {
     _checkInitialState();
   }
 
+  final VaultApi _api;
+
+  /// 迁移期读**旧**钥匙串（系统钥匙串）用的存储。
+  ///
+  /// 只在"核心还没有校验材料"时用一次：把 `easypass_master_key_salt` 与
+  /// `easypass_master_pw_hash` 交给核心（`adoptLegacyKeyMaterial`），之后就再也
+  /// 不碰它 —— 校验材料的唯一权威是库文件的 `vault_meta`。
+  ///
+  /// 生产实现由 [legacySecretStoreProvider] 提供（`FlutterSecretStore`）。
+  final SecretStore _legacyStore;
+
+  // ─── 启动探测 ──────────────────────────────────────────
+
   Future<void> _checkInitialState() async {
     try {
-      _autoLockMinutes = await _cryptoService.getAutoLockMinutes();
-      final isFirstRun = await _cryptoService.isFirstRun();
+      final snapshot = await _api.authSnapshot();
+
+      if (snapshot.hasAuthMaterial) {
+        state = state.copyWith(
+          status: _statusFromSnapshot(snapshot),
+          autoLockMinutes: snapshot.autoLockMinutes,
+          remainingSeconds: snapshot.remainingSeconds,
+          errorMessage: null,
+        );
+        return;
+      }
+
+      // 核心还没有校验材料：可能是全新安装，也可能是**升级**后的第一次启动
+      // （旧版把 salt/hash 存在系统钥匙串里）。两者必须区分开 —— 把升级误判成
+      // 全新安装会让用户"重新设置主密码"，而整库密文还在旧钥匙下，等于丢数据。
+      final adopted = await _adoptLegacyKeyMaterialIfPresent();
       state = state.copyWith(
-        status: isFirstRun ? AuthStatus.firstRun : AuthStatus.locked,
-        autoLockMinutes: _autoLockMinutes,
+        status: adopted ? AuthStatus.locked : AuthStatus.firstRun,
+        autoLockMinutes: snapshot.autoLockMinutes,
+        remainingSeconds: null,
         errorMessage: null,
       );
     } catch (_) {
-      // A storage failure is not evidence that this is a fresh install.
-      // Keep the app out of the first-run route and report the failure on
-      // the lock screen instead of silently falling back to a false setup
-      // state (or leaving routing in `loading` forever).
+      // 读不到权威状态（核心连不上 / 钥匙串上锁）时**不能**猜成 firstRun：
+      // 那会把用户推到"设置主密码"表单，一旦他真设了，旧库就再也打不开。
+      // 保持锁定态 + 可重试的错误码，由锁屏的恢复面板（Retry / Exit）兜底。
       state = state.copyWith(
         status: AuthStatus.locked,
-        autoLockMinutes: _autoLockMinutes,
         errorMessage: AuthErrorCodes.storageUnavailable,
       );
     }
   }
 
-  /// Re-runs the secure-storage probe the boot sequence uses to decide
-  /// between first-run / locked / unlocked. The lock screen wires this to
-  /// its "Retry" button so the user can recover from a transient keyring
-  /// failure without restarting the app.
+  /// 核心没有校验材料时，看旧钥匙串里有没有；有就一次性交给核心。
+  ///
+  /// 返回 true 表示"迁移完成，库已可解锁"。
+  ///
+  /// **刻意不删除**钥匙串里的旧材料：迁移成功后核心不再读它（`hasAuthMaterial`
+  /// 已为 true），但用户若回退到 2.4.x，旧版会因为没有材料而判定"首次运行"，
+  /// 那才是真正会毁数据的路径。留一份不生效的旧材料比留一个坑便宜。
+  Future<bool> _adoptLegacyKeyMaterialIfPresent() async {
+    final salt = await _legacyStore.read(
+      key: '${AppConstants.secureStorageKey}_salt',
+    );
+    final passwordHash = await _legacyStore.read(
+      key: AppConstants.masterPasswordHashKey,
+    );
+    if (salt == null || passwordHash == null || salt.isEmpty) return false;
+
+    await _api.adoptLegacyKeyMaterial(salt: salt, passwordHash: passwordHash);
+    return true;
+  }
+
+  AuthStatus _statusFromSnapshot(AuthSnapshot snapshot) {
+    if (snapshot.isUnlocked) return AuthStatus.unlocked;
+    if (snapshot.isFirstRun) return AuthStatus.firstRun;
+    return AuthStatus.locked;
+  }
+
+  /// Re-runs the boot probe the boot sequence uses to decide between
+  /// first-run / locked / unlocked. The lock screen wires this to its
+  /// "Retry" button so the user can recover from a transient keyring /
+  /// core-connection failure without restarting the app.
   Future<void> retryInitialState() async {
     await _checkInitialState();
   }
 
-  /// Set the master password for the first time
+  /// 重新向核心要一次会话快照（状态 + 剩余秒数 + 自动锁定设置）。
+  ///
+  /// 屏幕想在空闲倒计时上显示剩余时间时调它；锁定本身由核心执行，UI 不负责。
+  Future<void> refreshSnapshot() async {
+    final snapshot = await _api.authSnapshot();
+    state = state.copyWith(
+      status: _statusFromSnapshot(snapshot),
+      autoLockMinutes: snapshot.autoLockMinutes,
+      remainingSeconds: snapshot.remainingSeconds,
+    );
+  }
+
+  // ─── 首次设置 ──────────────────────────────────────────
+
+  /// Set the master password for the first time.
   Future<bool> setMasterPassword(
     String password,
     String confirmPassword,
   ) async {
+    // 本地先校验一次只是为了即时反馈；核心会**再校验一次**（它是权威）。
     if (password != confirmPassword) {
       state = state.copyWith(
         status: AuthStatus.firstRun,
@@ -146,17 +223,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     try {
-      final salt = _cryptoService.generateSalt();
-      final passwordHash = _cryptoService.hashMasterPassword(password, salt);
-      final derivedKey = _cryptoService.deriveKey(password, salt);
-      await _cryptoService.storeKeyMaterial(salt, passwordHash);
-
-      // Store the derived key for the session
-      _ref.read(encryptionKeyProvider.notifier).state = derivedKey;
-
-      state = state.copyWith(status: AuthStatus.unlocked, errorMessage: null);
-      _startAutoLockTimer();
-      return true;
+      await _api.setMasterPassword(password, confirmPassword);
+    } on VaultApiException catch (error) {
+      state = state.copyWith(
+        status: AuthStatus.firstRun,
+        errorMessage: _validationErrorCode(error) ?? AuthErrorCodes.failedToSave,
+      );
+      return false;
     } catch (_) {
       state = state.copyWith(
         status: AuthStatus.firstRun,
@@ -164,14 +237,20 @@ class AuthNotifier extends StateNotifier<AuthState> {
       );
       return false;
     }
+
+    // 核心在设置成功时顺手解锁本次会话（`CoreActions._setMasterPassword`），
+    // 所以这里的状态要从核心取，不能自己假设。
+    await _syncAfterSessionChange(fallback: AuthStatus.unlocked);
+    state = state.copyWith(errorMessage: null);
+    return true;
   }
+
+  // ─── 解锁 ──────────────────────────────────────────────
 
   /// Unlock the vault with the master password.
   ///
-  /// 这里同时是**被打断的轮换的恢复入口**：如果库上挂着未完成的轮换
-  /// （见 [MasterPasswordRotation]），无论用户输入新旧哪个密码，都会先把
-  /// 轮换补完 / 收尾，再决定用哪把钥匙继续。没有这一步，用户就会卡在
-  /// "两个密码都开不了库"。
+  /// 校验、轮换日志恢复（"两个密码都开不了库"的兜底）全部在核心里，UI 只做
+  /// 错误码 → 文案的翻译。
   Future<bool> unlock(String password) async {
     // Only switch to loading if storage is actually usable: if the boot
     // probe already published `storageUnavailable`, tapping Unlock would
@@ -184,36 +263,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
     state = state.copyWith(status: AuthStatus.loading);
 
     try {
-      final rotation = _ref.read(masterPasswordRotationProvider);
-      final check = await rotation.verifyCredentials(password);
-
-      if (check == null) {
-        state = state.copyWith(
-          status: AuthStatus.locked,
-          errorMessage: AuthErrorCodes.incorrectMasterPassword,
-        );
-        return false;
-      }
-
-      // 挂着轮换时先把它收尾；拿回来的钥匙保证能解开当前整库。
-      final key = await rotation.recoverPendingRotation(
-        check: check,
-        providedKey: check.key,
+      await _api.unlock(password);
+    } on VaultApiException catch (error) {
+      state = state.copyWith(
+        status: AuthStatus.locked,
+        errorMessage: _unlockErrorCode(error),
       );
-      if (key == null) {
-        // 轮换其实已经生效（整库已是新钥匙的密文），但用户输入的是旧密码。
-        // 目标钥匙无法由旧密码推出 —— 只能明确告诉他改用新密码。
-        state = state.copyWith(
-          status: AuthStatus.locked,
-          errorMessage: AuthErrorCodes.useNewMasterPassword,
-        );
-        return false;
-      }
-
-      _ref.read(encryptionKeyProvider.notifier).state = key;
-      state = state.copyWith(status: AuthStatus.unlocked, errorMessage: null);
-      _startAutoLockTimer();
-      return true;
+      return false;
     } catch (_) {
       state = state.copyWith(
         status: AuthStatus.locked,
@@ -221,10 +277,16 @@ class AuthNotifier extends StateNotifier<AuthState> {
       );
       return false;
     }
+
+    await _syncAfterSessionChange(fallback: AuthStatus.unlocked);
+    state = state.copyWith(errorMessage: null);
+    return true;
   }
 
-  /// Change the master password: verify the current one, re-encrypt all
-  /// entries with a freshly derived key, then persist the new salt + hash.
+  // ─── 改主密码 ──────────────────────────────────────────
+
+  /// Change the master password (verification + whole-vault re-encryption are
+  /// atomic inside the core).
   Future<bool> changeMasterPassword(
     String currentPassword,
     String newPassword,
@@ -241,107 +303,44 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
 
     try {
-      final rotation = _ref.read(masterPasswordRotationProvider);
-
-      // 校验当前密码 —— 走轮换服务，它会同时看 secure storage 与未完成的轮换
-      // 日志（不能只看 secure storage：打断过的库里，那儿的材料和实际密文可能
-      // 不一致）。
-      final check = await rotation.verifyCredentials(currentPassword);
-      if (check == null) {
-        final stored = await _cryptoService.getStoredPasswordHash();
-        state = state.copyWith(
-          errorMessage: stored == null
-              ? AuthErrorCodes.noMasterPassword
-              : AuthErrorCodes.currentPasswordIncorrect,
-        );
-        return false;
-      }
-
-      var oldKey = check.key;
-      if (check.hasPendingRotation) {
-        // 上一次轮换没走完。先按日志把它收尾 / 回退，拿到真正能开库的钥匙，
-        // 再在此基础上开始这一次。不收尾就直接轮换，会把库留在
-        // "日志是旧的、密文是新的"这种自相矛盾的状态里。
-        final resolved = await rotation.recoverPendingRotation(
-          check: check,
-          providedKey: check.key,
-        );
-        if (resolved == null) {
-          // 走到这里意味着库已在新钥匙上、而当前密码是旧的 —— 但
-          // verifyCredentials 刚刚认了它，所以理论上不可达。防御性处理：
-          // 不改密码，避免把库搅坏。
-          state = state.copyWith(
-            errorMessage: AuthErrorCodes.useNewMasterPassword,
-          );
-          return false;
-        }
-        oldKey = resolved;
-      }
-
-      if (!await _ref
-          .read(vaultRepositoryProvider)
-          .encryptionProbeWorks(oldKey)) {
-        // 兜底：用户给的当前密码不是当前整库的钥匙（例如上面刚被判为旧密码、
-        // 而库其实已经在新钥匙上）。继续轮换只会把数据搅坏。
-        state = state.copyWith(
-          errorMessage: AuthErrorCodes.currentPasswordIncorrect,
-        );
-        return false;
-      }
-
-      // Derive the new key first so a failure re-encrypts nothing.
-      final newSalt = _cryptoService.generateSalt();
-      final newKey = _cryptoService.deriveKey(newPassword, newSalt);
-      final newHash = _cryptoService.hashMasterPassword(newPassword, newSalt);
-
-      // 整库重加密 + 轮换日志写进**同一个事务**（见 MasterPasswordRotation）。
-      // 全库重加密走 repository → VaultItemMapper，**新加的密文列自动包含
-      // 在内**；任何一行解不开都会抛异常并整段回滚。
-      await rotation.startRotation(
-        oldKey: oldKey,
-        newSalt: newSalt,
-        newPasswordHash: newHash,
-        newKey: newKey,
+      await _api.changeMasterPassword(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+        confirmPassword: confirmPassword,
       );
-
-      // 最后一步：把新的校验材料写进 secure storage 并清掉日志。这一步失败
-      // **不再会锁死库** —— 日志还在，条目密文已经在新钥匙上，下次解锁时
-      // 用新密码即可由 recoverPendingRotation 自动补完。
-      final storeUpdated = await rotation.completeRotation(
-        PendingRotation(salt: newSalt, passwordHash: newHash),
-      );
-
-      // 改完主密码**回到锁定态**。
-      //
-      // 不留在解锁态的原因有两个：
-      // 1. **让用户当场验收**新密码确实生效 —— 本仓库刚因为"改了主密码而实际
-      //    生效的仍是旧密码"出过一次事故（三处校验口径不一致），"改完还能直接
-      //    用"恰恰会让这类问题看不出来。锁定后必须用新密码重新进来。
-      // 2. 换钥匙这个安全敏感动作之后重新认证一次，是密码管理器的常规做法。
-      // 路由层（app.dart 的 redirect）会据此把界面送回 /lock。
-      _autoLockTimer?.cancel();
-      _ref.read(encryptionKeyProvider.notifier).state = null;
-      BrowserSessionRegistry.lockIfAny();
-      state = state.copyWith(
-        status: AuthStatus.locked,
-        // 钥匙串没写成功时给一句可操作的提示（新密码仍然有效，依据是库里的
-        // 轮换日志）。写成功了就不打扰用户。
-        errorMessage: storeUpdated
-            ? null
-            : AuthErrorCodes.masterPasswordChangedStorageWarning,
-      );
-      return true;
+    } on VaultApiException catch (error) {
+      state = state.copyWith(errorMessage: _changeErrorCode(error));
+      return false;
     } catch (_) {
       state = state.copyWith(errorMessage: AuthErrorCodes.failedToChange);
       return false;
     }
+
+    // 改完主密码**回到锁定态**（核心已经在同一个事务里 `lockAll()`，这里只是把
+    // UI 状态归位，路由随即回 /lock）。
+    //
+    // 不留在解锁态的原因有两个：
+    // 1. **让用户当场验收**新密码确实生效 —— 本仓库刚因为"改了主密码而实际
+    //    生效的仍是旧密码"出过一次事故（三处校验口径不一致），"改完还能直接
+    //    用"恰恰会让这类问题看不出来。锁定后必须用新密码重新进来。
+    // 2. 换钥匙这个安全敏感动作之后重新认证一次，是密码管理器的常规做法。
+    //
+    // 不要"顺手恢复解锁"：`test/change_password_then_lock_test.dart` 盯着这条。
+    state = state.copyWith(
+      status: AuthStatus.locked,
+      remainingSeconds: null,
+      errorMessage: null,
+    );
+    return true;
   }
 
-  /// Update the auto-lock timeout and persist it.
+  // ─── 自动锁定设置 ──────────────────────────────────────
+
+  /// Update the auto-lock timeout (persisted and enforced by the core).
   Future<void> setAutoLockMinutes(int minutes) async {
     final normalizedMinutes = minutes.clamp(1, 60).toInt();
     try {
-      await _cryptoService.setAutoLockMinutes(normalizedMinutes);
+      await _api.setAutoLockMinutes(normalizedMinutes);
     } catch (error, stackTrace) {
       // Do not publish a setting that was not persisted.  Report it in the
       // auth state and propagate the original error so the caller can show
@@ -350,50 +349,126 @@ class AuthNotifier extends StateNotifier<AuthState> {
       Error.throwWithStackTrace(error, stackTrace);
     }
 
-    _autoLockMinutes = normalizedMinutes;
     state = state.copyWith(
-      autoLockMinutes: _autoLockMinutes,
+      autoLockMinutes: normalizedMinutes,
       errorMessage: null,
     );
-    if (state.status == AuthStatus.unlocked) {
-      _startAutoLockTimer();
+  }
+
+  // ─── 锁定 ──────────────────────────────────────────────
+
+  /// Lock the vault. 核心会顺带锁掉 bridge 域（"锁 App 不能留下解锁的浏览器"）。
+  Future<void> lock() async {
+    try {
+      await _api.lock();
+    } catch (_) {
+      // 锁定请求本身失败也必须把 UI 置为锁定态：宁可让界面多锁一次，
+      // 也不要停在"看起来还开着"的解锁界面上。
+    }
+    state = state.copyWith(
+      status: AuthStatus.locked,
+      remainingSeconds: null,
+      errorMessage: null,
+    );
+  }
+
+  // ─── 错误码映射 ────────────────────────────────────────
+
+  /// 会话状态变化（解锁 / 首设成功）后向核心要一次权威快照。
+  ///
+  /// **不能因为这一步失败就报"解锁失败"** —— 动作已经成功了，那会变成假阴性。
+  /// 取不到快照时退化为"按本地已知的结果置状态"，剩余秒数留空。
+  Future<void> _syncAfterSessionChange({required AuthStatus fallback}) async {
+    try {
+      await refreshSnapshot();
+    } catch (_) {
+      state = state.copyWith(status: fallback, remainingSeconds: null);
     }
   }
 
-  /// Lock the vault
-  void lock() {
-    _autoLockTimer?.cancel();
-    _ref.read(encryptionKeyProvider.notifier).state = null;
-    // The browser extension keeps its own session inside the daemon (C 方案),
-    // so lock that one too: "lock the app" must not leave the browser unlocked
-    // until the idle timeout expires. No-op when no daemon runs in this process.
-    BrowserSessionRegistry.lockIfAny();
-    state = state.copyWith(status: AuthStatus.locked, errorMessage: null);
-  }
+  /// 把用户活动上报给核心（空闲锁定的权威在核心）。
+  ///
+  /// 调用方（`app.dart` 的活动监听）已做节流；核心不可达时静默失败。
+  Future<void> touchActivity() => _api.touchActivity();
 
-  /// Start auto-lock timer
-  void _startAutoLockTimer() {
-    _autoLockTimer?.cancel();
-    _autoLockTimer = Timer(Duration(minutes: _autoLockMinutes), lock);
-  }
-
-  /// Reset the timer on user activity
-  void onUserActivity() {
-    if (state.status == AuthStatus.unlocked) {
-      _startAutoLockTimer();
+  /// 核心的会话事件：`locked` / `unlocked` / `shuttingDown`。
+  ///
+  /// **必须订阅**：空闲锁定发生在核心里，核心会广播 `sessionLocked`。
+  /// 不订阅的话 UI 会停在"看起来还能用"的界面（每个动作都回 locked），
+  /// 用户以为应用坏了 —— 这是客户端化最容易漏的一致性缺口。
+  void handleSessionEvent(String event) {
+    switch (event) {
+      case 'locked':
+        state = state.copyWith(status: AuthStatus.locked, remainingSeconds: null);
+      case 'unlocked':
+        _syncAfterSessionChange(fallback: AuthStatus.unlocked);
+      case 'shuttingDown':
+        // 核心要退出了：先把 UI 切回锁定态，避免用户继续对着假界面操作。
+        state = state.copyWith(status: AuthStatus.locked, remainingSeconds: null);
     }
   }
 
-  @override
-  void dispose() {
-    _autoLockTimer?.cancel();
-    super.dispose();
+  String _unlockErrorCode(VaultApiException error) {
+    switch (error.code) {
+      case ErrorCodes.needsKeyMigration:
+        // 核心里没有校验材料。启动探测时已经尝试过迁移，走到这里说明旧钥匙串
+        // 也确实没有材料 —— 只能让用户重新设置主密码。
+        return AuthErrorCodes.noMasterPassword;
+      case ErrorCodes.unauthorized:
+        return _newPasswordRequired(error)
+            ? AuthErrorCodes.useNewMasterPassword
+            : AuthErrorCodes.incorrectMasterPassword;
+      case ErrorCodes.rateLimited:
+        // 二次校验的退避（`verifyMasterPassword`）不会出现在解锁路径上；
+        // 真出现时按"解锁失败"提示，不要谎称密码错。
+        return AuthErrorCodes.unlockError;
+      default:
+        return AuthErrorCodes.unlockError;
+    }
   }
+
+  String _changeErrorCode(VaultApiException error) {
+    final validation = _validationErrorCode(error);
+    if (validation != null) return validation;
+    if (error.code == ErrorCodes.unauthorized) {
+      return _newPasswordRequired(error)
+          ? AuthErrorCodes.useNewMasterPassword
+          : AuthErrorCodes.currentPasswordIncorrect;
+    }
+    if (error.code == ErrorCodes.locked) return AuthErrorCodes.vaultLocked;
+    return AuthErrorCodes.failedToChange;
+  }
+
+  /// 核心的 `invalidRequest` 用文案区分两种输入校验失败（两次输入不一致 /
+  /// 密码太短）。UI 在调用前已经本地校验过，这里只是把核心的拒绝也翻译对。
+  /// 认不出的文案返回 null（调用方退化为通用错误码）—— 绝不误判成成功。
+  String? _validationErrorCode(VaultApiException error) {
+    if (error.code != ErrorCodes.invalidRequest) return null;
+    if (error.message.contains('不一致')) return AuthErrorCodes.passwordsDoNotMatch;
+    if (error.message.contains('8 位')) return AuthErrorCodes.passwordTooShort;
+    return null;
+  }
+
+  /// "必须改用新密码"与"密码错"在协议上共用 `unauthorized`，只能按核心文案
+  /// 细化：认不出时退化为"主密码不正确"（只是提示不够具体，不会误导用户去做
+  /// 错误的操作）。核心若补上结构化原因，这里应改为看错误码。
+  bool _newPasswordRequired(VaultApiException error) =>
+      error.code == ErrorCodes.unauthorized &&
+      error.message.contains('新的主密码');
 }
 
+/// 迁移期读旧钥匙串的存储。测试覆盖它即可模拟"升级后的第一次启动"。
+final legacySecretStoreProvider = Provider<SecretStore>((ref) {
+  return const FlutterSecretStore();
+});
+
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
-  final cryptoService = ref.watch(cryptoServiceProvider);
-  return AuthNotifier(cryptoService, ref);
+  final api = ref.watch(vaultApiProvider);
+  final notifier = AuthNotifier(api, ref.watch(legacySecretStoreProvider));
+  // 核心的会话事件（空闲自锁 / 解锁 / 即将退出）驱动 UI 状态。
+  final subscription = api.sessionEvents.listen(notifier.handleSessionEvent);
+  ref.onDispose(subscription.cancel);
+  return notifier;
 });
 
 /// Maps an [AuthErrorCodes] value to a localized message.

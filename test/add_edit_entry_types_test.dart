@@ -1,4 +1,3 @@
-import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -9,9 +8,13 @@ import 'package:easypass/features/vault/screens/add_edit_entry_screen.dart';
 import 'add_edit_entry_harness.dart';
 
 /// 四种条目类型的字段分区、校验与持久化。
+///
+/// M4 起"持久化"= "假核心收到了什么"：UI 不再有数据库句柄，所以原来那些
+/// `row.passwordEncrypted` / `row.dataEncrypted` 的行级断言搬到了核心侧
+/// （`entry_models_test.dart`、`vault_repository_items_test.dart` 直接对
+/// `VaultItemMapper` 与仓储断言"明文不进列、密文非空、类型列正确"）。
+/// 这里守的是 UI 的契约：**交给核心的模型**里只有当前类型的字段块。
 void main() {
-  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
-
   late EntryFormHarness harness;
 
   setUp(() => harness = EntryFormHarness());
@@ -38,22 +41,16 @@ void main() {
     expect(find.text(enL10n.entrySaved), findsWidgets);
     await harness.flushSnackBar(tester);
 
-    final items = await harness.repo.getItems(type: EntryType.secureNote);
+    final items = await harness.api.listItems(type: EntryType.secureNote);
     expect(items, hasLength(1));
     expect(items.single.type, EntryType.secureNote);
     expect(items.single.name, '家里 Wi-Fi');
     expect(items.single.notes, 'ssid: home\npassword: correct horse');
 
-    final row = await harness.db.getEntryById(items.single.id);
-    expect(row, isNotNull);
-    expect(row!.type, 'secure_note');
-    // 非登录类型：登录列一律空串，绝不留 null 或明文。
-    expect(row.passwordEncrypted, '');
-    expect(row.url, '');
-    expect(row.username, '');
-    expect(row.totpSecretEncrypted, '');
-    expect(row.notesEncrypted, isNotEmpty);
-    expect(row.notesEncrypted, isNot(contains('correct horse')));
+    // 行级断言（`type` 列 / `*_encrypted` 列里没有明文）随"UI 不再碰数据库"
+    // 移到核心侧（`entry_models_test.dart` 直接对 mapper 断言同一性质）。
+    expect(harness.api.called('saveItem'), isTrue,
+        reason: '保存必须经 VaultApi.saveItem 交给核心（UI 侧没有加密路径）');
   });
 
   // ─── 身份信息 ─────────────────────────────────────────
@@ -78,7 +75,7 @@ void main() {
     expect(find.text(enL10n.entrySaved), findsWidgets);
     await harness.flushSnackBar(tester);
 
-    final items = await harness.repo.getItems(type: EntryType.identity);
+    final items = await harness.api.listItems(type: EntryType.identity);
     expect(items, hasLength(1));
     final identity = items.single.identityOrEmpty;
     expect(identity.firstName, '三');
@@ -91,14 +88,9 @@ void main() {
     expect(items.single.login, isNull);
     expect(items.single.sshKey, isNull);
 
-    final row = await harness.db.getEntryById(items.single.id);
-    expect(row!.type, 'identity');
-    expect(row.passwordEncrypted, '');
-    expect(row.url, '');
-    expect(row.username, '');
-    expect(row.dataEncrypted, isNotEmpty);
-    // 证件号是密文，不是明文。
-    expect(row.dataEncrypted, isNot(contains('110101199001011234')));
+    // 身份块整体进核心（`data_encrypted` 那一列由核心写；见文件头说明）。
+    expect(items.single.identity, isNotNull);
+    expect(harness.api.called('saveItem'), isTrue);
   });
 
   // ─── SSH 密钥 ─────────────────────────────────────────
@@ -135,7 +127,7 @@ void main() {
     expect(find.text(enL10n.entrySaved), findsWidgets);
     await harness.flushSnackBar(tester);
 
-    final items = await harness.repo.getItems(type: EntryType.sshKey);
+    final items = await harness.api.listItems(type: EntryType.sshKey);
     expect(items, hasLength(1));
     final ssh = items.single.sshKeyOrEmpty;
     expect(ssh.publicKey, publicKey);
@@ -147,14 +139,9 @@ void main() {
     // 口令不做 trim：前后空格也是口令的一部分。
     expect(ssh.passphrase, 'p@ss word ');
 
-    final row = await harness.db.getEntryById(items.single.id);
-    expect(row!.type, 'ssh_key');
-    expect(row.passwordEncrypted, '');
-    expect(row.url, '');
-    // 私钥与口令只以密文形态落库。
-    expect(row.dataEncrypted, isNotEmpty);
-    expect(row.dataEncrypted, isNot(contains('not-a-real-key')));
-    expect(row.dataEncrypted, isNot(contains('p@ss word')));
+    // 私钥与口令随 SSH 块一起交给核心（加密在核心侧完成）。
+    expect(items.single.sshKey, isNotNull);
+    expect(harness.api.called('saveItem'), isTrue);
   });
 
   testWidgets('手改过的推导字段不会被公钥覆盖', (tester) async {
@@ -185,7 +172,7 @@ void main() {
     // 空密钥用的是"至少填一个"的专用文案（sshKeyRequired），
     // 与"公钥解析失败"（sshPublicKeyInvalid）区分开。
     expect(find.text(enL10n.sshKeyRequired), findsWidgets);
-    expect(await harness.repo.countItems(), 0);
+    expect(harness.api.items, isEmpty);
     await harness.flushSnackBar(tester);
   });
 
@@ -204,7 +191,7 @@ void main() {
     expect(find.text(enL10n.entrySaved), findsWidgets);
     await harness.flushSnackBar(tester);
 
-    final items = await harness.repo.getItems(type: EntryType.sshKey);
+    final items = await harness.api.listItems(type: EntryType.sshKey);
     expect(items, hasLength(1));
     expect(items.single.sshKeyOrEmpty.publicKey, 'not-a-key!!!');
     expect(items.single.sshKeyOrEmpty.privateKey, 'PRIVATE-KEY-BODY');
@@ -219,7 +206,7 @@ void main() {
     await harness.tapSave(tester);
     await harness.flushSnackBar(tester);
 
-    final items = await harness.repo.getItems(type: EntryType.sshKey);
+    final items = await harness.api.listItems(type: EntryType.sshKey);
     expect(items, hasLength(1));
     expect(items.single.sshKeyOrEmpty.hasPrivateKey, isTrue);
   });
@@ -227,7 +214,7 @@ void main() {
   // ─── 类型切换（编辑既有条目）────────────────────────────
 
   testWidgets('编辑时切换类型：先确认，确认后丢掉旧类型的字段块', (tester) async {
-    await harness.repo.saveItem(harness.loginItem(notes: 'keep me'));
+    await harness.api.saveItem(harness.loginItem(notes: 'keep me'));
     await harness.pumpEdit(tester, 'seed-login');
     expect(readField(tester, EntryFormKeys.url), 'https://github.com');
 
@@ -256,23 +243,20 @@ void main() {
     expect(find.text(enL10n.entryUpdated), findsWidgets);
     await harness.flushSnackBar(tester);
 
-    expect(await harness.repo.getItems(type: EntryType.login), isEmpty);
-    final items = await harness.repo.getItems();
+    expect(await harness.api.listItems(type: EntryType.login), isEmpty);
+    final items = await harness.api.listItems();
     expect(items, hasLength(1));
     expect(items.single.id, 'seed-login');
     expect(items.single.type, EntryType.secureNote);
     expect(items.single.notes, 'body after switch');
-
-    final row = await harness.db.getEntryById('seed-login');
-    expect(row!.type, 'secure_note');
-    expect(row.passwordEncrypted, '');
-    expect(row.url, '');
-    expect(row.username, '');
-    expect(row.totpSecretEncrypted, '');
+    // 类型切换后**只**带新类型的块：登录块必须消失（否则核心会写出"身份条目
+    // 里还挂着 login"这种噪音）。
+    expect(items.single.login, isNull);
+    expect(items.single.sshKey, isNull);
   });
 
   testWidgets('切换类型时取消：条目类型与字段都不变', (tester) async {
-    await harness.repo.saveItem(harness.loginItem());
+    await harness.api.saveItem(harness.loginItem());
     await harness.pumpEdit(tester, 'seed-login');
 
     await harness.selectType(tester, EntryType.identity);
@@ -286,7 +270,7 @@ void main() {
     await harness.tapSave(tester);
     await harness.flushSnackBar(tester);
 
-    final items = await harness.repo.getItems();
+    final items = await harness.api.listItems();
     expect(items, hasLength(1));
     expect(items.single.type, EntryType.login);
     expect(items.single.loginOrEmpty.password, 'pw-seed');
@@ -330,7 +314,7 @@ void main() {
     expect(find.text(enL10n.entrySaved), findsWidgets);
     await harness.flushSnackBar(tester);
 
-    final items = await harness.repo.getItems(type: EntryType.secureNote);
+    final items = await harness.api.listItems(type: EntryType.secureNote);
     expect(items, hasLength(1));
     expect(items.single.customFields, hasLength(1));
     expect(items.single.customFields.single.label, 'PIN');

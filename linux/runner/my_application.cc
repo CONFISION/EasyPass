@@ -123,20 +123,13 @@ static gboolean debug_auto_show_cb(gpointer user_data) {
 }
 
 // CI / smoke-test hook callback — see `EASYPASS_DEBUG_AUTO_EXIT_AFTER_MS` in
-// `my_application_activate`. Mirrors the tray "Exit" code path so a
-// headless / unattended run can verify that quit actually tears down the
-// process and the tray entry.
+// `my_application_activate`. Runs the tray's "Exit UI Only" path
+// (`easypass_quit_ui()`, shared with the tray menu) so a headless / unattended
+// run verifies the exact teardown the menu entry performs: mark quitting,
+// destroy the window, drop the tray-mode hold and quit the application loop.
 static gboolean debug_auto_exit_cb(gpointer user_data) {
-  GtkWindow* window = GTK_WINDOW(user_data);
-  // Mark quitting first so `easypass_tray_is_active()` returns FALSE — this
-  // mirrors `on_exit_activate` in easypass_tray.cc.
-  g_quitting_set_for_test();
-  gtk_widget_destroy(GTK_WIDGET(window));
-  GApplication* app = g_application_get_default();
-  if (app != nullptr) {
-    g_application_release(app);
-    g_application_quit(app);
-  }
+  (void)user_data;
+  easypass_quit_ui();
   return G_SOURCE_REMOVE;
 }
 

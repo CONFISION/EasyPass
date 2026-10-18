@@ -41,7 +41,7 @@ class WindowsAutostart implements LinuxAutostartBackend {
   }
 
   @override
-  Future<String> resolveExecutableForDesktopEntry() async {
+  Future<String> resolveExecCommandForDesktopEntry() async {
     throw AutostartException('Not applicable on Windows');
   }
 }

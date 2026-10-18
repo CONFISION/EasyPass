@@ -127,7 +127,11 @@ class LinuxDesktopIntegration implements DesktopIntegrationBackend {
   ///
   /// AppImage 形态下 `$APPIMAGE` 指向持久文件（`Platform.resolvedExecutable`
   /// 指向 AppImage 挂载的临时目录，退出即失效）——与
-  /// `LinuxAutostart.resolveExecutableForDesktopEntry()` 同一套优先级。
+  /// `LinuxAutostart._resolveUiEntryPoint()` 同一套优先级。
+  ///
+  /// 注意与**开机自启**的区别：`$XDG_DATA_HOME/applications/easypass.desktop`
+  /// 是应用菜单入口，必须拉起 UI（有窗口的那个）；`~/.config/autostart/` 里的自
+  /// 启项 3.0.0 起指向核心服务（见 `LinuxAutostart.resolveCoreServicePath()`）。
   String resolveExecutableForDesktopEntry() {
     final appImage = appImagePath ?? _env['APPIMAGE'];
     if (appImage != null && appImage.isNotEmpty) return appImage;

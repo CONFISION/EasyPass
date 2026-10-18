@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'dart:math';
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:meta/meta.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 
 /// `ProcessException.errorCode` 是非空 int（"无错误码" 也是 0），
@@ -69,7 +69,24 @@ abstract final class AppPaths {
   }
 
   static Directory _resolveDataDirectory() {
-    if (!Platform.isLinux) return executableDirectory;
+    if (!Platform.isLinux) {
+      // 非 Linux（Windows）：数据目录 = 可执行文件目录。
+      //
+      // 例外：核心服务被装到 `<app>\core\easypass_core.exe` 时，它的数据目录
+      // 仍然是 `<app>`（= UI 二进制所在目录），否则同一个保险库会出现两个
+      // 坐标。为什么核心要放子目录：`dart build cli` 的原生资产按
+      // `<exe>\..\lib\sqlite3.dll` 解析，核心必须在子目录里、库放 `<app>\lib`，
+      // 才能让一切留在安装目录内。
+      //
+      // 判据是"父目录里有 UI 二进制"，纯目录结构判断，不依赖任何环境变量。
+      final exeDir = executableDirectory;
+      final parent = exeDir.parent;
+      final uiBinaryName = Platform.isWindows ? 'easypass.exe' : 'easypass';
+      if (File(p.join(parent.path, uiBinaryName)).existsSync()) {
+        return parent;
+      }
+      return exeDir;
+    }
 
     final configuredDataHome = Platform.environment['XDG_DATA_HOME'];
     final dataHome =

@@ -3,13 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../client/api_providers.dart';
 import '../../../core/crypto/ssh_key_service.dart';
-import '../../../data/database/database.dart' show Folder;
 import '../../../data/models/entry_fields.dart';
 import '../../../data/models/entry_type.dart';
 import '../../../data/models/vault_item.dart';
-import '../../../data/repositories/vault_repository.dart';
 import '../../../l10n/app_localizations.dart';
+import '../../../protocol/codecs.dart' show WireFolder;
 import '../../generator/providers/generator_provider.dart';
 import '../providers/entry_item_provider.dart';
 import '../providers/vault_provider.dart';
@@ -49,13 +49,15 @@ class EntryFormKeys {
 /// 文件夹列表来自**共享的** `foldersProvider`（`vault_provider.dart`）。
 /// 这里曾经有一份私有的 `FutureProvider`，它把首次打开表单时的文件夹列表**永久
 /// 缓存**住，而且没有任何人 invalidate 它 —— 于是"添加条目时只能选到无文件夹 +
-/// 第一个文件夹"（用户报的 bug）。`foldersProvider` 是 drift 的流：谁写入都会
-/// 推到所有正在读它的地方，新增 / 改名 / 删除当场可见。
+/// 第一个文件夹"（用户报的 bug）。`foldersProvider` 现在由核心的 `folders` 主题
+/// 推送驱动：谁写入都会重取，新增 / 改名 / 删除当场可见。
 ///
 /// 数据纪律：
-/// - 保存只走 `repo.saveItem(VaultItem)`，**不碰** `*_encrypted` 列；
+/// - 保存只走 `vaultApiProvider.saveItem(VaultItem)`，**不碰** `*_encrypted` 列
+///   （加密在核心里做，明文过线但不落地）；
 /// - 只提交当前类型对应的字段块，切换类型时先 `withoutTypeData()` 丢弃旧块；
-/// - 加密失败一律冒泡成错误提示，绝不退化成写明文。
+/// - TOTP 种子与密码生成器**留在 UI 本地**：种子随条目一起从核心取回（编辑要有
+///   种子才能改），生成器是纯本地算法，都不需要额外的协议动作。
 class AddEditEntryScreen extends ConsumerStatefulWidget {
   final String? entryId;
 
@@ -467,7 +469,9 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
     setState(() => _isSaving = true);
 
     try {
-      await ref.read(vaultRepositoryProvider).saveItem(_buildItem());
+      // 加密在核心里完成；这里只把明文模型交过去（失败必须报错，绝不退化成
+      // "本地写一份明文"——UI 已经没有数据库句柄了）。
+      await ref.read(vaultApiProvider).saveItem(_buildItem());
       if (!mounted) return;
       messenger.showSnackBar(
         SnackBar(
@@ -491,6 +495,8 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
 
   void _confirmDelete(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final api = ref.read(vaultApiProvider);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -503,9 +509,16 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
           ),
           FilledButton(
             onPressed: () async {
-              await ref
-                  .read(vaultRepositoryProvider)
-                  .deleteItem(widget.entryId!);
+              try {
+                await api.deleteItem(widget.entryId!);
+              } catch (error) {
+                // 删不掉就明说（对话框留着，用户可以重试或取消）。
+                if (ctx.mounted) Navigator.pop(ctx);
+                messenger.showSnackBar(
+                  SnackBar(content: Text(l10n.failedWithError('$error'))),
+                );
+                return;
+              }
               if (ctx.mounted) Navigator.pop(ctx);
               if (context.mounted) context.pop();
             },
@@ -937,15 +950,15 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
 
   /// 当前选中的文件夹 id —— 先按**实时**文件夹列表校验，再交给下拉框。
   ///
-  /// 表单打开期间文件夹可能被删除 / 改名 / 整体替换（列表读的是 drift 流，
-  /// 任何一处写入都会推过来）。此时若仍把这个 id 交给下拉框：
+  /// 表单打开期间文件夹可能被删除 / 改名 / 整体替换（列表由核心的 `folders`
+  /// 主题推送，任何一处写入都会重取过来）。此时若仍把这个 id 交给下拉框：
   /// - `DropdownButton` 会因为"value 不在 items 里"直接断言崩溃（红屏）；
   /// - 就算不崩，保存也会把条目挂到一个已经不存在的文件夹上。
   /// 所以解析不出来就回退成"无文件夹"。
   ///
   /// [folders] 为 null = 列表还没到（首帧）：保留原选择，
   /// 否则"页面刚打开就保存"会把文件夹静默丢掉。
-  String? _folderIdIn(List<Folder>? folders) {
+  String? _folderIdIn(List<WireFolder>? folders) {
     final selected = _selectedFolderId;
     if (selected == null || folders == null) return selected;
     for (final folder in folders) {

@@ -1,18 +1,15 @@
-import 'package:drift/drift.dart' show driftRuntimeOptions;
-import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:easypass/client/api_providers.dart';
 import 'package:easypass/core/constants/app_constants.dart';
-import 'package:easypass/core/crypto/crypto_service.dart';
-import 'package:easypass/data/database/database.dart';
-import 'package:easypass/data/repositories/vault_repository.dart';
 import 'package:easypass/features/settings/providers/theme_provider.dart';
 import 'package:easypass/features/settings/screens/settings_screen.dart';
 import 'package:easypass/l10n/app_localizations.dart';
 
+import 'fake_vault_api.dart';
 import 'fakes.dart';
 
 /// 主题设置（跟随系统 / 浅色 / 深色）的持久化回归。
@@ -21,8 +18,6 @@ import 'fakes.dart';
 /// 启动必须落到 [ThemeMode.system] 且不抛异常 —— 主题是启动路径上的设置项，
 /// 它一崩整个 app 就是白屏。
 void main() {
-  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
-
   late FakeSecureStorage storage;
 
   setUp(() {
@@ -161,12 +156,9 @@ void main() {
     final themeStorage = FakeSecureStorage();
     final container = ProviderContainer(
       overrides: [
-        cryptoServiceProvider.overrideWithValue(
-          CryptoService(secureStorage: FakeSecureStorage()),
-        ),
-        databaseProvider.overrideWithValue(
-          AppDatabase.forTesting(NativeDatabase.memory()),
-        ),
+        // 设置页只跟核心客户端打交道（`vaultApiProvider`）：不再需要
+        // databaseProvider / cryptoServiceProvider。
+        vaultApiProvider.overrideWithValue(FakeVaultApi()),
         themeStorageProvider.overrideWithValue(themeStorage),
       ],
     );

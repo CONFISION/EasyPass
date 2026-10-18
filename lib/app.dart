@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -103,6 +105,47 @@ final _routerProvider = Provider<GoRouter>((ref) {
   );
 });
 
+/// 用户活动 → 核心会话续期。
+///
+/// 空闲锁定的权威在**核心**（`SessionDomains`）：UI 只负责把"用户还在动"
+/// 告诉它。没有这一层，用户停在"不读数据"的页面（生成器、设置页）时，
+/// 核心会在用户正在操作时把库锁掉。
+///
+/// 节流到 20 秒一次：远小于最短的自动锁定时间（1 分钟），又不会让每次
+/// 指针移动都发一个请求。
+class _ActivityTouchHost extends ConsumerStatefulWidget {
+  const _ActivityTouchHost({required this.child});
+
+  final Widget child;
+
+  @override
+  ConsumerState<_ActivityTouchHost> createState() => _ActivityTouchHostState();
+}
+
+class _ActivityTouchHostState extends ConsumerState<_ActivityTouchHost> {
+  static const Duration _minInterval = Duration(seconds: 20);
+
+  DateTime _lastTouch = DateTime.fromMillisecondsSinceEpoch(0);
+
+  void _touch() {
+    final now = DateTime.now();
+    if (now.difference(_lastTouch) < _minInterval) return;
+    _lastTouch = now;
+    // 失败无所谓：核心没起来时，下一次真实动作会触发重连/拉起。
+    unawaited(ref.read(authProvider.notifier).touchActivity());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) => _touch(),
+      onPointerMove: (_) => _touch(),
+      child: widget.child,
+    );
+  }
+}
+
 class EasyPassApp extends ConsumerWidget {
   const EasyPassApp({super.key});
 
@@ -139,11 +182,13 @@ class EasyPassApp extends ConsumerWidget {
       supportedLocales: AppLocalizations.supportedLocales,
       routerConfig: router,
       // 首次启动的浏览器集成提示（方案 B：不做设置页 UI，只提示一次）。
-      builder: (context, child) => BrowserHostPromptHost(
-        // 单实例：UI 准备好后启动 raise 监听，让二次启动的进程能把窗口
-        // 唤到前台。该 Host 是 ConsumerStatefulWidget，只在主实例上挂 handler
-        // （backend 非 null）；非 Linux / 没有 backend 时是空操作。
-        child: SingleInstanceRaiseHost(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) => _ActivityTouchHost(
+        child: BrowserHostPromptHost(
+          // 单实例：UI 准备好后启动 raise 监听，让二次启动的进程能把窗口
+          // 唤到前台。该 Host 是 ConsumerStatefulWidget，只在主实例上挂 handler
+          // （backend 非 null）；非 Linux / 没有 backend 时是空操作。
+          child: SingleInstanceRaiseHost(child: child ?? const SizedBox.shrink()),
+        ),
       ),
     );
   }

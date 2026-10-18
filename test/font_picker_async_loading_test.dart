@@ -9,26 +9,21 @@
 
 import 'dart:async';
 
-import 'package:drift/drift.dart' show driftRuntimeOptions;
-import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:easypass/client/api_providers.dart';
 import 'package:easypass/core/constants/app_constants.dart';
-import 'package:easypass/core/crypto/crypto_service.dart';
-import 'package:easypass/data/database/database.dart';
-import 'package:easypass/data/repositories/vault_repository.dart';
 import 'package:easypass/data/services/font_discovery_service.dart';
 import 'package:easypass/features/settings/providers/font_settings_provider.dart';
 import 'package:easypass/features/settings/screens/settings_screen.dart';
 import 'package:easypass/l10n/app_localizations.dart';
 
+import 'fake_vault_api.dart';
 import 'fakes.dart';
 
 void main() {
-  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
-
   /// 永不 resolve 的 [Completer]。测试用它把 [availableFontsProvider] 钉
   /// 在 `AsyncLoading` 状态（首帧一致性修复点场景）。
   late Completer<FontList> neverCompletes;
@@ -54,12 +49,8 @@ void main() {
 
       final container = ProviderContainer(
         overrides: [
-          cryptoServiceProvider.overrideWithValue(
-            CryptoService(secureStorage: FakeSecureStorage()),
-          ),
-          databaseProvider.overrideWithValue(
-            AppDatabase.forTesting(NativeDatabase.memory()),
-          ),
+          // 设置页只跟核心客户端打交道：UI 不该再需要数据库 / 加密服务。
+          vaultApiProvider.overrideWithValue(FakeVaultApi()),
           fontStorageProvider.overrideWithValue((FakeSecureStorage()
             ..store[AppConstants.fontFamilyStorageKey] = 'Maple Mono NF CN')),
           // 关键：把可用字体 provider 替换成永不 resolve 的替身 —— 模拟
@@ -130,12 +121,7 @@ void main() {
 
       final container = ProviderContainer(
         overrides: [
-          cryptoServiceProvider.overrideWithValue(
-            CryptoService(secureStorage: FakeSecureStorage()),
-          ),
-          databaseProvider.overrideWithValue(
-            AppDatabase.forTesting(NativeDatabase.memory()),
-          ),
+          vaultApiProvider.overrideWithValue(FakeVaultApi()),
           fontStorageProvider.overrideWithValue(FakeSecureStorage()),
           // 提供一份**立刻**可用的字体列表（带 2 个 bundle + 1 个 system）。
           availableFontsProvider.overrideWith((ref) async => const FontList(

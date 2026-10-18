@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import '../database/database.dart';
 import '../repositories/vault_repository.dart';
 import '../../core/crypto/crypto_service.dart';
@@ -314,20 +312,3 @@ class MasterPasswordRotation {
     return null;
   }
 }
-
-/// 校验器：App / 桥接 / 详情页共用。
-final masterPasswordVerifierProvider = Provider<MasterPasswordVerifier>((ref) {
-  return MasterPasswordVerifier(
-    db: ref.watch(databaseProvider),
-    cryptoService: ref.watch(cryptoServiceProvider),
-  );
-});
-
-/// 轮换器：需要仓储才能做整库重加密。
-final masterPasswordRotationProvider = Provider<MasterPasswordRotation>((ref) {
-  return MasterPasswordRotation(
-    db: ref.watch(databaseProvider),
-    cryptoService: ref.watch(cryptoServiceProvider),
-    repository: ref.watch(vaultRepositoryProvider),
-  );
-});
