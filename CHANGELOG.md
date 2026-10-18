@@ -56,6 +56,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
   UI 只接收统计数字（条数 / 分数 / 问题条目的 id+名字），**明文密码与 TOTP 种子
   不再经过 IPC**。回归网：两个健康测试都用 `expect(api.called('listItems'), isFalse)`
   盯着"别再退回本地分析"。
+- **关窗即锁**（Windows）：`WM_CLOSE` 先跑 `easypass_core --lock` 再隐藏到托盘，
+  重新打开是锁屏；托盘 `Exit UI Only` 走同一条路径。此前关窗只隐藏，锁定完全依赖
+  核心的空闲计时器（默认 5 分钟）。
+  语义提醒：`--lock` → `lockAll()`，所以关窗后**浏览器扩展也需要重新解锁**（既定行为）。
 - **Windows UI 单实例**（`windows/runner/main.cpp`）：命名 Mutex `Local\EasyPass.UI`
   + `FindWindowW` 抬窗，双击两次不会再出现第二个进程/第二个托盘图标；带 `--` 开关的
   CLI 调用跳过闸门。
@@ -74,8 +78,24 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
   `BrowserSessionRegistry`（被核心内会话域取代）。**这同时修掉了 2.4.x 的一个真实缺陷**：
   `--service` 进程虽然窗口不可见，却照样注册托盘图标，托盘 "Open EasyPass" 能把那个空窗口
   显示出来（2026-10-17 实测复现）。
+- **Linux 桌面支持移出主分支**（2.3.3 引入的 AppImage / GTK 托盘 / XDG 自启等）。
+  完整实现与文档保存在仓库的 `linux` 分支（分叉点 `3312384`）；主分支只构建与支持
+  **Windows**。因此本版只发布 Windows 产物。
+
+### Fixed
+
+- **关窗上锁只生效一次**（用户真机报告：第一次关窗后重开要求密码，之后再关窗重开却
+  直接显示解锁态且条目全空）。核心每次都锁了，但**没有广播 `sessionLocked`** ——
+  状态翻转原本只由 5 秒节拍器比对，"解锁后 5 秒内关窗"时 `_lastKnown` 还没更新，
+  `lockAll()` 判为"无变化"就不广播。现在 `VaultSession` 的解锁/锁定**立即**通知
+  `SessionDomains`，不再依赖节拍器。回归网：`test/session_domains_test.dart`
+  （连续三轮"解锁 → 立即锁定"，每轮都必须有事件）。
+- **扩展解锁会让桌面端也变成解锁态**：客户端把 `sessionUnlocked` 一律当成自己的事件、
+  **丢了 `domain`**，于是浏览器解锁后桌面端也显示解锁态（`ui` 域其实还锁着）。现在只认
+  `ui` 域，`coreShuttingDown` 仍一律转发。回归网：`test/session_event_translation_test.dart`。
 
 ---
+
 ## [2.4.0]
 
 ### Added
