@@ -8,7 +8,7 @@
 | 文件 | 触发 | 做什么 |
 | --- | --- | --- |
 | `ci.yml` | push 到 `master`、任何 `pull_request` | Windows 上跑 analyze / test / 扩展静态检查 + 三个 jsdom 冒烟 / runner 语法检查 |
-| `release.yml` | 推送 `v*` 形式的 tag（如 `v2.4.0`） | Windows 装包、Linux AppImage，汇总 `SHA256SUMS.txt` 并创建 GitHub Release |
+| `release.yml` | 推送 `v*` 形式的 tag（如 `v3.0.0`） | Windows 装包，汇总 `SHA256SUMS.txt` 并创建 GitHub Release |
 
 两个文件的注释都是中文；`name:`（Actions 界面里显示的步骤名）保持英文，便于在
 GitHub 网页上扫读。改动工作流后建议本地跑一次 `actionlint`（见文末）。
@@ -29,9 +29,9 @@ on:
 
 ### 唯一的任务：Windows
 
-跑在 `windows-latest` 上，因为 Windows 是本仓库的**基准平台**：Linux-only 的用例
-（`browser_host_installer_test.dart`、`linux_window_controller_test.dart`、
-`desktop_integration_test.dart` 的 POSIX 位、`easypass_daemon_terminate_test.dart` 的
+跑在 `windows-latest` 上，因为 Windows 是本仓库唯一支持的平台（Linux 适配在 `linux` 分支）。
+
+  `easypass_daemon_terminate_test.dart` 的
 SIGTERM 路径）在 Windows 上**不注册用例**，所以 Windows 上的报告最接近"全绿即真绿"，
 断言也不会因平台而漂移（见 AGENTS.md 的 Build/Test/Lint）。步骤顺序：
 
@@ -96,9 +96,9 @@ flutter assemble --no-version-check --output=build `
   （`/Zs` 不产出文件），链接期问题仍要真机构建才能发现。
 - **不跑 `check_integrity.bat`**：它检查的是工作区的强制完整性标签（agent 沙箱
   workspace-write 会打 Low 标签），对 GitHub runner 没有意义。
-- **Linux-only 用例不在 PR 门禁里跑**：见上文平台选择。如果需要，可另加一个
-  `ubuntu-latest` 任务（装 GTK 3 + `libayatana-appindicator3-dev` 后
-  `flutter test --no-pub`），代价是多机位维护。
+
+
+  代价是多机位维护。
 - **不做 `dart format` 检查**：本仓库刻意不跑 `dart format`（见 AGENTS.md），
   门禁只有 `flutter analyze`。
 
@@ -121,12 +121,12 @@ on:
 | --- | --- | --- |
 | `verify` | ubuntu-latest | 校验 tag ↔ `pubspec.yaml`，再跑 `check_extension.mjs`（四处版本号契约） |
 | `windows` | windows-latest | `flutter build windows` → `tool/build_core.ps1` → ISCC → `EasyPass-<版本>-windows-x64-setup.exe` |
-| `linux` | ubuntu-latest | `flutter build linux --release` → `tool/build_core.sh` → `build_appimage.sh` → `EasyPass-<版本>-linux-x86_64.AppImage` |
-| `release` | ubuntu-latest | 下载两个 artifact、跑 `installer/release/collect_artifacts.mjs`、创建/更新 GitHub Release |
+
+| `release` | ubuntu-latest | 下载 Windows artifact、跑 `installer/release/collect_artifacts.mjs`、创建/更新 GitHub Release |
 
 产物名带版本号是为了发布页上好认。Release 里的资产是：`EasyPass-<版本>-windows-x64-setup.exe`
 （安装包本体仍是 `build\installer\EasypassSetup.exe`，只是上传前改了名）、
-`EasyPass-<版本>-linux-x86_64.AppImage`、`SHA256SUMS.txt` 以及 `release-manifest.json`。
+`SHA256SUMS.txt` 以及 `release-manifest.json`。
 
 ### 核心服务（3.0.0 起）
 
@@ -138,22 +138,22 @@ on:
   `'dart compile' does not support build hooks, use 'dart build' instead`。
 - 入口 `bin/easypass_core.dart`，产物 `<目录>/bundle/bin/easypass_core[.exe]`
   + `<目录>/bundle/lib/sqlite3.dll`。摊平逻辑封装在 `tool/build_core.ps1`（Windows）
-  与 `tool/build_core.sh`（Linux），两个工作流只调脚本，不重复实现。
+  两个工作流只调脚本，不重复实现。
 - **核心必须放进子目录，这是 `sqlite3` 原生库决定的**：`package:sqlite3` 用
   `@ffi.DefaultAsset` 编译，运行时按 `<exe 所在目录>\..\lib\<name>` 解析（Dart 3.13.4
   实测：放在 exe 旁边的副本**不会**被加载，`native_assets.json` sidecar 也被忽略）。
-  所以两边统一成"核心在 `core/`、库在 `lib/`"：
-  - Windows：`Release\core\easypass_core.exe` + `Release\lib\sqlite3.dll`；
-  - Linux：`bundle/core/easypass_core` + `bundle/lib/`（复用 Flutter bundle 自带的
-    lib 目录，脚本**不覆盖**已有的 `libsqlite3.so`）；
-  - AppImage 里即 `usr/bin/core/easypass_core` + `usr/bin/lib/...`。
+  所以统一成"核心在 `core/`、库在 `lib/`"：
+  - Windows：`Release\core\easypass_core.exe` + `Release\lib\sqlite3.dll`。
+
+
+
   Flutter 自己那份 `Release\sqlite3.dll`（UI 用）保持不动。
 - **数据坐标不变**：`AppPaths._resolveDataDirectory()`（`lib/core/platform/app_paths.dart`）
   发现父目录里有 UI 二进制（`easypass.exe`）就取父目录，所以核心在 `{app}\core\` 时
   保险库与 `daemon.json` 仍是 `{app}`，与 2.4.x 一致，不需要迁移数据。
-- Windows 的 `Verify build output` 断言 `core\easypass_core.exe` 与 `lib\sqlite3.dll`；
-  Linux 的 `Verify bundle` 断言 `test -x build/linux/x64/release/bundle/core/easypass_core`。
-- Linux 侧另外在依赖里加了 `libsqlite3-dev`（pubspec.yaml 的钩子对 Linux 走
+- Windows 的 `Verify build output` 断言 `core\easypass_core.exe` 与 `lib\sqlite3.dll`。
+
+  `source: system`）。`.iss` 里核心与它的库分别装到 `{app}\core` 与 `{app}\lib`，
   `source: system`）。`.iss` 里核心与它的库分别装到 `{app}\core` 与 `{app}\lib`，
   自启项指向 `{app}\core\easypass_core.exe --serve`，安装/卸载前先停核心。
 
@@ -178,32 +178,17 @@ on:
   静默安装（两条命令都写在注释里了）。
 - 安装包**没有代码签名**，CI 也不会签名：需要签名的话得先加证书 secret。
 
-### Linux 任务
-
-- 依赖：`build-essential clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
-  libayatana-appindicator3-dev libsqlite3-dev`。刻意不写 `libstdc++-12-dev` 这类带版本号的包名 ——
-  `ubuntu-latest` 的默认 GCC 会随镜像升级，写死版本号会在镜像换代后直接 apt 失败。
-  `libsqlite3-dev` 只为核心构建（`source: system` 钩子）准备。
-- `linux/CMakeLists.txt` 会用 `sqlite3_flutter_libs` 里的 sqlite.org 源码现编一份
-  `libsqlite3.so`（`pubspec.yaml` 的 linux-scoped `source: system` 钩子要求这个名字），
-  配置阶段需要联网拉源码，runner 上有网。
-- appimagetool 用官方 1.9.1 的 `appimagetool-x86_64.AppImage`（URL 是固定 tag，
-  不用每天重建的 `continuous`）。它自己就是个 AppImage，runner 上没有 FUSE2，
-  所以打包时用 `APPIMAGE_EXTRACT_AND_RUN=1` 让运行时解包后直接执行；
-  依赖步骤里也顺手试装 `libfuse2t64`/`libfuse2`，装不上不影响。
-- 版本号由 `build_appimage.sh` 自己从 `pubspec.yaml` 读，与 `dist` 里的文件名一致。
-
 ### Release 任务
 
 - **校验和与清单不在这里手搓**：跑 `node installer/release/collect_artifacts.mjs
-  --installer incoming/<安装包> --appimage incoming/<AppImage> --skip extension`，
+  --installer incoming/<安装包> --skip extension`，
   也就是仓库里唯一一份 `SHA256SUMS.txt` 实现（本地手工发布走同一条路，见
-  `installer/release/README.md`）。它把两个产物拷进 `dist/release/<version>/`，
-  写出 `SHA256SUMS.txt`（`<hex>  <文件名>`、按文件名排序、LF、无注释行 —— Linux 上
+  `installer/release/README.md`）。它把产物拷进 `dist/release/<version>/`，
+  写出 `SHA256SUMS.txt`（`<hex>  <文件名>`、按文件名排序、LF、无注释行 —— `sha256sum -c` 直接可用）。
   `sha256sum -c SHA256SUMS.txt` 直接可用）与 `release-manifest.json`，并且**缺产物就失败、
   一个文件都不写**，不会出现"只覆盖一半资产的校验和"。步骤里还会再独立
   `sha256sum -c` 复核一遍。
-  `--skip extension` 是因为这个工作流不出扩展商店包；要一起发的话，在 linux 任务里加
+  `--skip extension` 是因为这个工作流不出扩展商店包；要一起发的话，在 windows 任务里加
   `node browser_extension/tools/build_extension_zip.mjs`，再去掉这个参数。
 - 用预装的 `gh` CLI 而不是第三方 release action：这个仓库发布的是密码管理器资产，
   发布环节只依赖 GitHub 自己的工具链更稳妥。上传的是**整个** `dist/release/<version>/`
@@ -260,14 +245,6 @@ on:
 - ci.yml 里"准备 `windows/flutter/ephemeral`"那一步的耗时：它包含一次引擎产物下载
   （约百 MB）和一次 Dart kernel 编译。命令本身已在本机（隔离副本里）验证过，但没在
   runner 上计时。
-- `APPIMAGE_EXTRACT_AND_RUN=1` 在 ubuntu-latest 上运行 appimagetool 1.9.1 的表现
-  （若该版本不认这个环境变量，就装 `libfuse2t64` 走 FUSE 路径，依赖步骤里已经试装）。
-- **核心服务构建只在 Windows 上实跑过**：`dart build cli` 的 Windows 产物
-  （`bundle/bin/easypass_core.exe` + `bundle/lib/sqlite3.dll`）、`tool/build_core.ps1`
-  的 `core\` + `lib\` 布局、以及核心能起/能查库/能 `--shutdown`（`LOCALAPPDATA`
-  重定向到沙箱里跑通）都已实测。Linux 侧只有 `tool/build_core.sh` 在 Cygwin 下用假
-  bundle 冒烟过复制逻辑；真机上 `dart build cli` 是否顺利用到系统 libsqlite3、
-  AppImage 里 `usr/bin/core/../lib` 能否命中 `usr/bin/lib`，第一次跑 CI 才能确认。
 - **`.iss` 的新增 `[Code]`（安装/卸载前停核心）没有用 ISCC 编过**：本机按约定不跑
   ISCC，语法与运行时行为（`ewNoWait` 的优雅停机 + `taskkill` 兜底）要到 `release.yml`
   或人工打包时才第一次真正执行。

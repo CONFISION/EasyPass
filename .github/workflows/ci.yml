@@ -33,7 +33,7 @@ env:
 jobs:
   windows:
     name: Windows — analyze / test / extension / runner syntax
-    # Windows 是仓库的基准平台：545 个用例在这里跑全，Linux-only 的用例在
+    # 见 AGENTS.md）。主分支只支持 Windows（Linux 适配在 git 的 linux 分支），所以门禁放在 Windows 上。
     # Windows 上不注册用例（见 AGENTS.md），所以门禁放在 Windows 上。
     runs-on: windows-latest
     timeout-minutes: 45

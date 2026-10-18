@@ -2,11 +2,11 @@
 
 **English**: [README.md](README.md)
 
-**Windows 与 Linux 上的本地优先密码管理器**，配套 Chrome / Edge 扩展：加密保险库就在自己的
+**Windows 上的本地优先密码管理器**，配套 Chrome / Edge 扩展：加密保险库就在自己的
 机器上，浏览器里一键自动填充。长期目标：一个可自部署的 Bitwarden 替代品。
 
 ![release](https://img.shields.io/badge/release-3.0.0-blue)
-![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D6)
+![platform](https://img.shields.io/badge/platform-Windows-0078D6)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 ## 你能得到什么
@@ -47,18 +47,9 @@ Flutter 界面 ┘     回环 TCP · 协议 5 · 全帧加密
 `EasypassSetup.exe` 直接运行：按用户安装、免管理员、可选随系统启动。安装包**未代码签名**，
 SmartScreen 可能提示未知发布者。
 
-**Linux** —— 下载 AppImage 后：
+> **仅 Windows。** Linux 桌面适配不在本主分支上 —— 它在仓库的 `linux` 分支里。
 
-```bash
-chmod +x EasyPass-3.0.0-linux-x86_64.AppImage
-./EasyPass-3.0.0-linux-x86_64.AppImage --install   # 写入应用菜单
-```
-
-需要 FUSE 2（`libfuse2`）；没有就加 `--appimage-extract-and-run`。
-**本版的 Linux 产物未经真机验证** —— 目前只过了语法检查，请当作未验证产物。
-
-保险库位置：Windows 在 `easypass.exe` 旁边（`%LOCALAPPDATA%\Programs\EasyPass\`），
-Linux 在 `$XDG_DATA_HOME/easypass/`。
+保险库位置：`easypass.exe` 旁边（`%LOCALAPPDATA%\Programs\EasyPass\`）。
 
 ## 从源码构建
 
@@ -67,15 +58,13 @@ flutter build windows    # → build\windows\x64\runner\Release\easypass.exe
 ```
 
 这一条命令同时产出 x86 浏览器桥与核心服务。构建前先停掉正在运行的 EasyPass：构建要替换
-界面与核心正打开的文件。Linux 用 `flutter build linux --release`（GTK 3 依赖与 AppImage
-打包见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
+界面与核心正打开的文件。
 
 ## 浏览器扩展
 
 尚未上架任何商店：打开 `chrome://extensions`（或 `edge://extensions`）→ 开发者模式 →
 **加载已解压的扩展程序** → 选 [`browser_extension/`](browser_extension)。它连的是核心
-服务，核心没在跑时桥会自动拉起它 —— 不需要开着界面。Linux 上先跑一次
-`--install-browser-host`（Windows 由安装包注册）。
+服务，核心没在跑时桥会自动拉起它 —— 不需要开着界面。原生消息宿主由 Windows 安装包注册。
 
 ## 想看细节去哪
 

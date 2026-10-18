@@ -1,26 +1,29 @@
-// P4 桌面集成（Linux 生效）：`.desktop` 入口 + hicolor 图标 + 平台协调器。
+// P4 桌面集成 facade。
 //
-// 设计原则（沿用 `desktop_autostart/` / `browser_bridge/` 既有风格）：
-//   1. **可注入、可单测** —— home / XDG 变量 / 入口路径 / 图标源 / 进程执行
-//      器全部可注入，无需真实桌面会话即可覆盖 install / uninstall / status。
-//   2. **幂等** —— 重复 install 内容一致（整体覆盖写，不追加）；卸载"没装过"
-//      也成功；顺手清掉自己建出来的**空**目录，不留残渣。
-//   3. **失败可读** —— 全部 IO 失败归一为 `DesktopIntegrationException`
-//      （带 basename，不泄漏完整 home 路径），由 CLI 层转成非零退出码。
-//   4. **Windows 零影响** —— Windows 的快捷方式由 Inno Setup 安装器负责，
-//      本模块在非 Linux 上只返回 `unsupported`，一个字节都不写。
+// **3.0.0 起主分支只支持 Windows**：快捷方式 / 应用菜单入口由 Inno Setup
+// 安装器负责（`installer/easypass_setup.iss` 的 `[Icons]`），Dart 侧一个字节都
+// 不写 —— 默认后端恒为 [OtherDesktopIntegration]，`--install` /
+// `--uninstall` / `--desktop-status` 三个 CLI 在 Windows 上打印"用安装器"并退 0
+// （行为与 3.0.0 之前完全一致）。
+//
+// Linux 适配（`$XDG_DATA_HOME/applications/easypass.desktop` + hicolor 图标 +
+// `linux_desktop_integration.dart`）完整保存在 git 的 `linux` 分支（`3312384`），
+// 需要时可以取回。
+//
+// 设计原则（沿用 `desktop_autostart/` 既有风格）：
+//   1. **可注入、可单测** —— 后端可注入，无需真实桌面会话即可覆盖
+//      install / uninstall / status 的委派。
+//   2. **失败可读** —— 全部 IO 失败归一为 `DesktopIntegrationException`。
+//   3. **零写入** —— 当前平台不写任何桌面集成文件。
 
-import 'dart:io' show Platform;
-
-import 'linux_desktop_integration.dart' as linux;
 import 'other_desktop_integration.dart' as other;
 
 /// 当前平台对"桌面集成"能否生效。
 enum DesktopIntegrationSupport {
-  /// Linux：写 `$XDG_DATA_HOME/applications/easypass.desktop` + hicolor 图标。
+  /// 由 Dart 侧直接写桌面入口与图标（主分支上目前没有这种平台）。
   supported,
 
-  /// 非 Linux：归 OS 自身机制（Windows = Inno Setup 安装器）。
+  /// 归 OS 自身机制（Windows = Inno Setup 安装器）。
   unsupported,
 }
 
@@ -210,24 +213,16 @@ class DesktopIntegrationException implements Exception {
   String toString() => cause == null ? message : '$message ($cause)';
 }
 
-/// 协调器：把调用**原样转给后端**。默认后端按平台选 Linux 真实实现 /
-/// 非 Linux 桩。
+/// 协调器：把调用**原样转给后端**。默认后端恒为 [OtherDesktopIntegration]
+/// （Windows 的快捷方式归安装器，本模块零写入）。
 ///
-/// **本类不再自带 `Platform.isLinux` 闸门**：那个闸门与
-/// [OtherDesktopIntegration] 的返回值逐字相同（`…skipped(platform:
-/// Platform.operatingSystem)` / `DesktopStatus(checked: false, …)`），却让
-/// **注入的后端在非 Linux 上永远收不到调用** —— 委派契约因此没法在 Windows
-/// 上测，非 Linux 行为也有了第二条真理来源。默认后端本身就是那个桩。
+/// 保留后端注入点：委派契约（install/uninstall/status 三条路径都真的转发）与
+/// 异常传播可以在 Windows 上被测到。
 class DesktopIntegration {
   DesktopIntegration({DesktopIntegrationBackend? backend})
-      : _backend = backend ?? _defaultBackend();
+      : _backend = backend ?? other.OtherDesktopIntegration();
 
   final DesktopIntegrationBackend _backend;
-
-  static DesktopIntegrationBackend _defaultBackend() {
-    if (Platform.isLinux) return linux.LinuxDesktopIntegration();
-    return other.OtherDesktopIntegration();
-  }
 
   Future<DesktopEntryInstallResult> install() => _backend.install();
 

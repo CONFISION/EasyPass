@@ -2,12 +2,12 @@
 
 **中文版**: [README_zh.md](README_zh.md)
 
-A **local-first password manager for Windows and Linux** with a companion
-Chrome/Edge extension: an encrypted vault on your own machine, one-click auto-fill in
-the browser. Long-term goal: a self-hostable Bitwarden alternative.
+A **local-first password manager for Windows** with a companion Chrome/Edge
+extension: an encrypted vault on your own machine, one-click auto-fill in the
+browser. Long-term goal: a self-hostable Bitwarden alternative.
 
 ![release](https://img.shields.io/badge/release-3.0.0-blue)
-![platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-0078D6)
+![platform](https://img.shields.io/badge/platform-Windows-0078D6)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 ## What you get
@@ -52,19 +52,10 @@ window. Details: [docs/technical-spec.md](docs/technical-spec.md).
 install, no administrator rights, optional start at logon. It is **not code-signed**,
 so SmartScreen may warn about an unknown publisher.
 
-**Linux** — download the AppImage, then:
+> **Windows only.** The Linux desktop port is not part of this branch — it lives in
+> the `linux` branch of this repository.
 
-```bash
-chmod +x EasyPass-3.0.0-linux-x86_64.AppImage
-./EasyPass-3.0.0-linux-x86_64.AppImage --install   # application-menu entry
-```
-
-Needs FUSE 2 (`libfuse2`); without it add `--appimage-extract-and-run`.
-**The Linux build is not verified on real hardware for this release** — it has only
-passed a syntax check, so treat the AppImage as unverified.
-
-The vault lives next to `easypass.exe` on Windows
-(`%LOCALAPPDATA%\Programs\EasyPass\`) and in `$XDG_DATA_HOME/easypass/` on Linux.
+The vault lives next to `easypass.exe` (`%LOCALAPPDATA%\Programs\EasyPass\`).
 
 ## Build from source
 
@@ -74,16 +65,14 @@ flutter build windows    # → build\windows\x64\runner\Release\easypass.exe
 
 That one command also builds the x86 browser bridge and the core service. Stop a
 running EasyPass first: the build replaces files the UI and the core have open.
-On Linux use `flutter build linux --release` (GTK 3 dependencies and AppImage
-packaging: [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## Browser extension
 
 Not published to any store yet: open `chrome://extensions` (or `edge://extensions`),
 enable **Developer mode**, then **Load unpacked** →
 [`browser_extension/`](browser_extension). It talks to the core service, and the
-bridge starts the core when it is not running — no open window required. On Linux run
-`--install-browser-host` once first (the Windows installer registers it for you).
+bridge starts the core when it is not running — no open window required. The Windows
+installer registers the native-messaging host for you.
 
 ## Where to look next
 

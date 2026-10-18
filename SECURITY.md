@@ -15,7 +15,7 @@ in a public issue *without details*, so a private channel can be arranged.
 
 Helpful reports include:
 
-- the version (`pubspec.yaml` / the Settings screen) and platform (Windows / Linux),
+- the version (`pubspec.yaml` / the Settings screen) and platform (Windows),
 - what an attacker gains and what they need to start (local file access? a malicious
   web page? a browser extension? physical access to an unlocked session?),
 - the smallest reproduction you have, and any log output — **with secrets redacted**.
@@ -89,10 +89,9 @@ Being precise here is more useful than a reassuring sentence, so:
   type, favourite flags and timestamps are stored as plaintext columns, because the
   list, search and autofill paths need them without decrypting everything. Treat the
   database file as metadata-bearing, not as an opaque blob.
-- **The SQLite database itself is not encrypted** (no SQLCipher). File permissions are
-  tightened to `0600` and the data directory to `0700` on Linux; on Windows the
-  database sits next to the executable (or in the install directory) and relies on the
-  user profile's ACLs.
+- **The SQLite database itself is not encrypted** (no SQLCipher). The database sits next
+  to the executable in the per-user install directory
+  (`%LOCALAPPDATA%\Programs\EasyPass\`) and relies on the user profile's ACLs.
 - **CBC without a MAC** (for the stored entry fields) means ciphertext tampering is
   detectable only as a decryption failure, not as an authentication error. This is a
   known weakness of the storage format and is on the roadmap for the key-hierarchy
@@ -156,16 +155,15 @@ roadmap and will change in future releases:
   Edge), and such a program cannot reasonably implement AES/HMAC. That hop therefore uses
   loopback TCP with token authentication only. The bridge is a byte forwarder on
   `127.0.0.1`, and whatever it carries (including plaintext passwords for autofill) is
-  already visible to the browser extension itself. On Linux the wrapper runs
-  `easypass_core --bridge`, which *does* use the encrypted handshake.
+  already visible to the browser extension itself.
 - **The threat boundary is the OS user account, not cryptography.** Another process
   running as the same user can read `daemon.json` (and therefore the token), connect to
   the core, or attach a debugger to the UI/core process — and the UI has to display
   plaintext passwords by design. Transport encryption protects against passive capture
   and unauthenticated impostors, not against same-user malware.
-- **Linux is not verified for 3.0.0.** The Linux runner, tray, `--bridge` host and
-  AppImage layout compile-check only (clang `-fsyntax-only` against stub headers); they
-  have not been built or exercised on a Linux desktop. Windows is the verified platform.
+- **This branch ships Windows only.** The Linux desktop port (2.3.3-era AppImage, GTK
+  runner, tray, XDG paths) lives in the `linux` branch and is **not** covered by the
+  security guarantees in this document. Windows is the supported and verified platform.
 - **Upgrading from 2.4.x leaves the old `--service` process alive for up to 10 minutes.**
   It exits on its own idle timer and will not delete the new core's `daemon.json`
   (port + pid are checked), and the installer asks it to close first; during that window
@@ -178,5 +176,3 @@ roadmap and will change in future releases:
 - Keep `easypass.db` and your exports out of cloud folders and shared directories.
 - Prefer the encrypted backup format for backups; treat plain-JSON and
   Bitwarden-compatible exports as secrets and delete them after use.
-- On Linux, make sure a Secret Service provider is installed and unlocked — without
-  one, EasyPass cannot create or verify a master password and will say so.

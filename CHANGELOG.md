@@ -19,6 +19,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 
 ## [3.0.0] — 核心服务化
 
+> **平台范围变更（3.0.0 之后）**：Linux 桌面支持（2.3.3 引入）已迁至本仓库的 `linux`
+> 分支，主分支只构建与支持 **Windows**。本文件的历史条目保持原样 —— 2.3.3 确实发布过
+> Linux 支持，改历史会让记录失真。
+
 ### Changed（架构 / 安全模型变更 → major）
 
 - **保险库改由独立的核心服务进程持有。** 新增 `easypass_core`（纯 Dart AOT，无 Flutter、

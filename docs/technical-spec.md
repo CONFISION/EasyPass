@@ -102,7 +102,7 @@ UI 冷启动时若没有核心，会**自动拉起**——用户先点扩展还�
 | 强制杀 UI | 系统 | 保持运行（空闲超时后锁） | 继续运行 | 不受影响 |
 | 核心被杀 | 系统 | — | — | 下次请求由桥重新拉起 |
 
-Linux 的对应实现见 `docs/linux-followup-plan.md`（**关窗即锁在 Linux 上尚未实现**）。
+> Linux 的对应实现（`lock_vault_before_exit()`）随 `linux` 分支维护。
 
 > **验证状态**：本表描述的是 3.0.0 代码的实际行为。截止 2026-10-18，Windows 上
 > "核心/界面分离""托盘两档退出""界面单实例"已真机确认；**"关窗即锁"是最后一轮才实现的，
@@ -241,9 +241,6 @@ flutter build windows
 
 ```powershell
 pwsh -File tool\build_core.ps1 [-OutDir build\windows\x64\runner\Release]
-```
-```bash
-bash tool/build_core.sh --out-dir build/linux/x64/release/bundle
 ```
 
 **必须用 `dart build cli`，不能用 `dart compile exe`**：后者报

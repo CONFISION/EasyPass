@@ -45,20 +45,6 @@ void main() {
       );
     });
 
-    test('configDirectory returns the same instance on consecutive reads', () {
-      final a = AppPaths.configDirectory;
-      final b = AppPaths.configDirectory;
-      expect(identical(a, b), isTrue,
-          reason: 'configDirectory mirrors the dataDirectory memoization.');
-    });
-
-    test('autostartDirectory returns the same instance on consecutive reads',
-        () {
-      final a = AppPaths.autostartDirectory;
-      final b = AppPaths.autostartDirectory;
-      expect(identical(a, b), isTrue,
-          reason: 'autostartDirectory mirrors the dataDirectory memoization.');
-    });
 
     test('debugResetAppPathsCacheForTesting re-parses on next access', () {
       final first = AppPaths.dataDirectory;
@@ -78,43 +64,18 @@ void main() {
       expect(p.equals(first.path, second.path), isTrue,
           reason: 'Reset must not change the resolved path.');
     });
-
-    test('debugResetAppPathsCacheForTesting clears ALL three caches '
-        '(no stale left-overs)', () {
-      // The single public reset hook clears all three at once — env changes
-      // affect all XDG lookups, so the test asserts the contract: a reset
-      // invalidates every cached Directory, and the next read for each one
-      // produces a fresh instance.
-      final dBefore = AppPaths.dataDirectory;
-      final cBefore = AppPaths.configDirectory;
-      final aBefore = AppPaths.autostartDirectory;
-      expect(identical(dBefore, AppPaths.dataDirectory), isTrue);
-      expect(identical(cBefore, AppPaths.configDirectory), isTrue);
-      expect(identical(aBefore, AppPaths.autostartDirectory), isTrue);
+    test('debugResetAppPathsCacheForTesting clears the cache (no stale left-over)', () {
+      final before = AppPaths.dataDirectory;
+      expect(identical(before, AppPaths.dataDirectory), isTrue);
 
       AppPaths.debugResetAppPathsCacheForTesting();
-      expect(identical(dBefore, AppPaths.dataDirectory), isFalse);
-      expect(identical(cBefore, AppPaths.configDirectory), isFalse);
-      expect(identical(aBefore, AppPaths.autostartDirectory), isFalse);
+      expect(identical(before, AppPaths.dataDirectory), isFalse,
+          reason: 'reset 之后必须重新解析出新的 Directory 实例');
     });
 
-    test(
-        'fail-loud semantics: `_resolveDataDirectory` throws when HOME + XDG_DATA_HOME both unset',
-        () {
-      // The promise was: "首次调用仍失败就大声报错（保持现有
-      // fail-loud, 不要改成静默兜底）". We can prove it for the helper
-      // directly, without touching the environment of the test runner:
-      // the @visibleForTesting setter for the cache lets us sidestep a
-      // populated cached value. The real env-driven fail-loud is exercised
-      // by AppPaths.dataDirectory itself (on a CI with a stripped env).
-      //
-      // Here we only confirm the helper structure: it must derive from
-      // XDG_DATA_HOME or fall through to _defaultLinuxDataHome().
-      // We don't try to assert the `throw` from this dart-process (which
-      // does have HOME set) — see the comment block at the top of
-      // lib/core/platform/app_paths.dart.
-      //
-      // Just confirm the helper exists and is reachable:
+    test('dataDirectory resolves without reading the environment', () {
+      // 3.0.0 起数据目录只由 exe 目录及其父目录决定，不再读 HOME/XDG；
+      // Linux 的 XDG 语义随 linux 分支维护。这里确认它在当前环境下可解析。
       expect(AppPaths.dataDirectory, isNotNull);
     });
   });

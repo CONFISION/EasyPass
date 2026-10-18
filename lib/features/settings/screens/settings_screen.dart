@@ -879,7 +879,7 @@ class _FontPickerList extends StatefulWidget {
 
 class _AutostartTile extends ConsumerStatefulWidget {
   const _AutostartTile({required this.coordinator});
-  final LinuxAutostartCoordinator coordinator;
+  final AutostartCoordinator coordinator;
 
   @override
   ConsumerState<_AutostartTile> createState() => _AutostartTileState();

@@ -1,25 +1,24 @@
-// Linux 开机自启。
+// 开机自启 facade。
 //
-// 设计原则：
-//   1. 抽象层可注入、可单测 —— 见 [LinuxAutostartBackend]。
-//   2. Windows 不受影响 —— 见 [windows_autostart.dart]（no-op 桩）。
-//   3. 失败 = 可读 stderr + UI 可读提示，绝不静默卡死。
+// **3.0.0 起主分支只支持 Windows**：自启项由安装器写 `HKCU\…\Run\EasyPass`
+// （`installer/easypass_setup.iss` 的 `[Code]`，指向
+// `{app}\core\easypass_core.exe --serve`）。Dart 侧不写任何自启配置，所以这里
+// 恒为 [AutostartSupport.unsupported]，开关在设置页显示为"由安装器管理"。
 //
-// Linux 上"开机自启"按 freedesktop.org 桌面条目规范写到
-// `~/.config/autostart/easypass.desktop`。关闭开关 = 删文件（幂等）。
-
-import 'dart:io' show Platform;
-
-import 'linux_autostart.dart' as linux;
-import 'other_autostart.dart' as other;
-import 'windows_autostart.dart' as windows;
+// Linux 适配（XDG `~/.config/autostart/easypass.desktop` + `Exec=<核心> --serve`
+// 的路径解析，以及 `linux_autostart.dart`）完整保存在 git 的 `linux` 分支
+// （`3312384`），需要时可以取回。
+//
+// 保留这层 facade 的理由：调用方（`lib/app.dart` 的 provider、设置页的
+// `_AutostartTile`）不必关心平台；将来若真有第二个平台，只需在
+// [AutostartCoordinator] 里换实现，调用姿势不变。
 
 /// 三态：当前进程平台对自启是否生效。
 enum AutostartSupport {
-  /// Linux 上有真实写入/读取 `.desktop` 的能力。
+  /// 本平台由 Dart 侧直接读写自启配置（主分支上目前没有这种平台）。
   supported,
 
-  /// 非 Linux：自启归 OS 自身的机制（Windows = 注册表 / 安装器）。
+  /// 自启归 OS 自身的机制（Windows = 注册表 / 安装器）。
   unsupported,
 }
 
@@ -31,7 +30,7 @@ class AutostartStatus {
     this.platform,
   });
 
-  /// 当前 `.desktop` 文件存在 → enabled = true。
+  /// 当前自启是否启用。
   final bool enabled;
 
   /// 读取 / 写入失败的诊断信息（写入失败时 detail 会同步抛出异常，但
@@ -42,27 +41,7 @@ class AutostartStatus {
   final AutostartSupport? platform;
 }
 
-/// 后端接口：让 Linux 自启可注入、可测试。
-abstract class LinuxAutostartBackend {
-  /// 检查当前 `.desktop` 是否存在且内容是 EasyPass 的（防止误读同名文件）。
-  Future<AutostartStatus> isEnabled();
-
-  /// 启用：写文件。失败抛 [AutostartException]。
-  Future<void> enable();
-
-  /// 关闭：删文件（不存在 = no-op）。
-  Future<void> disable();
-
-  /// 解析 `Exec=` 字段将写入的**命令行**（程序 + 参数，已按 Desktop Entry
-  /// Spec 的规则转义）。
-  ///
-  /// 3.0.0 核心服务化后，自启的目标是**核心**（`<easypass_core> --serve`）而不是
-  /// UI；核心不可用（开发态 / AppImage 挂载点不可持久）时退回 UI 二进制，自启项
-  /// 不因此失效 —— 降级细节见 `LinuxAutostart.resolveCoreServicePath()`。
-  Future<String> resolveExecCommandForDesktopEntry();
-}
-
-/// 启动自启出错时抛 —— UI 层捕获后用 SnackBar 提示。
+/// 启用/关闭自启出错时抛 —— UI 层捕获后用 SnackBar 提示。
 class AutostartException implements Exception {
   AutostartException(this.message, [this.cause]);
   final String message;
@@ -72,60 +51,35 @@ class AutostartException implements Exception {
   String toString() => cause == null ? message : '$message ($cause)';
 }
 
-/// 协调器：根据当前平台决定调用 Linux 真实实现 / no-op 桩。
-class LinuxAutostartCoordinator {
-  LinuxAutostartCoordinator({LinuxAutostartBackend? backend})
-      : _backend = backend ?? _defaultBackend();
+/// 自启协调器：主分支上恒为"由安装器管理"。
+class AutostartCoordinator {
+  const AutostartCoordinator();
 
-  final LinuxAutostartBackend _backend;
-
-  static LinuxAutostartBackend _defaultBackend() {
-    if (Platform.isLinux) return linux.LinuxAutostart();
-    if (Platform.isWindows) return windows.WindowsAutostart();
-    return other.OtherAutostart();
-  }
-
-  /// 当前自启是否启用；非 Linux 平台始终返回 disabled + platform=unsupported。
+  /// 当前自启是否启用。
+  ///
+  /// Windows 上自启由安装器的 `[Code]` 段写注册表，Dart 侧不去读它（也不该
+  /// 读：注册表项的存活与卸载由安装器负责），所以这里恒报未启用 + 未支持，
+  /// 设置页据此把开关显示成不可操作并说明原因。
   Future<AutostartStatus> query() async {
-    if (!Platform.isLinux) {
-      return const AutostartStatus(
-        enabled: false,
-        platform: AutostartSupport.unsupported,
-      );
-    }
-    try {
-      final s = await _backend.isEnabled();
-      return AutostartStatus(
-        enabled: s.enabled,
-        detail: s.detail,
-        platform: AutostartSupport.supported,
-      );
-    } on Object catch (e) {
-      return AutostartStatus(
-        enabled: false,
-        detail: 'Failed to read autostart status: $e',
-        platform: AutostartSupport.supported,
-      );
-    }
+    return const AutostartStatus(
+      enabled: false,
+      platform: AutostartSupport.unsupported,
+    );
   }
 
   /// 启用自启。失败抛 [AutostartException]。
   Future<void> enable() async {
-    if (!Platform.isLinux) {
-      throw AutostartException(
-        'Autostart is managed by the OS installer on non-Linux platforms.',
-      );
-    }
-    await _backend.enable();
+    throw AutostartException(
+      'Autostart on Windows is managed by the installer. '
+      'Re-run the installer and tick the "launch at login" option.',
+    );
   }
 
   /// 关闭自启。失败抛 [AutostartException]。
   Future<void> disable() async {
-    if (!Platform.isLinux) {
-      throw AutostartException(
-        'Autostart is managed by the OS installer on non-Linux platforms.',
-      );
-    }
-    await _backend.disable();
+    throw AutostartException(
+      'Autostart on Windows is managed by the installer. '
+      'Uninstall EasyPass or untick the "launch at login" option there.',
+    );
   }
 }

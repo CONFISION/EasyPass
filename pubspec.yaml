@@ -77,18 +77,19 @@ dependencies:
   share_plus: ^10.1.4
   file_picker: ^8.1.7
 
-# Linux only: linux/CMakeLists.txt compiles a standalone SQLite shared object
-# from sqlite3_flutter_libs' sqlite.org sources and installs it as
-# `libsqlite3.so` — exactly the name the "system" lookup asks the loader for
-# (the plugin keeps its own copy private; see the comments in that file).
+# sqlite3 hook —— **这不是 Windows 需要的配置**，它是给 git 的 `linux` 分支用的
+# （那边 linux/CMakeLists.txt 会把 sqlite3_flutter_libs 里的 sqlite.org 源码编成
+# `libsqlite3.so`，`source: system` 让加载器按这个名字去找）。
 #
-# The map form is load-bearing: with no `default` entry every other platform
-# keeps the package's own binary. A bare `source: system` also applied to
-# Windows, where there is no system sqlite3.dll, so `flutter test` could not
-# load SQLite at all ("Failed to load dynamic library 'sqlite3.dll'", 206
-# failures). See package:sqlite3 doc/hook.md: "The same map syntax is
-# available for source ... Without a default entry, the package falls back to
-# downloading its own binaries for the other operating systems".
+# 主分支（Windows only）保留它，只是为了将来与 `linux` 分支 merge 时不丢掉这一行。
+# 对 Windows 没有影响：map 形式下 Windows 查不到自己的 entry，`source` 落到 null，
+# 走"从 GitHub 下载预编译二进制"那条路 —— 与整段 hooks 不存在完全一致（实测过：
+# 删掉整个 hooks 段后 `flutter test` 照常通过）。
+#
+# ⚠️ 唯一的雷：写成**裸 `source: system`**（不带 map）。那样 Windows 也会去
+# `LookupSystem("sqlite3")`，而 Windows 没有系统 libsqlite3，于是 `flutter test`
+# 一次 206 个用例失败在 "Failed to load dynamic library 'sqlite3.dll'"。
+# 一句话：`source` 必须是 map 形式或整段不存在，**不要写成裸 system**。
 hooks:
   user_defines:
     sqlite3:

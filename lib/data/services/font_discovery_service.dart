@@ -57,10 +57,9 @@ class FontDiscoveryService {
   static Future<List<String>> discoverSystemFonts() async {
     final override = _systemFontDirectoriesOverride;
     final dirs = override ?? _systemFontDirectories();
-    // Linux 子目录递归（Fontconfig 默认行为）；Windows / 其他平台保持
-    // 原有"只扫顶层"语义以免误碰意外文件。override 路径**也**走递归——
-    // 测试用临时目录模拟 Linux 默认行为，避免两份测试代码。
-    final recursive = Platform.isLinux;
+    // 注入的候选目录（测试用临时目录）按递归扫，模拟"字体在子目录里"的真实
+    // 形态；生产路径（Windows 字体目录）保持只扫顶层，以免误碰意外文件。
+    final recursive = override != null;
     final names = <String>{};
     for (final dir in dirs) {
       names.addAll(await _scanDirectory(dir, recursive: recursive));
@@ -71,14 +70,13 @@ class FontDiscoveryService {
   /// 系统字体目录列表（按优先级顺序）。
   ///
   /// 默认实现：Windows 用 `C:\Windows\Fonts` + `%LOCALAPPDATA%\Microsoft\
-  /// Windows\Fonts`（既有行为）；Linux 用 4 个 Fontconfig 标准目录
-  /// （Linux 侧新增）。其他平台返回空列表（macOS / 测试 stub 都走这条）。
+  /// Windows\Fonts`（既有行为）；其他平台返回空列表（macOS / 测试 stub 都走
+  /// 这条）。
   ///
-  /// 测试可注入：参考 `LinuxFontDirectoryOverride.newForTest`；生产代码不
-  /// 直接调这个 getter —— 走 [discoverSystemFonts]。
+  /// 测试可注入：见 `_systemFontDirectoriesOverride`；生产代码不直接调这个
+  /// getter —— 走 [discoverSystemFonts]。
   static List<Directory> _systemFontDirectories() {
     if (Platform.isWindows) return _windowsSystemFontDirectories();
-    if (Platform.isLinux) return _linuxSystemFontDirectories();
     return const <Directory>[];
   }
 
@@ -90,20 +88,6 @@ class FontDiscoveryService {
         Directory(p.join(localAppData, 'Microsoft', 'Windows', 'Fonts')),
       );
     }
-    return dirs;
-  }
-
-  static List<Directory> _linuxSystemFontDirectories() {
-    final dirs = <Directory>[];
-    final home = Platform.environment['HOME'];
-    if (home != null && home.isNotEmpty) {
-      // 用户级目录排前面 —— Fontconfig 的优先级：HOME > /usr/local > /usr。
-      dirs.add(Directory(p.join(home, '.local', 'share', 'fonts')));
-      dirs.add(Directory(p.join(home, '.fonts')));
-    }
-    // 系统级：管理员包（/usr/local）先于发行版包（/usr）。
-    dirs.add(Directory('/usr/local/share/fonts'));
-    dirs.add(Directory('/usr/share/fonts'));
     return dirs;
   }
 

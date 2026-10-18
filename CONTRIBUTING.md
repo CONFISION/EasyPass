@@ -13,9 +13,8 @@ Requirements:
 
 - **Flutter** with Dart SDK `^3.12.2` (see `pubspec.yaml`).
 - **Node.js** for the browser-extension self-checks.
-- Linux only: GTK 3 and `libayatana-appindicator3-dev`.
-- Windows only: no extra tooling for the checks below (they deliberately avoid
-  MSBuild), but Inno Setup 7 if you want to build the installer yourself.
+- No extra tooling for the checks below (they deliberately avoid MSBuild), but Inno
+  Setup 7 if you want to build the installer yourself.
 
 ```bash
 flutter pub get
@@ -47,10 +46,9 @@ CI runs the same set on every push, so a green local run means a green PR.
 
 **Reading the test count.** A Windows run reports **570 passing / 9 skipped**. The tree
 declares more cases than that (~602), and the difference is deliberate: several files
-guard on the platform and register nothing on Windows (`browser_host_installer_test.dart`
-is entirely Linux-only; others skip individual cases). So a Windows run reports *fewer
-cases*, not failures — do not "fix" the numbers by forcing platform-specific tests to
-run everywhere. `AGENTS.md` lists the known Linux-only files.
+guard on the platform and register nothing here (they target the Linux port, which
+lives in the `linux` branch). So a run reports *fewer cases*, not failures — do not
+"fix" the numbers by forcing platform-specific tests to run everywhere.
 
 If something behaves strangely only when launched from `build\` — no tray icon,
 settings that do not stick — run `cmd /c windows\runner\check_integrity.bat` before

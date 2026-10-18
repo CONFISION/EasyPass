@@ -10,8 +10,6 @@
 //       只读预检：报出找到/缺失的产物，并且**真的算一遍** SHA-256，但不写任何文件（agent / CI 预检用）
 //   node installer/release/collect_artifacts.mjs
 //       真正收集：把产物拷进 dist/release/<version>/，写出 SHA256SUMS.txt 与 release-manifest.json
-//   node installer/release/collect_artifacts.mjs --appimage release/EasyPass-2.3.3-linux-x86_64.AppImage
-//   node installer/release/collect_artifacts.mjs --skip linux             # 只发 Windows 时
 //   node installer/release/collect_artifacts.mjs --require extension-zip  # 扩展包也必须存在
 //   node installer/release/collect_artifacts.mjs --extra dist/portable.zip
 //
@@ -19,7 +17,6 @@
 //   --dry-run            预检，不写任何文件
 //   --strict             --dry-run 时也把"缺产物"当错误（CI 预检用）
 //   --installer <path>   Windows 安装包（默认 build/installer/EasypassSetup.exe）
-//   --appimage <path>    Linux AppImage（不给则在仓库里自动发现）
 //   --extension <path>   扩展商店包（默认 dist/easypass-extension-<version>.zip）
 //   --extra <path>       额外产物，可重复（例如将来的便携包 / .deb）
 //   --out-dir <path>     输出目录（默认 dist/release/<version>）
@@ -35,7 +32,7 @@
 //   release-manifest.json  机器可读清单（名称 / 大小 / sha256 / 版本 / 来源命令）—— 发布说明由它生成
 //
 // 设计要点：
-//   1. **版本号只从 pubspec.yaml 读**（与 installer/appimage/build_appimage.sh 同一套读法），脚本里不写死版本号。
+//   1. **版本号只从 pubspec.yaml 读**（与发布说明生成脚本同一套读法），脚本里不写死版本号。
 //   2. **零依赖**：只用 node:fs / node:crypto / node:path，CI 里不需要 npm install；大文件流式哈希，不整份读进内存。
 //   3. **缺产物 = 失败，且不产出半份清单**：真正收集时任何"应有却没有"的产物都会让脚本以 1 退出，并且**一个文件都不写**。
 //      --dry-run 例外（只报告并以 0 退出，专门给"还没构建过"的机器用），加 --strict 可与真实运行同样严格。
@@ -54,10 +51,10 @@ import { die, formatBytes, isInside, log, parseArgs, readVersion, repoRoot, same
 const HELP = `EasyPass 发布产物收集（SHA256SUMS.txt + release-manifest.json）
   node installer/release/collect_artifacts.mjs --dry-run          预检，不写文件
   node installer/release/collect_artifacts.mjs                    收集 → dist/release/<version>/
-  --installer <path>  --appimage <path>  --extension <path>  --extra <path>（可重复）
+  --installer <path>  --extension <path>  --extra <path>（可重复）
   --out-dir <path>    --skip <key>  --require <key>    --strict  --dry-run  --help
-  产物名（--skip / --require 用）：windows-installer / linux-appimage / extension-zip
-  别名：windows / linux / extension`;
+  产物名（--skip / --require 用）：windows-installer / extension-zip
+  别名：windows / installer / exe / extension / ext / zip`;
 
 // ─── 0. 参数、版本号、输出目录 ─────────────────────────────────
 const { flags, values, multi } = parseArgs(process.argv.slice(2), {
@@ -65,7 +62,6 @@ const { flags, values, multi } = parseArgs(process.argv.slice(2), {
   strict: 'bool',
   help: 'bool',
   installer: 'value',
-  appimage: 'value',
   extension: 'value',
   extra: 'list',
   'out-dir': 'value',
@@ -102,18 +98,6 @@ const ARTIFACTS = [
     producedBy: 'flutter build windows && "C:\\Program Files\\Inno Setup 7\\ISCC.exe" installer\\easypass_setup.iss',
   },
   {
-    key: 'linux-appimage',
-    aliases: ['linux', 'appimage'],
-    label: 'Linux AppImage',
-    platform: 'linux',
-    required: true,
-    flag: 'appimage',
-    // 输出名由 build_appimage.sh 的调用者决定，没有固定路径 —— 走 discoverAppImage()
-    defaultPath: null,
-    producedBy:
-      'flutter build linux --release && bash installer/appimage/build_appimage.sh build/linux/x64/release/bundle release/EasyPass-<version>-linux-x86_64.AppImage',
-  },
-  {
     key: 'extension-zip',
     aliases: ['extension', 'ext', 'zip'],
     label: '浏览器扩展商店包',
@@ -145,30 +129,6 @@ const skipped = new Set(listArg('skip').map(resolveKey));
 const forced = new Set(listArg('require').map(resolveKey));
 for (const k of skipped) forced.delete(k); // --skip 优先于 --require
 
-// ─── 2. AppImage 自动发现 ─────────────────────────────────────
-// 只看各候选目录的第一层：build/ 里的同名文件多半是构建中间物，递归进去只会捡到垃圾。
-const APPIMAGE_DIRS = ['release', 'dist', 'dist/release', 'installer/appimage', 'build', '.'];
-
-function discoverAppImage(v, excludeDir) {
-  const found = [];
-  for (const rel of APPIMAGE_DIRS) {
-    const dir = resolve(repoRoot, rel);
-    if (!existsSync(dir) || !statSync(dir).isDirectory()) continue;
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (!entry.isFile() || !entry.name.endsWith('.AppImage')) continue;
-      const abs = join(dir, entry.name);
-      if (isInside(abs, excludeDir)) continue; // 上一轮收集进来的拷贝不算"新产物"
-      found.push(abs);
-    }
-  }
-  found.sort();
-  const versioned = found.filter((p) => basename(p).includes(v));
-  if (versioned.length === 1) return { path: versioned[0] };
-  if (versioned.length > 1) return { ambiguous: versioned };
-  if (found.length === 1) return { path: found[0], note: `文件名里没有版本号 ${v}，按唯一候选使用` };
-  if (found.length > 1) return { ambiguous: found };
-  return { searched: APPIMAGE_DIRS.map((d) => (d === '.' ? './' : `${d}/`)) };
-}
 
 // ─── 3. 解析每个产物的来源 ────────────────────────────────────
 const plan = []; // { spec, source, note }
@@ -189,25 +149,15 @@ for (const spec of ARTIFACTS) {
   } else if (spec.defaultPath) {
     source = resolve(repoRoot, spec.defaultPath(version));
   } else {
-    const found = discoverAppImage(version, outDir);
-    if (found.ambiguous) {
-      issues.push({
-        label: spec.label,
-        required: true,
-        detail: `发现 ${found.ambiguous.length} 个候选 AppImage，无法判断该收哪个 —— 用 --appimage 指定：\n         ${found.ambiguous.map(show).join('\n         ')}`,
-      });
-      continue;
-    }
-    if (!found.path) {
-      issues.push({
-        label: spec.label,
-        required,
-        detail: `未找到（搜索过 ${found.searched.join(' ')}）—— 先构建，或用 --appimage 指定路径${required ? '' : '；它属于可选项，但缺了就不会进校验和'}`,
-      });
-      continue;
-    }
-    if (found.note) notes.push(`${spec.label}：${found.note}`);
-    source = found.path;
+    // 每个产物定义都必须给出 defaultPath（或由调用方用 --<flag> 显式指定）。
+    // 3.0.0 起主分支只发布 Windows 安装包与扩展包，两者都有固定默认路径，
+    // 因此这里不再有"自动发现"分支（它原先是给 Linux AppImage 用的）。
+    issues.push({
+      label: spec.label,
+      required,
+      detail: `产物定义缺少 defaultPath —— 用 --${spec.flag} 显式指定路径`,
+    });
+    continue;
   }
 
   if (!existsSync(source)) {
@@ -269,7 +219,7 @@ if (plan.length === 0) {
 }
 
 // ─── 4. 算哈希（--dry-run 也算，只读）─────────────────────────
-/** 流式 SHA-256：AppImage 上百 MB，不整份读进内存。 */
+  /** 流式 SHA-256：安装包上百 MB，不整份读进内存。 */
 function sha256File(file) {
   return new Promise((ok, bad) => {
     const hash = createHash('sha256');

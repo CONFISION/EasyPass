@@ -72,60 +72,40 @@ void main() {
       }
     });
 
-    test('linux/CMakeLists.txt and windows/CMakeLists.txt both install to '
+    test('windows/CMakeLists.txt installs to '
         'CMAKE_INSTALL_PREFIX/assets/fonts (textual contract test)', () {
       // Since this is a Dart-only test environment without invoking CMake,
-      // we read both CMakeLists.txt files and assert the install pattern.
-      // The full build verification (`flutter build linux --release` must
-      // produce `bundle/assets/fonts/MapleMono-NF-CN-Regular.ttf`) needs a
-      // real Flutter/CMake build and is therefore not run here.
+      // we read the CMakeLists.txt file and assert the install pattern.
+      // The full build verification ("flutter build windows" must produce
+      // 'assets/fonts/...' next to the exe) needs a real build and is
+      // therefore not run here.
+      //
+      // Linux 的对应断言随 linux 分支维护（主分支不含 linux/CMakeLists.txt）。
       final repoRoot = _repoRoot();
-      final linux = File(p.join(repoRoot, 'linux', 'CMakeLists.txt'));
       final windows = File(p.join(repoRoot, 'windows', 'CMakeLists.txt'));
-      expect(linux.existsSync(), isTrue,
-          reason: 'linux/CMakeLists.txt must exist.');
       expect(windows.existsSync(), isTrue,
           reason: 'windows/CMakeLists.txt must exist.');
 
-      final linuxText = linux.readAsStringSync();
       final windowsText = windows.readAsStringSync();
 
-      // Both files must install to `<...>/assets/fonts` for `*.ttf`. Match
-      // the comment immediately above each install block as well so future
-      // "rename to fonts2" is caught: the loader looks for exactly
-      // `assets/fonts/`.
-      expect(
-          linuxText.contains('assets/fonts'),
-          isTrue,
-          reason:
-              'linux/CMakeLists.txt must reference the `assets/fonts/` '
-              'install destination (the loader expects this name).');
+      // It must install to <...>/assets/fonts for *.ttf: the loader looks
+      // for exactly ssets/fonts/.
       expect(
           windowsText.contains('assets/fonts'),
           isTrue,
           reason:
-              'windows/CMakeLists.txt must reference the `assets/fonts/` '
+              'windows/CMakeLists.txt must reference the ssets/fonts/ '
               'install destination (the loader expects this name).');
 
-      // Both targets must NOT point at `data/flutter_assets/...` for fonts.
-      // We look for a `DESTINATION` line that mentions fonts + data. If it
-      // exists, that's the regression #14 warned about.
+      // It must NOT point at data/flutter_assets/... for fonts.
       expect(
-          RegExp(r'DESTINATION\s+"\$\{?CMAKE_INSTALL_PREFIX\}?/data.*fonts')
-              .hasMatch(linuxText),
-          isFalse,
-          reason:
-              'linux/CMakeLists.txt must NOT install fonts under '
-              '`CMAKE_INSTALL_PREFIX/data/...`. The loader looks under '
-              '`assets/fonts/`.');
-      expect(
-          RegExp(r'DESTINATION\s+"\$\{?CMAKE_INSTALL_PREFIX\}?/data.*fonts')
+          RegExp(r'DESTINATION\s+\"\$\{?CMAKE_INSTALL_PREFIX\}?/data.*fonts')
               .hasMatch(windowsText),
           isFalse,
           reason:
               'windows/CMakeLists.txt must NOT install fonts under '
-              '`CMAKE_INSTALL_PREFIX/data/...`. The loader looks under '
-              '`assets/fonts/`.');
+              'CMAKE_INSTALL_PREFIX/data/.... The loader looks under '
+              'ssets/fonts/.');
     });
 
     test('loadBundledFonts tolerates a missing install dir (no exception)',

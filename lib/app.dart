@@ -9,14 +9,11 @@ import 'features/auth/screens/lock_screen.dart';
 import 'features/auth/screens/set_master_password_screen.dart';
 import 'features/auth/providers/auth_provider.dart';
 import 'features/desktop_autostart/desktop_autostart.dart';
-import 'features/desktop_single_instance/single_instance_backend.dart';
-import 'features/desktop_single_instance/single_instance_raise_host.dart';
 import 'features/generator/screens/generator_screen.dart';
 import 'features/health/screens/health_screen.dart';
 import 'features/settings/providers/font_settings_provider.dart';
 import 'features/settings/providers/theme_provider.dart';
 import 'features/settings/screens/settings_screen.dart';
-import 'features/browser_bridge/browser_host_prompt.dart';
 import 'features/vault/screens/add_edit_entry_screen.dart';
 import 'features/vault/screens/entry_detail_screen.dart';
 import 'features/vault/screens/vault_screen.dart';
@@ -25,14 +22,10 @@ import 'l10n/app_localizations.dart';
 /// Selected UI locale; `null` follows the system language.
 final localeProvider = StateProvider<Locale?>((ref) => null);
 
-/// Single-instance backend: `null` on non-Linux platforms (or when the
-/// primary instance check failed and the process should exit, but `main.dart`
-/// already `exit(0)`s in that branch before reaching `runApp`).
-final singleInstanceBackendProvider = Provider<SingleInstanceBackend?>((ref) => null);
-
-/// Autostart coordinator (Linux only).
-final autostartCoordinatorProvider = Provider<LinuxAutostartCoordinator>(
-  (ref) => LinuxAutostartCoordinator(),
+/// Autostart coordinator (Windows: managed by the installer, so the settings
+/// toggle reports `unsupported`).
+final autostartCoordinatorProvider = Provider<AutostartCoordinator>(
+  (ref) => const AutostartCoordinator(),
 );
 
 final _routerProvider = Provider<GoRouter>((ref) {
@@ -181,15 +174,11 @@ class EasyPassApp extends ConsumerWidget {
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       routerConfig: router,
-      // 首次启动的浏览器集成提示（方案 B：不做设置页 UI，只提示一次）。
-      builder: (context, child) => _ActivityTouchHost(
-        child: BrowserHostPromptHost(
-          // 单实例：UI 准备好后启动 raise 监听，让二次启动的进程能把窗口
-          // 唤到前台。该 Host 是 ConsumerStatefulWidget，只在主实例上挂 handler
-          // （backend 非 null）；非 Linux / 没有 backend 时是空操作。
-          child: SingleInstanceRaiseHost(child: child ?? const SizedBox.shrink()),
-        ),
-      ),
+      // 首次启动的浏览器集成提示与"二次启动抬窗"监听都只服务于 Linux 移植版，
+      // 本分支已移除（见 `linux` 分支）；Windows 的宿主注册由安装器负责、单实例由
+      // 原生 Mutex 闸门负责，UI 侧不需要再挂任何 Host。
+      builder: (context, child) =>
+          _ActivityTouchHost(child: child ?? const SizedBox.shrink()),
     );
   }
 

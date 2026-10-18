@@ -1,31 +1,20 @@
-// Linux 桌面体验对等 · 关窗最小化到托盘 + 托盘菜单/图标。
+// Desktop tray facade.
 //
-// 设计原则：
-//   1. 抽象层可注入、单测不依赖真实桌面会话 —— 见 [WindowController] /
-//      [TrayController] / [MenuAction]。
-//   2. Windows 不受影响：Windows 上 `windows/runner/flutter_window.cpp` 已经在原生
-//      层处理托盘 + WM_CLOSE，这里只暴露 Linux 路径。
-//   3. 检测不到可用托盘宿主时降级为"关窗即退出"，并在设置页给可读说明。
+// **3.0.0 起主分支只支持 Windows**：托盘图标、关窗隐藏/关窗即锁、菜单三项都在
+// 原生层（`windows/runner/flutter_window.cpp` 的 CreateTrayIcon / WM_CLOSE /
+// TaskbarCreated），Dart 侧永远是 [DesktopTrayStatus.inactive] —— 这里保留
+// facade 只是为了给调用方（`lib/main.dart`、设置页）一个稳定的入口，不再做平台
+// 分派。
 //
-// 文件清单（全部在 `lib/features/desktop_tray/`）：
-//   - desktop_tray.dart            ：本文件，公共 API + 安装入口 + 平台分派
-//   - window_controller.dart       ：WindowController 抽象 + 测试桩
-//   - tray_controller.dart         ：TrayController 抽象 + 测试桩
-//   - linux_desktop_tray.dart      ：Linux 实现（window_manager + tray_manager）
-//   - windows_desktop_tray.dart    ：Windows no-op 桩（保持现有 runner C++ 路径不变）
-//   - macos_desktop_tray.dart      ：其他桌面平台 no-op 桩
+// Linux 适配（GTK runner + libayatana-appindicator + 本目录下的
+// `linux_desktop_tray.dart` / `linux_window_controller.dart`）完整保存在 git 的
+// `linux` 分支（`3312384`），需要时可以取回。
 //
-// 三态：
-//   - installed：托盘已装 + 关窗隐藏
-//   - unavailable：托盘不可用（GNOME 无 AppIndicator 扩展等），降级为"关窗即退出"
-//   - inactive：非 Linux（Windows 现有 C++ 实现接管，或 macOS 不在本轮范围）
+// 三态（保留给调用方做文案判断）：
+//   - installed：托盘已装 + 关窗隐藏（Linux 曾有；Windows 由 C++ 承担，不经过这里）
+//   - unavailable：托盘不可用，降级为"关窗即退出"
+//   - inactive：本平台由原生层接管（Windows 现状）
 
-import 'dart:io' show Platform;
-
-import 'linux_desktop_tray.dart' as linux;
-import 'macos_desktop_tray.dart' as other;
-import 'tray_controller.dart';
-import 'window_controller.dart';
 import 'windows_desktop_tray.dart' as windows;
 
 /// Aggregate state of the desktop-tray installation.
@@ -35,8 +24,7 @@ import 'windows_desktop_tray.dart' as windows;
 /// back to close-to-quit" — both could in principle succeed, but only one of
 /// them provides the Bitwarden-style close-to-hide behaviour we want.
 enum DesktopTrayStatus {
-  /// Tray icon is up and close-to-hide is active (Linux with KDE / GNOME +
-  /// AppIndicator / etc.).
+  /// Tray icon is up and close-to-hide is active.
   installed,
 
   /// Tray could not be created; close now exits the app. The caller must
@@ -45,17 +33,12 @@ enum DesktopTrayStatus {
   unavailable,
 
   /// The desktop layer is a no-op for this platform (Windows: the C++ runner
-  /// owns the tray and close interception; macOS: out of scope).
+  /// owns the tray and close interception).
   inactive,
 }
 
 class DesktopTrayResult {
-  const DesktopTrayResult(
-    this.status, {
-    this.detail,
-    this.windowController,
-    this.trayController,
-  });
+  const DesktopTrayResult(this.status, {this.detail});
 
   final DesktopTrayStatus status;
 
@@ -63,19 +46,11 @@ class DesktopTrayResult {
   /// [status] is [DesktopTrayStatus.unavailable].
   final String? detail;
 
-  /// Controllers the caller can use to drive menu actions (only meaningful
-  /// when [status] == [DesktopTrayStatus.installed]). `null` otherwise so
-  /// callers can't accidentally surface menu-driven UI on platforms where
-  /// the menu doesn't exist.
-  final WindowController? windowController;
-  final TrayController? trayController;
-
   @override
   String toString() => 'DesktopTrayResult($status, detail=$detail)';
 }
 
-/// Default installer chosen by the current platform. Tests override via
-/// [debugSetInstallerForTesting].
+/// Default installer. Tests override via [debugSetInstallerForTesting].
 typedef DesktopTrayInstaller = DesktopTrayResult Function(
   DateTime clock,
 );
@@ -91,23 +66,15 @@ void debugSetInstallerForTesting(DesktopTrayInstaller? installer) {
 
 /// Installs the desktop tray + close interception for the current platform.
 ///
-/// Returns:
-///   - [DesktopTrayStatus.installed] when the tray icon is up and close-to-hide
-///     is wired up. The returned [DesktopTrayResult.windowController] and
-///     [DesktopTrayResult.trayController] are usable for tests.
-///   - [DesktopTrayStatus.unavailable] when the tray could not be created
-///     (e.g. GNOME without an AppIndicator extension); close now exits the
-///     app, [DesktopTrayResult.detail] explains why.
-///   - [DesktopTrayStatus.inactive] on platforms where the layer is a no-op
-///     (Windows: the C++ runner owns the tray; macOS: out of scope).
+/// On Windows this is a no-op that reports [DesktopTrayStatus.inactive]: the
+/// C++ runner owns the tray icon and the close interceptor, so the Dart side
+/// never sees a window-close event.
+///
+/// The `clock` parameter is part of the historical API (the Linux installer
+/// needed a timestamp); it is passed through to the installer so tests can
+/// keep injecting it.
 DesktopTrayResult installDesktopTray({DateTime Function()? clock}) {
   final at = (clock ?? DateTime.now)();
-  final installer = _installerOverride ?? _defaultInstallerForPlatform();
+  final installer = _installerOverride ?? windows.installWindowsDesktopTray;
   return installer(at);
-}
-
-DesktopTrayInstaller _defaultInstallerForPlatform() {
-  if (Platform.isLinux) return linux.installLinuxDesktopTray;
-  if (Platform.isWindows) return windows.installWindowsDesktopTray;
-  return other.installOtherDesktopTray;
 }
