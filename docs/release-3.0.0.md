@@ -135,15 +135,23 @@
 
 <!-- BEGIN GENERATED:artifacts —— 由 installer/release/generate_release_notes.mjs 依据 release-manifest.json 生成，勿手工编辑 -->
 
-> **本节尚未生成。** 产物表、大小、SHA-256 与 `SHA256SUMS.txt` 的内容在打包完成后由脚本
-> 写入（构建本身仍由用户 / CI 执行）：
->
-> ```bash
-> node installer/release/collect_artifacts.mjs        # → dist/release/3.0.0/{产物…,SHA256SUMS.txt,release-manifest.json}
-> node installer/release/generate_release_notes.mjs   # → 本节被替换为真实产物表
-> ```
->
-> 在拿到真实产物之前，这里不写任何数值，**也不编造哈希**。
+版本 **3.0.0**（pubspec `3.0.0+15`） · 产物 **1** 个 · 合计 **27.9 MiB** · 清单生成时间 2026-10-18T10:06:30.357Z
+
+| 文件 | 平台 | 大小 | SHA-256 |
+| --- | --- | ---: | --- |
+| `EasypassSetup.exe` | Windows | 27.9 MiB | `aaaab0a51272a020e2ab8f9a853195da9c17cb8e9f106e2b61c2c6906eae66eb` |
+
+`SHA256SUMS.txt` 的完整内容（与本文件同目录）：
+
+```text
+aaaab0a51272a020e2ab8f9a853195da9c17cb8e9f106e2b61c2c6906eae66eb  EasypassSetup.exe
+```
+
+产物来源（构建由用户 / CI 执行，脚本只做收集与哈希）：
+
+```text
+flutter build windows && "C:\Program Files\Inno Setup 7\ISCC.exe" installer\easypass_setup.iss
+```
 
 <!-- END GENERATED:artifacts -->
 
