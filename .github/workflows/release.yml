@@ -85,25 +85,20 @@ jobs:
       #     POST_BUILD 调 browser_extension/native_host/build_bridge.bat 生成（cl.exe，x86）
       #   · msvcp140.dll / vcruntime140.dll / vcruntime140_1.dll —— 由另一个 POST_BUILD
       #     调 installer/copy_vc_runtime.bat 拷进 Release 目录（.iss 需要它们）
-      # 核心服务 easypass_core.exe 不在其中，由下一步单独构建。
-      - name: flutter build windows
-        run: flutter build windows
-
-      # 核心服务（无窗口、独占库）是独立可执行文件：`dart compile exe` 在本仓库
-      # 不可用（依赖图含 build hook，SDK 要求改用 `dart build cli`），所以由
-      # tool/build_core.ps1 构建并摊平到 Release 目录：
+      # 核心服务 easypass_core.exe 由同一个 POST_BUILD 自动构建（见下），
+      # 所以 `flutter build windows` 就是**一条命令完整构建**：
       #   · core\easypass_core.exe  -> 核心（放子目录，见下）
       #   · lib\sqlite3.dll         -> 核心的原生库；Dart CLI 运行时按
       #     `<exe>\..\lib\<name>` 解析，核心在 core\ 时正好命中 Release\lib\
       #   · Release\sqlite3.dll     -> Flutter 自己那份（UI 用），保持不动
       # 数据坐标不变：AppPaths 发现父目录里有 easypass.exe 就取父目录，
       # 所以核心在 core\ 里，保险库仍是 Release\easypass.db。
-      - name: Build core service (dart build cli)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          ./tool/build_core.ps1 -OutDir 'build\windows\x64\runner\Release'
-          if ($LASTEXITCODE -ne 0) { throw "tool/build_core.ps1 失败，exit=$LASTEXITCODE" }
+      #
+      # 本步骤不再单独跑 tool/build_core.ps1（POST_BUILD 已经做了）；
+      # 下面的 Verify 只负责断言产物在位。跳过核心构建可用
+      # `flutter build windows -- -DEASYPASS_SKIP_CORE_BUILD=ON`。
+      - name: flutter build windows
+        run: flutter build windows
 
       - name: Verify build output
         shell: pwsh

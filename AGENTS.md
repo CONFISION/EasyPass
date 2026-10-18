@@ -55,10 +55,25 @@ flutter test            # 569 passing / 3 skipped on Windows (the tree declares 
                         # cases; Linux-only files register none here, so a Windows run
                         # reports FEWER CASES, not failures — see CONTRIBUTING.md)
 flutter run -d windows  # run desktop app
-flutter build windows   # release build → build\windows\x64\runner\Release\easypass.exe
-pwsh -File tool\build_core.ps1   # 核心服务 → Release\core\easypass_core.exe + Release\lib\sqlite3.dll
+flutter build windows   # ⚠️ 一条命令完整构建：easypass.exe + x86 桥 + MSVC 运行时
+                        #    + core\easypass_core.exe + lib\sqlite3.dll（POST_BUILD）
 flutter build linux --release   # Linux bundle → build/linux/x64/release/bundle/
+                                # （Linux 侧核心仍要单独跑 tool/build_core.sh，见下）
 ```
+
+- **`flutter build windows` 现在是完整构建，包含核心服务。** `windows/runner/CMakeLists.txt`
+  的第三个 POST_BUILD 会跑 `tool/build_core.ps1`，把 `core\easypass_core.exe` 与
+  `lib\sqlite3.dll` 摊平进 Release 目录。**不要再手动跑一遍** `tool/build_core.ps1`
+  （幂等，但纯属浪费）。只想调 UI 时跳过核心：
+  `flutter build windows -- -DEASYPASS_SKIP_CORE_BUILD=ON`。
+  Linux 侧没有对应 hook（`linux/CMakeLists.txt` 未改），AppImage 与 CI 仍单独调
+  `tool/build_core.sh --out-dir <bundle>`。
+- **`sqlite3` 被钉在 3.6.0（`pubspec.yaml`），不要随手升级。** `package:sqlite3` 的
+  build hook 在 Windows 上默认**从 GitHub 下载**预编译 `sqlite3.x64.windows.dll`；网络不稳时
+  `flutter build windows` 会在 `build_hooks` 阶段失败，只报 `Building native assets failed`
+  （真实原因 `SocketException / errno 121` 要翻日志）。诊断命令（不调 MSBuild，agent 可跑）：
+  `flutter assemble --no-version-check --output=build\agent_assemble -dTargetPlatform=windows-x64 -dBuildMode=release debug_bundle_windows-x64_assets`。
+  升级前先确认能访问 GitHub。
 
 - **核心服务（3.0.0）用 `dart build cli` 构建，不是 `dart compile exe`** —— 后者会以
   `'dart compile' does not support build hooks` 直接失败（依赖图里 `sqlite3` /

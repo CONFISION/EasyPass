@@ -50,6 +50,19 @@ dependencies:
   # Database
   drift: ^2.35.0
   sqlite3_flutter_libs: ^0.5.30
+  # **钉死 sqlite3 版本，不要随手升级**（3.0.0 的构建事故记录）。
+  #
+  # `package:sqlite3` 的 build hook 在 Windows 上**默认从 GitHub 下载**预编译的
+  # `sqlite3.x64.windows.dll`
+  # （https://github.com/simolus3/sqlite3.dart/releases/download/sqlite3-<ver>/…）。
+  # 本机与部分 CI 网络访问 GitHub 不稳定，`flutter build windows` 会在
+  # build_hooks 阶段直接失败（表现为 `Building native assets failed`，真实原因
+  # 要翻 assemble 日志才看得到：SocketException / errno 121）。
+  #
+  # 升级这个版本号之前请先确认：能访问 GitHub（或配好代理），否则
+  # `flutter build windows` / `flutter test` 都会在 hook 阶段挂掉。
+  # 3.6.0 满足 drift 的 `sqlite3: ^3.4.0`，且其二进制已在本地 hooks 缓存里。
+  sqlite3: 3.6.0
   path: ^1.9.1
   # 纯 Dart 注解（visibleForTesting）。核心服务（bin/easypass_core.dart）不能
   # 依赖 flutter/foundation，因此这类注解统一走 package:meta。

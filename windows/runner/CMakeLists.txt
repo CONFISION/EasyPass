@@ -67,3 +67,31 @@ add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
   COMMENT "Copying MSVC runtime DLLs (msvcp140 / vcruntime140*)"
   VERBATIM
 )
+
+# ---------------------------------------------------------------------------
+# Core service (since 3.0.0): `flutter build windows` is the ONE command.
+#
+# The core is a separate, windowless Dart AOT executable that owns the vault.
+# tool/build_core.ps1 produces:
+#   <TargetFileDir>\core\easypass_core.exe   the executable
+#   <TargetFileDir>\lib\sqlite3.dll          its native library
+# package:sqlite3 resolves that library as "<exe>\..\lib", which is exactly why
+# the core lives in a subdirectory: everything stays inside the app directory.
+#
+# Failure here fails the build on purpose - an installer without the core
+# yields an app that cannot open its vault at all.
+#
+# UI-only debugging can skip it with:
+#   flutter build windows -- -DEASYPASS_SKIP_CORE_BUILD=ON
+# ---------------------------------------------------------------------------
+option(EASYPASS_SKIP_CORE_BUILD "Do not build the EasyPass core service" OFF)
+
+if(NOT EASYPASS_SKIP_CORE_BUILD)
+  add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+            -File "${CMAKE_CURRENT_SOURCE_DIR}/../../tool/build_core.ps1"
+            -OutDir "$<TARGET_FILE_DIR:${BINARY_NAME}>"
+    COMMENT "Building EasyPass core service (core\\easypass_core.exe)"
+    VERBATIM
+  )
+endif()
