@@ -26,9 +26,9 @@ are Windows and Linux;** Phase 3 (cloud sync, sharing, emergency access, mobile/
 is still planned.
 
 > **Local-only docs (NOT in a fresh clone — `.gitignore` excludes them):** the
-> roadmap `Plan.md`, the working agreement/pitfalls `HANDOFF.md`, the 2.3.x
-> interface contract `docs/entry-types.md`, the acceptance checklists
-> `docs/acceptance-2.3.0.md` / `docs/acceptance-3.0.0.md`, the 3.0.0 design doc
+> roadmap `Plan.md`, the working agreement/pitfalls `HANDOFF.md`, the data model
+> spec `docs/data-model.md`, the acceptance checklist `docs/acceptance-3.0.0.md`,
+> the 3.0.0 design doc
 > `docs/core-service-refactor.md`, release notes under `docs/`, and the `dist/` audit /
 > phase evidence dumps. Never write a committed file that *depends* on them; this
 > file and the READMEs must stand alone.
@@ -220,7 +220,7 @@ lib/adapters/flutter_secret_store.dart  唯一允许 import flutter_secure_stora
 tool/build_core.ps1 / .sh                核心服务构建（dart build cli + 摊平产物）
 tool/probe_core.dart                     核心功能探针（19 项；只跑空库）
 browser_extension/                      Chrome MV3 extension (see below)
-docs/entry-types.md                     2.3.x interface contract (LOCAL ONLY — gitignored)
+docs/data-model.md                      数据模型与持久化规范 (LOCAL ONLY — gitignored)
 docs/acceptance-3.0.0.md                3.0.0 真机验收清单 (LOCAL ONLY — gitignored)
 windows/                                Flutter Windows runner (CMake) + the tray/single-instance glue
 linux/                                  Flutter Linux runner (CMake): my_application.cc (window + method
@@ -670,6 +670,8 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
   **照样注册了托盘图标**，托盘菜单的 "Open EasyPass" 能把那个空窗口 `ShowWindow` 出来
   （2026-10-17 用 `WM_COMMAND(1001)` 实测复现）。3.0.0 的修法不是加门控，而是**根本
   没有无 UI 的 Flutter 进程**：核心是纯 Dart 控制台程序，托盘只属于 UI。
+
+
 
 
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // EasyPass 发布说明生成：把"产物清单"从手工回忆变成脚本产出
 //
-// 背景：docs/release-2.3.2.md 里的 `SHA256  <构建后填这里>` 一直没人填 —— 因为清单要靠人回忆。
+// 背景：早期发布说明里的 `SHA256  <构建后填这里>` 一直没人填 —— 因为清单要靠人回忆。
 // 现在产物清单、大小、SHA-256、清单时间都由 collect_artifacts.mjs 写进 release-manifest.json，
 // 本脚本把它渲染成发布说明里那一段；人只写"亮点 / 升级须知"这类只有人知道的内容。
 //
@@ -9,8 +9,8 @@
 //   node installer/release/generate_release_notes.mjs --dry-run     # 打印到 stdout，不写文件
 //   node installer/release/generate_release_notes.mjs               # → docs/release-<version>.md
 //   node installer/release/generate_release_notes.mjs --manifest dist/release/2.3.3/release-manifest.json
-//   node installer/release/generate_release_notes.mjs --out docs/release-2.3.3.md
-//   node installer/release/generate_release_notes.mjs --out docs/release-2.3.2.md --force
+//   node installer/release/generate_release_notes.mjs --out docs/release-3.0.0.md
+//   node installer/release/generate_release_notes.mjs --out docs/release-3.0.0.md --force
 //
 // 参数：
 //   --dry-run          只打印，不写文件（stdout 是干净的 Markdown，可直接重定向）
@@ -206,3 +206,5 @@ mkdirSync(dirname(outPath), { recursive: true });
 writeFileSync(outPath, doc, 'utf8');
 log.ok(`已写入 ${show(outPath)}（${doc.length} 字符，${doc.split('\n').length} 行）`);
 if (todos.length) log.warn('人工段落还没写 —— 发布前记得补上（再跑一次本脚本会保留它们）。');
+
+

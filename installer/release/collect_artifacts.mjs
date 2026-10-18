@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // EasyPass 发布产物收集：SHA256SUMS.txt + release-manifest.json
 //
-// 背景：发布时"该附哪些文件、各自的 SHA-256 是多少"过去靠人回忆 —— docs/release-2.3.2.md 里那句
+// 背景：发布时"该附哪些文件、各自的 SHA-256 是多少"过去靠人回忆 —— 早期发布说明里那句
 // `SHA256  <构建后填这里>` 一直没人填。本脚本把这件事固定下来：产物清单与校验和由脚本产出，
 // 缺产物就是失败，不允许悄悄生成一份"半份"校验和。
 //
@@ -399,3 +399,4 @@ log.ok(`已写入 ${show(join(outDir, 'release-manifest.json'))}（${artifacts.l
 
 log.info('校验：Linux `sha256sum -c SHA256SUMS.txt`（在本目录）；Windows `Get-FileHash <文件> -Algorithm SHA256`');
 log.info('下一步：node installer/release/generate_release_notes.mjs');
+
