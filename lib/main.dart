@@ -106,10 +106,12 @@ Future<void> main() async {
 
 /// Reads the process command-line arguments directly from `/proc/self/cmdline`.
 ///
-/// `Platform.executableArguments` is unreliable on Flutter desktop:
-/// - On Windows, the runner mirrors CLI args into `EASYPASS_NATIVE_HOST` /
-///   `EASYPASS_SERVICE` env vars (see `windows/runner/main.cpp`); we keep the
-///   env-var + `Platform.executableArguments` check as a belt-and-braces.
+/// - On Windows, the runner hands `argv` to Dart through the engine
+///   (`set_dart_entrypoint_arguments`), so `Platform.executableArguments` works
+///   there. **3.0.0 removed the `EASYPASS_NATIVE_HOST` / `EASYPASS_SERVICE`
+///   env-var mirroring** — those modes now live in `easypass_core`
+///   (`--bridge` / `--serve`) and the UI binary has only one shape — so this
+///   function ends up reading `/proc` on Linux only.
 /// - On Linux, the Flutter runner does NOT propagate `argv` to Dart
 ///   ([Platform.executableArguments](https://api.dart.dev/stable/dart-io/Platform/executableArguments.html)
 ///   returns Dart's own internal flags instead). The only reliable source

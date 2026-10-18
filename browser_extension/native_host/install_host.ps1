@@ -45,10 +45,11 @@ function Resolve-EasyPassExe {
 $exe = Resolve-EasyPassExe
 Write-Host "Using host executable: $exe"
 
-# 2.0: the browser launches the console BRIDGE (easypass_native_host.exe,
-# same directory as easypass.exe), which forwards stdio to the background
-# daemon (easypass.exe --service). The bridge is x86 so 32-bit browsers
-# inherit its stdio handles reliably.
+# The browser launches the console BRIDGE (easypass_native_host.exe, same
+# directory as easypass.exe), which forwards stdio to the background CORE
+# (core\easypass_core.exe --serve, a separate always-on process since 3.0.0;
+# before that it was `easypass.exe --service`). The bridge is x86 so 32-bit
+# browsers inherit its stdio handles reliably.
 $exeDir = Split-Path $exe -Parent
 $bridge = Join-Path $exeDir "easypass_native_host.exe"
 if (-not (Test-Path $bridge)) {
@@ -110,3 +111,4 @@ Write-Host ""
 Write-Host "Done. Restart the browser, then reload the EasyPass extension."
 Write-Host "Verify the extension ID shown in chrome://extensions is: $ExtensionId"
 Write-Host "To remove:  powershell -ExecutionPolicy Bypass -File uninstall_host.ps1"
+

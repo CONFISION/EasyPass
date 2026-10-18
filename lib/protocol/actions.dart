@@ -69,10 +69,15 @@ class Actions {
   static const String exportVault = 'exportVault';
   static const String importVault = 'importVault';
 
-  // ─── 订阅 / 快照 ────────────────────────────────────────
-
-  static const String subscribe = 'subscribe';
-  static const String getSnapshot = 'getSnapshot';
+  // ─── 关于"订阅/快照动作" ────────────────────────────────
+  //
+  // 这里**故意没有** subscribe / getSnapshot 之类的动作。
+  // 3.0.0 的推送模型是：核心在写入事务提交后主动向所有 `ui`/`bridge` 连接广播
+  // `changed` 事件（带 topic + revision），客户端收到后自己去调对应的**读动作**
+  // 重取快照（见 `lib/features/vault/providers/core_stream.dart`）。
+  // 因此不存在"订阅某个主题"的状态，也就不需要订阅动作。
+  // 之前这两个常量被列进白名单但从未实现（会落到 `unsupported`），是死代码，
+  // 已删除 —— 别再加回来，除非真的引入按主题的服务端订阅状态。
 
   // ─── 管理 ──────────────────────────────────────────────
 
@@ -127,8 +132,7 @@ class Actions {
     deleteAllData,
     exportVault,
     importVault,
-    subscribe,
-    getSnapshot,
     shutdownCore,
   };
 }
+

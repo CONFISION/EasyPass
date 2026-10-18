@@ -65,6 +65,13 @@ class CoreInfo {
     }
   }
 
+  /// 这条发现信息是否指向一个**过时的**核心（协议低于当前版本）。
+  ///
+  /// 升级场景：2.4.x 的 `easypass.exe --service` daemon 写的是协议 ≤4 的文件，
+  /// 它不认识协议 5 的加密握手。客户端据此在连接前就把它判为陈旧并退休
+  /// （见 `CoreSession._connect` 的说明：只删文件、不盲杀进程）。
+  bool get isStale => protocolVersion < coreProtocolVersion;
+
   @override
   String toString() =>
       'CoreInfo(pid=$pid, port=$port, protocol=$protocolVersion, '
@@ -120,3 +127,4 @@ class CoreDiscovery {
     }
   }
 }
+

@@ -276,9 +276,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
         // Tier 1: lock the vault, then drop this UI. The core keeps running
         // (the browser extension stays served), so the vault must not be left
         // unlocked behind a closed UI. Locking is best effort -- the UI closes
-        // either way (see LockVaultBeforeExit).
+        // either way (see LockVault).
         LogTrayLine(L"tray: exit UI only (locking the vault first)");
-        LockVaultBeforeExit();
+        LockVault();
         Destroy();
         return 0;
       }
@@ -295,6 +295,17 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     case WM_CLOSE:
       // Bitwarden-style: closing the window hides the app to the tray; the
       // daemon keeps running. Real exit goes through the tray menu.
+      //
+      // Lock the vault first: the window is going away while the core keeps the
+      // session alive, so without this the vault stayed unlocked until the
+      // core's auto-lock timeout (user report: close the window, reopen it from
+      // the tray, still unlocked). Locking is best effort -- on failure
+      // LockVault() reports it, and the window is hidden (or closed) anyway.
+      // The lock happens before the tray check on purpose: the fall-through
+      // path below closes the window for real, which also leaves the core
+      // running with an unlocked vault.
+      LogTrayLine(L"WM_CLOSE: locking the vault before hiding/closing");
+      LockVault();
       //
       // Only hide when the tray icon is really there. When
       // `Shell_NotifyIconW(NIM_ADD)` fails (icon resource missing, shell
@@ -480,26 +491,32 @@ bool FlutterWindow::StopCoreService() {
   return true;
 }
 
-void FlutterWindow::LockVaultBeforeExit() {
-  // "Exit UI Only" leaves the core (and therefore the vault) running for the
-  // browser extension, so the vault has to be locked before this UI goes away
-  // -- otherwise closing the window would leave an unlocked vault behind for
-  // whoever sits down at the machine next.
+void FlutterWindow::LockVault() {
+  // Both callers keep the core (and therefore the vault) alive after the UI
+  // stops being visible: "Exit UI Only" leaves the process running for the
+  // browser extension, and close-to-tray leaves it running behind the tray
+  // icon. Without this the vault stayed unlocked until the core's auto-lock
+  // timeout -- user report: close the window, reopen it from the tray, and the
+  // vault was still unlocked.
   //
-  // Best effort by design: any failure is reported and the UI quits anyway. A
-  // failed lock must not trap the user inside the window (the same reasoning as
-  // the tray-vs-Task-Manager fallback in WM_CLOSE).
+  // Best effort by design: a failure is reported and the caller hides/closes
+  // anyway. A failed lock must not trap the user inside the window (the same
+  // reasoning as the tray-vs-Task-Manager fallback in WM_CLOSE).
+  //
+  // The message is deliberately path-neutral ("Could not lock the vault.")
+  // because both callers share it; the caller's own logging says which path it
+  // was.
   DWORD dir_error = 0;
   const std::wstring exe_dir = CurrentExecutableDirectory(&dir_error);
   if (exe_dir.empty()) {
     wchar_t detail[256] = {0};
     swprintf_s(detail, ARRAYSIZE(detail),
-               L"Could not lock the vault before closing the UI.\n\nThe "
-               L"EasyPass installation directory could not be determined "
+               L"The EasyPass installation directory could not be determined "
                L"(GetModuleFileNameW, error %lu). The vault may still be "
                L"unlocked.",
                dir_error);
-    ShowTrayError(GetHandle(), detail);
+    ShowTrayError(GetHandle(),
+                  L"Could not lock the vault.\n\n" + std::wstring(detail));
     return;
   }
 
@@ -515,11 +532,11 @@ void FlutterWindow::LockVaultBeforeExit() {
   if (!result.started) {
     wchar_t detail[512] = {0};
     swprintf_s(detail, ARRAYSIZE(detail),
-               L"Could not lock the vault before closing the UI.\n\n%ls "
-               L"--lock could not be started (Windows error %lu). The vault "
-               L"may still be unlocked.",
+               L"%ls --lock could not be started (Windows error %lu). The "
+               L"vault may still be unlocked.",
                core_path.c_str(), result.error);
-    ShowTrayError(GetHandle(), detail);
+    ShowTrayError(GetHandle(),
+                  L"Could not lock the vault.\n\n" + std::wstring(detail));
     return;
   }
 
@@ -527,22 +544,20 @@ void FlutterWindow::LockVaultBeforeExit() {
     wchar_t detail[512] = {0};
     if (result.finished) {
       swprintf_s(detail, ARRAYSIZE(detail),
-                 L"Could not lock the vault before closing the UI.\n\n"
                  L"easypass_core --lock exited with code %lu. The vault may "
                  L"still be unlocked.",
                  result.exit_code);
     } else {
       swprintf_s(detail, ARRAYSIZE(detail),
-                 L"Could not lock the vault before closing the UI.\n\n"
                  L"easypass_core --lock did not finish within %lu seconds. The "
                  L"vault may still be unlocked.",
                  kCoreCommandTimeoutMs / 1000);
     }
-    ShowTrayError(GetHandle(), detail);
-    LogTrayLine(L"FAILED LockVaultBeforeExit: the lock helper did not report "
-                L"success");
+    ShowTrayError(GetHandle(),
+                  L"Could not lock the vault.\n\n" + std::wstring(detail));
+    LogTrayLine(L"FAILED LockVault: the lock helper did not report success");
     return;
   }
 
-  LogTrayLine(L"OK LockVaultBeforeExit: the vault is locked, exiting the UI");
+  LogTrayLine(L"OK LockVault: the vault is locked");
 }

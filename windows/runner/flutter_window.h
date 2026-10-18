@@ -45,13 +45,18 @@ class FlutterWindow : public Win32Window {
   // keeps this UI alive and the user can retry.
   bool StopCoreService();
 
-  // Tray "Exit UI Only" preamble: run `easypass_core.exe --lock` so the vault
-  // the core keeps serving is not left unlocked behind a closed UI.
+  // Lock the vault through the core: run `easypass_core.exe --lock` and wait
+  // for it (15 s backstop).
   //
-  // Best effort by contract -- the caller quits either way. A failed lock opens
-  // a message box; a missing core (pure UI development layout) is skipped
-  // silently.
-  void LockVaultBeforeExit();
+  // Shared by the two paths that leave the UI invisible while the core keeps
+  // running: close-to-tray (WM_CLOSE) and the tray's "Exit UI Only". Reopening
+  // the window must ask for the master password again, so the lock has to
+  // happen here and not on the core's idle timeout.
+  //
+  // Best effort by contract -- the caller hides/closes either way. A failed
+  // lock opens a message box; a missing core (pure UI development layout) is
+  // skipped silently.
+  void LockVault();
 
   static constexpr UINT kTrayIconMessage = WM_APP + 1;
   static constexpr UINT kTrayOpenCommand = 1001;

@@ -48,13 +48,38 @@ class CoreSession {
 
   Future<CoreClient> _connect() async {
     var info = await CoreDiscovery.read();
+
+    // ── 陈旧核心退休（3.0.0）─────────────────────────────────
+    //
+    // 升级前可能是 2.4.x 的 `easypass.exe --service` daemon（协议 ≤ 4，不认识
+    // 协议 5 的加密握手）。判定依据是 `daemon.json` 的 `protocolVersion`：
+    // 低于当前协议就应该退休它，而不是让握手一路失败到超时。
+    //
+    // **只删发现文件、不主动结束那个进程**，这是有意的安全取舍：
+    // - 旧 daemon 的 `daemon.json` 没有 `exe` 字段（协议 3/4 的格式），我们
+    //   无法把 pid 与"确实是我们自己的镜像"对上 —— 盲杀 pid 有误杀风险。
+    // - 它会自己 10 分钟空闲自退；且它的 `_removeInfoIfOurs` 会校验 port+pid，
+    //   不会删掉我们随后写入的新核心注册信息（这条保护是刻意写的）。
+    // - 安装包升级时，Inno 的 CloseApplications 会先请它关闭（它锁着
+    //   easypass.exe 映像）。
+    // 代价：最多 10 分钟内新旧两个进程并发访问同一个 SQLite —— SQLite 本身
+    // 能扛（WAL + 锁），且旧进程只读不写（它的会话另一份），不会损坏数据。
+    if (info != null && info.isStale) {
+      stderr.writeln(
+        'easypass: retiring stale core before connect '
+        '(pid=${info.pid}, protocol=${info.protocolVersion} < $coreProtocolVersion)',
+      );
+      await CoreDiscovery.removeAny();
+      info = null;
+    }
+
     var client = info == null ? null : await _tryConnect(info);
     if (client != null) {
       _adopt(client);
       return client;
     }
 
-    // 发现文件缺失/陈旧：清掉残留后按需拉起核心。
+    // 发现文件缺失/连不上（含协议够但握手失败）：清掉残留后按需拉起核心。
     await CoreDiscovery.removeAny();
     if (!launchIfMissing || !await launchCoreIfPresent()) {
       throw VaultApiException(
@@ -360,4 +385,6 @@ bool coreExecutableExists() => coreExecutablePath() != null;
 
 /// 平台判断的薄封装（UI 侧不需要 import dart:io 的地方用它）。
 bool get isWindowsHost => Platform.isWindows;
+
+
 

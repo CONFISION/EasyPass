@@ -504,9 +504,14 @@ prose. The version comes from `pubspec.yaml` only. Runbook: `installer/release/R
   v5 核心拒绝 v4 及更旧的客户端（明文握手只留给 x86 桥的 bridge 角色）。
 - **`easypass_core --lock`**：连上运行中的核心并锁定保险库，**不停核心**；
   没有核心在跑时退 0（无事可做）。托盘"仅退出 UI"就是先跑它再退 UI ——
-  `windows/runner/flutter_window.cpp` 的 `LockVaultBeforeExit()` /
+  `windows/runner/flutter_window.cpp` 的 **`LockVault()`**（关窗隐藏与"仅退出 UI"共用）/
   `linux/runner/easypass_tray.cc` 的 `lock_vault_before_exit()`，锁定失败只提示、
   仍然退出（不能把用户困在界面里）。
+  **关窗 = 立即锁定**（`WM_CLOSE` 先 `--lock` 再 `MinimizeToTray`）：用户实测报告过
+  "关窗后保险库没上锁、重开还是解锁态"，这不是 bug 而是当时压根没做 —— 只有核心的
+  空闲计时器（默认 5 分钟）会锁。注意 `--lock` 派发到 `Actions.lock`，而核心的
+  `lockAll()` 会**连 bridge 域一起锁**，所以关窗后浏览器扩展也需要重新解锁；若以后
+  希望扩展不受影响，需要一个"只锁 ui 域"的动作，别直接改 `lock` 的语义。
 - **Debug tools (no browser needed):** `node browser_extension/tools/probe_bridge.mjs`
   （端到端：拉起桥，桥再去找/拉起核心）、`probe_daemon.mjs`（直连已在跑的核心），
   以及 `dart run tool\probe_core.dart --core <path>`（19 项核心动作面，只跑空库）。
@@ -665,6 +670,8 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
   **照样注册了托盘图标**，托盘菜单的 "Open EasyPass" 能把那个空窗口 `ShowWindow` 出来
   （2026-10-17 用 `WM_COMMAND(1001)` 实测复现）。3.0.0 的修法不是加门控，而是**根本
   没有无 UI 的 Flutter 进程**：核心是纯 Dart 控制台程序，托盘只属于 UI。
+
+
 
 
 

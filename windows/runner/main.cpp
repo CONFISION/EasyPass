@@ -122,39 +122,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     }
   }
 
-  // Native messaging host mode (launched by Chrome/Edge). The browser does
-  // NOT pass any command-line arguments -- the "args" field of the native
-  // messaging manifest is unsupported by Chrome/Edge -- so the mode is
-  // detected from startup signals instead:
-  //   1. --native-host flag (manual testing),
-  //   2. stdin being a pipe (browser launch; reliable for 64-bit launchers),
-  //   3. started hidden: Chromium launches native hosts with
-  //      STARTF_USESHOWWINDOW + SW_HIDE (start_hidden). This covers browser
-  //      launches where the pipe handle is not visible through GetStdHandle
-  //      (observed with 32-bit Edge spawning the 64-bit host: the host ran
-  //      the UI instead of serving the pipe). A normal double-click launch
-  //      is never started hidden.
-  // The detected mode is mirrored into an environment variable because
-  // Platform.executableArguments is not reliably populated on Flutter
-  // Windows.
-  STARTUPINFOW si = {sizeof(si)};
-  ::GetStartupInfoW(&si);
-  const bool started_hidden =
-      (si.dwFlags & STARTF_USESHOWWINDOW) != 0 && si.wShowWindow == SW_HIDE;
-  const bool is_native_host =
-      wcsstr(command_line, L"--native-host") != nullptr ||
-      ::GetFileType(::GetStdHandle(STD_INPUT_HANDLE)) == FILE_TYPE_PIPE ||
-      started_hidden;
-  if (is_native_host) {
-    ::SetEnvironmentVariableW(L"EASYPASS_NATIVE_HOST", L"1");
-  }
-
-  // Background daemon mode (`easypass.exe --service`, launched by the native
-  // host bridge). Windowless: hide the window so no UI ever appears.
-  const bool is_service = wcsstr(command_line, L"--service") != nullptr;
-  if (is_service) {
-    ::SetEnvironmentVariableW(L"EASYPASS_SERVICE", L"1");
-  }
+  // 3.0.0: the UI binary has exactly one mode. The old `--native-host` (browser
+  // stdio host) and `--service` (windowless in-process daemon) modes moved into
+  // the core service -- `easypass_core --bridge` and `easypass_core --serve`
+  // (see bin/easypass_core.dart) -- so the mode detection that used to live
+  // here (flag sniffing, pipe-stdin / started-hidden heuristics, the
+  // EASYPASS_NATIVE_HOST / EASYPASS_SERVICE environment variables and the
+  // "keep the window hidden" path) is gone. Passing either switch to
+  // easypass.exe now simply starts the normal UI, which is harmless.
 
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
@@ -173,12 +148,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // the vault sidebar (see lib/features/vault/screens/vault_screen.dart).
   if (!window.Create(L"EasyPass", origin, size)) {
     return EXIT_FAILURE;
-  }
-  // In native host / daemon mode the Dart code never renders UI; hide the
-  // window so nothing pops up. The message loop below still runs, which the
-  // Flutter engine needs.
-  if (is_native_host || is_service) {
-    ::ShowWindow(window.GetHandle(), SW_HIDE);
   }
   window.SetQuitOnClose(true);
 
