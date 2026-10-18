@@ -212,6 +212,13 @@ class BrowserHostInstaller {
     w('}');
     w('');
     w('if [ -n "\${APPDIR:-}" ]; then');
+    w('  # Production layout keeps the core in usr/bin/core/ (see');
+    w('  # tool/build_core.sh); a flat usr/bin/ only happens in dev');
+    w('  # builds, so both are probed. Missing this level made the');
+    w('  # wrapper exit 127 on a real AppImage.');
+    w('  if [ -x "\${APPDIR}/usr/bin/core/easypass_core" ]; then');
+    w('    exec "\${APPDIR}/usr/bin/core/easypass_core" --bridge "\$@"');
+    w('  fi');
     w('  if [ -x "\${APPDIR}/usr/bin/easypass_core" ]; then');
     w('    exec "\${APPDIR}/usr/bin/easypass_core" --bridge "\$@"');
     w('  fi');
@@ -240,6 +247,9 @@ class BrowserHostInstaller {
       }
       w('  do');
       w('    _d="\$(dirname "\$_c")"');
+      w('    if [ -x "\${_d}/core/easypass_core" ]; then');
+      w('      exec "\${_d}/core/easypass_core" --bridge "\$@"');
+      w('    fi');
       w('    if [ -x "\${_d}/easypass_core" ]; then');
       w('      exec "\${_d}/easypass_core" --bridge "\$@"');
       w('    else');
@@ -251,6 +261,9 @@ class BrowserHostInstaller {
 
     w('');
     w('HERE="\$(dirname "\$(readlink -f "\$0")")"');
+    w('if [ -x "\${HERE}/core/easypass_core" ]; then');
+    w('  exec "\${HERE}/core/easypass_core" --bridge "\$@"');
+    w('fi');
     w('if [ -x "\${HERE}/easypass_core" ]; then');
     w('  exec "\${HERE}/easypass_core" --bridge "\$@"');
     w('fi');

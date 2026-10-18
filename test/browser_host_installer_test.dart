@@ -218,6 +218,7 @@ void main() {
   });
 
   group('wrapper 脚本', () {
+
     test('不会向 stdout 写非协议内容（除 exec 路径）', () {
       final body = BrowserHostInstaller.renderWrapperScript();
       // 失败兜底走 stderr；stdout 必须只透传给 exec 出的核心。
@@ -1007,3 +1008,5 @@ void main() {
     });
   });
 }
+
+
