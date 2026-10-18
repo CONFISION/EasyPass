@@ -258,9 +258,23 @@ jobs:
             echo "release $tag 已存在 —— 覆盖上传资产"
             gh release upload "$tag" "$out"/* --clobber
           else
-            gh release create "$tag" "$out"/* \
-              --title "EasyPass ${tag}" \
-              --generate-notes \
-              --verify-tag
+            # 版本号来自 verify job（与产物目录用的是同一个值）。
+            version="${{ needs.verify.outputs.version }}"
+            notes_file="docs/release-${version}.md"
+            if [ -f "$notes_file" ]; then
+              # 仓库里写了完整发布说明（含产物表，由 generate_release_notes.mjs 填好）：用它。
+              echo "使用仓库内的发布说明：$notes_file"
+              gh release create "$tag" "$out"/* \
+                --title "EasyPass ${tag}" \
+                --notes-file "$notes_file" \
+                --verify-tag
+            else
+              # 没有手写说明时退回 GitHub 的自动生成（从 commit 汇总）。
+              echo "未找到 $notes_file，退回 --generate-notes"
+              gh release create "$tag" "$out"/* \
+                --title "EasyPass ${tag}" \
+                --generate-notes \
+                --verify-tag
+            fi
           fi
           gh release view "$tag" --json url,assets --jq '.url, (.assets[].name)'
