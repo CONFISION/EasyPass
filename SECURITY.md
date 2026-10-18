@@ -73,8 +73,15 @@ Being precise here is more useful than a reassuring sentence, so:
 
 - **The master password is never stored.** `PBKDF2-HMAC-SHA256(masterPassword, salt,
   100_000 iterations)` derives a 32-byte AES-256 key. Only the salt and a
-  `SHA-256(derivedKey)` verifier are persisted, via `flutter_secure_storage` (Windows
-  Credential Manager / Linux Secret Service).
+  `SHA-256(derivedKey)` verifier are persisted — **since 3.0.0 inside the vault database
+  itself** (`vault_meta`, keys prefixed `secret.`), not in the OS keychain. This is not a
+  downgrade: deriving the key and checking the verifier cost the same PBKDF2 work, so
+  anyone holding `easypass.db` could already brute-force the password at that cost, and
+  the rotation journal had been storing the same material in that table since 2.4.0. The
+  upside is that the core process needs no OS keychain and the verifier lives in the same
+  SQLite transaction domain as the data it protects. Upgrading from 2.4.x hands the old
+  keychain values to the core **once** (`adoptLegacyKeyMaterial`); the old keychain entries
+  are deliberately left in place so you can roll back.
 - **Entry fields are encrypted individually** with AES-256-CBC as `base64(IV ‖
   ciphertext)`, a fresh random IV per value. All encryption goes through
   `VaultItemMapper`.
@@ -86,35 +93,45 @@ Being precise here is more useful than a reassuring sentence, so:
   tightened to `0600` and the data directory to `0700` on Linux; on Windows the
   database sits next to the executable (or in the install directory) and relies on the
   user profile's ACLs.
-- **CBC without a MAC** means ciphertext tampering is detectable only as a decryption
-  failure, not as an authentication error. This is a known weakness of the current
-  format and is on the roadmap for the key-hierarchy rework; it is why the rotation
-  path refuses to proceed when any row fails to decrypt.
-- **Master-password rotation keeps a journal inside the vault database.** Changing the
-  master password must update two stores that have no common transaction: the entry
-  ciphertext (SQLite) and the salt + verifier (`flutter_secure_storage`). To make that
-  all-or-nothing, the *target* salt and verifier are written into a `vault_meta` row in
-  the **same transaction** as the re-encryption. The deliberate consequence: while a
-  rotation is incomplete — i.e. when the OS keychain cannot be written (Linux Secret
-  Service unavailable or locked) — that verifier lives in `easypass.db` rather than in
-  the keychain, and it is served from there until the keychain writes succeed. It is
-  still `SHA-256(PBKDF2(masterPassword, salt, 100_000))`, so guessing the password
-  offline costs the full PBKDF2 work per attempt, but it is not protected by the OS
-  keychain during that window. Removing this trade-off requires the key-hierarchy
-  rework (v3.0). The journal is deleted as soon as the keychain write succeeds, and it
-  never contains the password, the derived key, or any entry plaintext.
-- **Password verification has a single implementation** (`MasterPasswordVerifier`) and
-  its rule is "a rotation journal exists ⇒ only the journal's target password is
-  valid". Any code path that compared stored salt/hash on its own would disagree with
-  the vault's actual key during that window — that was a real bug in 2.4.0, where the
-  browser bridge kept accepting the old master password.
-- **The derived key lives in memory** for the session (a Riverpod `StateProvider`) and
-  is cleared on lock. Auto-lock defaults to 5 minutes. Changing the master password
-  ends the session (the vault returns to the lock screen), so no session outlives the
-  key it was opened with.
-- **The browser bridge** listens on `127.0.0.1` only, and the daemon writes a token
-  plus a protocol version into `daemon.json`. The extension's native-messaging
-  allowlist is pinned to a single extension ID.
+- **CBC without a MAC** (for the stored entry fields) means ciphertext tampering is
+  detectable only as a decryption failure, not as an authentication error. This is a
+  known weakness of the storage format and is on the roadmap for the key-hierarchy
+  rework; it is why the rotation path refuses to proceed when any row fails to decrypt.
+  (The **transport** is authenticated — see the channel-encryption bullet below.)
+- **One process owns the vault (3.0.0).** `easypass_core` is the only process that opens
+  `easypass.db` and the only one that holds the derived key. The desktop UI is a client:
+  it has no database handle and never sees the key, so a compromised UI can read what it
+  displays but cannot decrypt the vault on its own. The key lives only in the core's
+  memory (`SessionDomains`) and is zeroed on lock.
+- **Two session domains.** The core keeps separate `ui` and `bridge` sessions. Locking
+  from the desktop locks **both** (closing the window, the tray's *Exit UI Only*, the
+  auto-lock timer); unlocking the desktop does **not** unlock the browser extension,
+  because unlocking should stay an explicit act. Auto-lock is enforced by the core
+  (default 5 minutes, configurable 1–60) and the UI only reports user activity.
+- **Transport encryption, protocol 5.** UI ↔ core traffic is encrypted and
+  authenticated: the handshake exchanges two nonces and mutual HMAC proofs, so **the
+  token never crosses the wire**; every subsequent frame is AES-256-CBC + HMAC-SHA256
+  (encrypt-then-MAC, four independent direction keys derived with HKDF from the token and
+  both nonces). Clients that still speak the old plaintext handshake are refused with
+  `unsupported` rather than silently downgraded — plaintext is accepted only for the
+  `bridge` role (see the known limitations).
+- **Master-password rotation is atomic.** Since 3.0.0 the ciphertext, the rotation
+  journal and the new salt/verifier all live in `easypass.db`, and the whole re-encryption
+  plus the new verifier are written in **one SQLite transaction**. The 2.4.x window where
+  the verifier could sit in the database because the OS keychain write failed no longer
+  exists. The journal never contains the password, the derived key, or entry plaintext,
+  and its rule is unchanged: a journal exists ⇒ only the journal's target password is
+  valid.
+- **Password verification has a single implementation** (`MasterPasswordVerifier`, now
+  running inside the core). Any code path that compared stored salt/hash on its own would
+  disagree with the vault's actual key during a rotation window — that was a real bug in
+  2.4.0, where the browser bridge kept accepting the old master password.
+- **Changing the master password ends both sessions**, so no session outlives the key it
+  was opened with; the UI returns to the lock screen.
+- **The browser bridge** reaches the core over `127.0.0.1` only. The core writes a token,
+  a protocol version, its own version and its executable path into `daemon.json`
+  (`exe` is what lets a client verify a process before terminating a stale core). The
+  extension's native-messaging allowlist is pinned to a single extension ID.
 - **The extension requests only** `clipboardWrite`, `nativeMessaging` and
   host permissions for `<all_urls>` (needed for autofill on any site). It stores no
   vault data itself; the unlocked session lives in the desktop app.
@@ -134,6 +151,26 @@ roadmap and will change in future releases:
 - macOS, mobile and Firefox are not supported.
 - The default OK for a `data/` write failure is a visible error, not a retry queue —
   if a write fails, the change did not happen and the UI says so.
+- **The x86 bridge → core hop is not encrypted.** On Windows the browser's native-messaging
+  host must be a 32-bit console program (a 64-bit host gets a non-pipe stdin from 32-bit
+  Edge), and such a program cannot reasonably implement AES/HMAC. That hop therefore uses
+  loopback TCP with token authentication only. The bridge is a byte forwarder on
+  `127.0.0.1`, and whatever it carries (including plaintext passwords for autofill) is
+  already visible to the browser extension itself. On Linux the wrapper runs
+  `easypass_core --bridge`, which *does* use the encrypted handshake.
+- **The threat boundary is the OS user account, not cryptography.** Another process
+  running as the same user can read `daemon.json` (and therefore the token), connect to
+  the core, or attach a debugger to the UI/core process — and the UI has to display
+  plaintext passwords by design. Transport encryption protects against passive capture
+  and unauthenticated impostors, not against same-user malware.
+- **Linux is not verified for 3.0.0.** The Linux runner, tray, `--bridge` host and
+  AppImage layout compile-check only (clang `-fsyntax-only` against stub headers); they
+  have not been built or exercised on a Linux desktop. Windows is the verified platform.
+- **Upgrading from 2.4.x leaves the old `--service` process alive for up to 10 minutes.**
+  It exits on its own idle timer and will not delete the new core's `daemon.json`
+  (port + pid are checked), and the installer asks it to close first; during that window
+  two processes may touch the same SQLite file (SQLite tolerates this; the old process
+  serves nothing new).
 
 ## Hardening advice for users
 
