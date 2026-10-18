@@ -64,9 +64,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
   界面会提示 —— 此前那个字段被丢掉，提示是死代码。
 - `easypass_core --serve / --bridge / --lock / --shutdown / --status / --version`。
   `--lock` 只锁库不停核心（托盘"仅退出 UI"先跑它再退 UI）。
-- Linux 自启项改为拉起核心（`<core> --serve`）；AppImage 场景因挂载点每次都是临时路径，
-  仍退回启动 AppImage 本身。
-- `tool/build_core.ps1` / `tool/build_core.sh`（`dart build cli` 封装）与
+- `tool/build_core.ps1`（`dart build cli` 封装）与
   `tool/probe_core.dart`（19 项核心动作面探针）。
 - `test/architecture_boundary_test.dart`：UI 不得碰数据库、核心不得 import Flutter。
 
@@ -98,7 +96,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
   re-encryption in **one SQLite transaction**, so the two can no longer disagree.
 - **CI** (GitHub Actions): `flutter analyze`, `flutter test`, the browser-extension
   self-checks and the native-runner syntax check on every push and pull request;
-  tagged releases build the installer and the AppImage and publish them with
+  tagged releases build the Windows installer and publish it with
   `SHA256SUMS.txt`.
 - **Release tooling**: `installer/release/collect_artifacts.mjs` generates the
   checksum file and a machine-readable artifact manifest, instead of recalling the
@@ -113,7 +111,7 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
   values (salt first, hash second), so a failure in between left the ciphertext on
   the new key while the stored verifier belonged to the old salt — **neither the old
   nor the new master password could open the vault**, and the entries decrypted to
-  empty strings. This is reachable in practice on Linux (Secret Service unavailable
+  empty strings. This is reachable in practice when the OS keychain is unavailable
   or locked) and on Windows (a process demoted to Low integrity cannot write
   `%APPDATA%`). The vault is now all-or-nothing: the journal and the re-encryption
   commit together, a keychain failure leaves the new password usable via the

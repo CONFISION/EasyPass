@@ -18,10 +18,10 @@ EasyPass 由**四个可执行形态**与一个数据库组成。3.0.0 的核心�
 
 | 形态 | 可执行文件 | 职责 | 有窗口 | 有托盘 | 生命周期 |
 | --- | --- | --- | --- | --- | --- |
-| **核心服务** | `{app}\core\easypass_core.exe --serve`（Linux `core/easypass_core`） | 独占 `easypass.db`、持有唯一会话密钥、执行加解密与策略、向客户端推事件 | ❌ | ❌ | **常驻**，只有 `shutdownCore` / `--shutdown` 退出 |
+| **核心服务** | `{app}\core\easypass_core.exe --serve` | 独占 `easypass.db`、持有唯一会话密钥、执行加解密与策略、向客户端推事件 | ❌ | ❌ | **常驻**，只有 `shutdownCore` / `--shutdown` 退出 |
 | **桌面 UI** | `{app}\easypass.exe` | 纯客户端：窗口、托盘、渲染；自己不开库、不持密钥 | ✅ | ✅（唯一） | 用户开关 |
 | **x86 桥** | `{app}\easypass_native_host.exe`（仅 Windows） | 浏览器 stdio ↔ 核心的回环 TCP 字节转发 | ❌ | ❌ | 浏览器连接期间 |
-| **Dart 桥** | `easypass_core --bridge`（Linux 由 wrapper 启动） | 同上，但由核心二进制自带转发模式 | ❌ | ❌ | 浏览器连接期间 |
+| **Dart 桥** | `easypass_core --bridge` | 同上，但由核心二进制自带转发模式（stdio ↔ 回环 TCP） | ❌ | ❌ | 浏览器连接期间 |
 | **数据库** | `{app}\easypass.db` | 加密后的条目 + `vault_meta`（含校验材料与轮换日志） | — | — | 由核心独占打开 |
 
 **为什么 x86 桥在 Windows 上不能省**：浏览器原生消息宿主必须是 32 位控制台程序
@@ -32,7 +32,7 @@ EasyPass 由**四个可执行形态**与一个数据库组成。3.0.0 的核心�
 **为什么核心放在 `{app}\core\` 子目录**：`package:sqlite3` 的 build hook 按
 `<exe 目录>\..\lib\<name>` 解析原生库（Dart 3.13.4 实测；放在 exe 旁边的 `sqlite3.dll`
 永远不会被加载）。核心进 `core\` 后，这个相对路径正好落在 `{app}\lib\`，
-**一切留在安装目录内**。数据坐标不受影响：`AppPaths` 在非 Linux 上会检查 exe 的父目录
+**一切留在安装目录内**。数据坐标不受影响：`AppPaths` 会检查 exe 的父目录
 是否含 `easypass[.exe]`，命中则数据目录取父目录（`lib/core/platform/app_paths.dart`
 的 `_resolveDataDirectory`）。
 
@@ -41,7 +41,7 @@ EasyPass 由**四个可执行形态**与一个数据库组成。3.0.0 的核心�
 ## 2. 运行时拓扑
 
 ```
-┌──────────────────────────── Windows / Linux ─────────────────────────────┐
+┌──────────────────────────────── Windows ─────────────────────────────────┐
 │  easypass_core --serve     唯一、常驻、无窗口、无托盘                     │
 │   ├ 独占 easypass.db（唯一密钥副本）                                      │
 │   ├ 会话两域：ui / bridge（+ 预留 agent）                                 │
@@ -72,8 +72,7 @@ EasyPass 由**四个可执行形态**与一个数据库组成。3.0.0 的核心�
    在 `WidgetsFlutterBinding.ensureInitialized()` **之前**拦截并退出（这些不需要 Flutter、不碰库）。
 2. `SecretStoreRegistry.register(const FlutterSecretStore())` —— 注册 UI 侧密钥材料存储
    （**仅迁移期**读旧钥匙串用）。
-3. **单实例**：`acquireSingleInstance()`。Linux 用 `easypass.lock` + unix socket 唤醒；
-   Windows 在**原生层**做（`windows/runner/main.cpp`：`Local\EasyPass.UI` Mutex →
+3. **单实例**：`acquireSingleInstance()`。Windows 在原生层做（`Local\EasyPass.UI` Mutex →
    `FindWindowW` → `SW_RESTORE` + `SetForegroundWindow` → 退出）。
 4. `runApp(ProviderScope(...))` —— **不做**任何开库动作。UI 进程**没有**数据库句柄。
 5. 第一个 `vaultApiProvider` 使用时，`CoreSession` 才去发现/拉起核心（见 3.2）。
@@ -102,11 +101,11 @@ UI 冷启动时若没有核心，会**自动拉起**——用户先点扩展还�
 | 强制杀 UI | 系统 | 保持运行（空闲超时后锁） | 继续运行 | 不受影响 |
 | 核心被杀 | 系统 | — | — | 下次请求由桥重新拉起 |
 
-> Linux 的对应实现（`lock_vault_before_exit()`）随 `linux` 分支维护。
+
 
 > **验证状态**：本表描述的是 3.0.0 代码的实际行为。截止 2026-10-18，Windows 上
 > "核心/界面分离""托盘两档退出""界面单实例"已真机确认；**"关窗即锁"是最后一轮才实现的，
-> 待真机复验**；Linux 全部未验证。各项的当前状态以 `docs/acceptance-3.0.0.md` 开头的
+> 待真机复验**。各项的当前状态以 `docs/acceptance-3.0.0.md` 开头的
 > 状态表为准，不要从本文推断"已验证"。
 
 ### 3.4 核心自身
@@ -195,14 +194,14 @@ UI 冷启动时若没有核心，会**自动拉起**——用户先点扩展还�
 
 ## 6. 数据与文件坐标
 
-| 项 | Windows | Linux |
-| --- | --- | --- |
-| 数据目录 | `{app}`（exe 目录；核心在 `core\` 时取父目录） | `$XDG_DATA_HOME/easypass`（默认 `~/.local/share/easypass`） |
-| 数据库 | `{app}\easypass.db` | `$XDG_DATA_HOME/easypass/easypass.db` |
-| 发现文件 | `%LOCALAPPDATA%\EasyPass\daemon.json` | `$XDG_DATA_HOME/easypass/daemon.json` |
-| 核心 exe | `{app}\core\easypass_core.exe` | `core/easypass_core`（AppImage: `usr/bin/core/`） |
-| 核心原生库 | `{app}\lib\sqlite3.dll` | `lib/libsqlite3.so`（AppImage: `usr/bin/lib/`） |
-| UI 原生库 | `{app}\sqlite3.dll`（Flutter 自带） | 同上（共用） |
+| 项 | 路径 |
+| --- | --- |
+| 数据目录 | `{app}`（exe 目录；核心在 `core\` 时取父目录） |
+| 数据库 | `{app}\easypass.db` |
+| 发现文件 | `%LOCALAPPDATA%\EasyPass\daemon.json` |
+| 核心 exe | `{app}\core\easypass_core.exe` |
+| 核心原生库 | `{app}\lib\sqlite3.dll` |
+| UI 原生库 | `{app}\sqlite3.dll`（Flutter 自带，与核心那份互不影响） |
 | 权限 | `%LOCALAPPDATA%` 的 ACL | 数据目录 `0700`、库/临时文件 `0600`、wrapper `0700` |
 | 调试日志 | `%TEMP%\easypass-tray.log` | —（走 stderr / journal） |
 
@@ -355,7 +354,7 @@ node browser_extension/tools/build_extension_zip.mjs --dry-run   # 扩展包到�
 | --- | --- |
 | **核心 / core** | `easypass_core` 进程，唯一持有库与密钥 |
 | **UI / 客户端** | `easypass.exe`，纯客户端 |
-| **桥 / bridge** | 浏览器 native messaging 宿主（Windows x86 exe；Linux 核心的 `--bridge` 模式） |
+| **桥 / bridge** | 浏览器 native messaging 宿主（Windows 上的独立 x86 exe） |
 | **会话域** | 核心内的 `ui` / `bridge` 两套独立会话（+ 预留 `agent`） |
 | **发现文件** | `daemon.json`，告诉客户端核心在哪、用哪个令牌 |
 | **布局/凭证** | 令牌只在 `daemon.json` 与两端内存中，不上线 |
@@ -370,7 +369,7 @@ node browser_extension/tools/build_extension_zip.mjs --dry-run   # 扩展包到�
 | --- | --- |
 | 3.0.0 | 核心服务化：独立核心进程、UI 变纯客户端、协议 5（通道加密）、密钥材料入库、关窗即锁、UI 单实例 |
 | 2.4.0 | 原子主密码轮换、Bitwarden 导入导出、CI/发布工程化 |
-| 2.3.x | 四种条目类型、自定义字段、文件夹管理、搜索前缀；2.3.3 加 Linux 桌面端 |
+| 2.3.x | 四种条目类型、自定义字段、文件夹管理、搜索前缀 |
 
 ---
 

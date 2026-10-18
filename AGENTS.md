@@ -10,18 +10,16 @@ and Phase 2 (browser extension, native messaging, encrypted export/import, TOTP)
 are implemented. **2.3.x** adds four entry types (login / secure note / identity /
 SSH key) with custom fields, live TOTP codes, folder management (icons, rename,
 guarded delete), type filtering and `type:`/`folder:`/`url:` search prefixes.
-**2.3.3** added the **Linux desktop port** (AppImage: tray + close-to-tray in the GTK
-runner, single instance with a unix-socket wake-up, XDG autostart, the desktop-entry
-CLI and per-browser host registration) — that port now lives in the **`linux` branch**
-and is **not** part of this branch. **2.4.0** adds
+**2.3.3** added a Linux desktop port that now lives in the **`linux` branch** and is
+**not** part of this branch. **2.4.0** adds
 **Bitwarden / Vaultwarden import** (JSON + CSV) and a **Bitwarden-compatible export**,
 makes **master-password rotation atomic** (a rotation journal in the vault database,
 schema **3**), and adds **CI** plus scripted release engineering. **3.0.0** turns the
 app into a **core-service architecture**: a standalone, windowless, always-on
 `easypass_core` process owns the vault, the Flutter app is a pure client
 (`lib/client/**` → `VaultApi`), and the tray — which belongs to the UI only — offers
-`Exit UI Only` and `Exit UI and Stop Service`. **This branch supports Windows only**
-(the Linux desktop port lives in the `linux` branch); Phase 3 (cloud sync, sharing,
+`Exit UI Only` and `Exit UI and Stop Service`. **This branch supports Windows only**;
+Phase 3 (cloud sync, sharing,
 emergency access, mobile/macOS) is still planned.
 
 > **Local-only docs (NOT in a fresh clone — `.gitignore` excludes them):** the
@@ -49,9 +47,7 @@ flutter pub get          # install deps
 dart run build_runner build --delete-conflicting-outputs   # regenerate database.g.dart (drift)
 flutter gen-l10n        # regenerate app_localizations.dart after editing lib/l10n/*.arb
 flutter analyze         # lint (flutter_lints)
-flutter test            # 570 passing / 3 skipped (the tree declares ~600 cases; the
-                        # files that target the Linux port register none here, so a run
-                        # reports FEWER CASES, not failures — see CONTRIBUTING.md)
+flutter test            # analyze 之外的全量用例（核心侧数据层 + UI 侧注入假 VaultApi）
 flutter run -d windows  # run desktop app
 flutter build windows   # ⚠️ 一条命令完整构建：easypass.exe + x86 桥 + MSVC 运行时
                         #    + core\easypass_core.exe + lib\sqlite3.dll（POST_BUILD）
@@ -120,9 +116,6 @@ flutter build windows   # ⚠️ 一条命令完整构建：easypass.exe + x86 �
   不再构造内存 drift 库；跑在核心侧的数据层测试仍用 `AppDatabase.forTesting()` +
   `FakeSecureStorage`（`test/fakes.dart`），轮换/加密的真实路径由
   `test/core_actions_harness.dart` 驱动 `CoreActions`。
-- 少数测试文件针对 Linux 移植版（`browser_host_installer_test.dart`、
-  `linux_window_controller_test.dart`、`desktop_integration_test.dart` 的 POSIX 位用例）：
-  它们在这里不注册任何用例（或自己 `skip:`），所以本分支跑出来是**用例更少**，不是失败。
 - **`test/architecture_boundary_test.dart` 是架构守卫**：`lib/features/**` 不得 import
   drift / database / repositories / session key；`lib/client/**` 不得碰数据库；
   `lib/core_service/**` 不得 import Flutter。加了新目录要同步这些规则。
@@ -167,7 +160,7 @@ lib/core_service/              核心服务实现（纯 Dart，**不得 import F
 │   │   └── ssh_key_service.dart        OpenSSH public-key parsing + SHA256/MD5 fingerprints (pure)
 │   ├── storage/                        SecretStore 抽象 + VaultMetaSecretStore（库内校验材料）
 │   └── platform/app_paths.dart         Data dir + file paths (exe dir on Windows;
-│                                       核心在子目录时取父目录), legacy-DB migration
+│                                       核心在子目录时取父目录）
 lib/adapters/flutter_secret_store.dart  唯一允许 import flutter_secure_storage 的"保险库路径"
 ├── data/
 │   ├── database/
@@ -191,19 +184,17 @@ lib/adapters/flutter_secret_store.dart  唯一允许 import flutter_secure_stora
     ├── health/   health_service.dart（纯函数 + HealthReport.fromJson；核心也在用同一套 analyze）
     │             health_provider.dart（走核心的 healthReport 动作，密码不过 IPC）
     ├── settings/ settings_screen.dart（导出/导入/清库全走 VaultApi）, providers/{font_settings,theme}_provider.dart
-    ├── browser_bridge/  browser_host_installer.dart (per-browser native-messaging manifests),
-    │                    browser_host_prompt.dart (first-run registration prompt)
-    ├── desktop_integration/  desktop_integration.dart (facade) + windows_desktop_integration.dart
-    │                         (desktop entry / icon / --desktop-status)
+    ├── desktop_integration/  desktop_integration.dart（桌面项 / 图标 / --desktop-status）
+    │                         + other_desktop_integration.dart（非 Windows 的 no-op）
     ├── desktop_tray/    desktop_tray.dart (facade) + windows_desktop_tray.dart
-    ├── desktop_autostart/  desktop_autostart.dart + windows_autostart.dart
+    ├── desktop_autostart/  desktop_autostart.dart（自启由安装器管，Dart 侧只读状态）
     └── desktop_single_instance/  desktop_single_instance.dart；Windows 的单实现在原生层
                                   （windows/runner/main.cpp 的 Mutex + FindWindow 抬窗），
                                   Dart 侧 windows_single_instance.dart 保持 notApplicable 桩
 tool/build_core.ps1                      核心服务构建（dart build cli + 摊平产物）
 tool/probe_core.dart                     核心功能探针（19 项；只跑空库）
 browser_extension/                      Chrome MV3 extension (see below)
-docs/data-model.md                      数据模型与持久化规范 (LOCAL ONLY — gitignored)
+docs/data-model.md                      数据模型与持久化规范（已入库）
 docs/acceptance-3.0.0.md                3.0.0 真机验收清单 (LOCAL ONLY — gitignored)
 windows/                                Flutter Windows runner (CMake) + the tray/single-instance glue
 ```
@@ -298,8 +289,6 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
   （只在迁移期读旧钥匙串）。未注册时任何存储操作都会**明确抛错**，不会静默退化。
 - **`lib/data/database/tables.drift`** — the schema (folders, password_entries).
   Sensitive columns are `*_encrypted` TEXT; plaintext never touches the DB.
-- **`lib/features/browser_bridge/browser_host_installer.dart`** — 原生消息宿主的
-  注册（各浏览器 manifest；Windows 上由安装器写入 `%LOCALAPPDATA%\EasyPass\`）。
 - **`browser_extension/manifest.json`** — MV3 manifest; `nativeMessaging` permission.
 - **`browser_extension/native_host/com.easypass.app.json`** — host registration
   pointing at `easypass_native_host.exe`; the installer rewrites the equivalent
@@ -370,7 +359,7 @@ in-app version shown on the Settings screen:
   UI 打磨等不改变功能的行为调整。
 
 Rule of thumb: 功能变更 → `y`，纯优化/修复 → `z`，架构/安全模型重构 → `x`。
-新增平台（如 Linux 桌面端，本分支不含）按"功能变更"走 `y`。
+新增平台按"功能变更"走 `y`。
 
 ## Git Workflow
 
@@ -379,7 +368,6 @@ Rule of thumb: 功能变更 → `y`，纯优化/修复 → `z`，架构/安全�
 - `.gitignore` ignores the whole `build/` output tree; `windows/flutter/ephemeral/` is
   ignored by `windows/.gitignore`. **The rest of `windows/` IS tracked** (runner sources,
   CMake files, icon) — treat it as normal source, not as disposable generated output.
-  （`linux/` 相关目录在本主分支上不存在；它们随 `linux` 分支一起维护。）
 
 ## CI/CD
 
@@ -441,13 +429,12 @@ prose. The version comes from `pubspec.yaml` only. Runbook: `installer/release/R
   `AppDatabase.forTesting()` + `NativeDatabase.memory()` 并注册
   `InMemorySecretStore`（`lib/core/storage/secret_store.dart`）。实机排查"库里到底有什么"
   请用 `easypass_core --status`，不要从 UI 进程去读文件。
-- **`pubspec.yaml` 的 sqlite3 hook 是给 `linux` 分支用的，写成 map 形式或整段省略都安全。**
-  当前是 `hooks: user_defines: sqlite3: source: {linux: system}` —— **map 形式**（只对 Linux
-  生效），主分支保留它只是为了将来与 `linux` 分支 merge 时不丢。
-  **它是 map 还是整段不存在，对 Windows 毫无影响**：`source == null` 时 Windows 走
-  "从 GitHub 下载预编译二进制"那条路，与完全没有 hooks 段完全同一条路径（实测：删掉整个
-  hooks 段后 `flutter test` 照常通过）。
-  **真正会炸的是把它写成裸 `source: system`（不带 map）** —— 那样 Windows 也会去
+- **`pubspec.yaml` 里的 sqlite3 hook 必须是 map 形式或整段省略。**
+  当前是 `hooks: user_defines: sqlite3: source: {linux: system}`。它是给 `linux` 分支
+  留的配置，对 Windows 毫无影响：`source` 查不到当前平台条目时落到 `null`，
+  Windows 走"从 GitHub 下载预编译二进制"那条路 —— 与整段 hooks 不存在完全同一条路径
+  （实测：删掉整个 hooks 段后 `flutter test` 照常通过）。
+  **真正会炸的是写成裸 `source: system`（不带 map）** —— 那样 Windows 也会去
   `LookupSystem('sqlite3')`，而 Windows 上没有系统 libsqlite3，于是 `flutter test`
   一次性 206 个用例失败在 `Failed to load dynamic library 'sqlite3.dll'`。
   一句话：**`source` 必须是 map 形式或不存在；不要写成裸 `system`。**
@@ -464,8 +451,8 @@ prose. The version comes from `pubspec.yaml` only. Runbook: `installer/release/R
 - **Secrets in code:** never print encryption keys/passwords; follow the
   existing pattern of passing `Uint8List` keys around by reference only.
 - **Plan.md** (local-only) holds the roadmap: v2.4 = master-password rotation atomicity + Bitwarden
-  import + CI + release engineering；**v3.0 = 核心服务化（本版已实现）**；再往后才是
-  自部署同步 / 密钥体系改造（orgKey 分层）。Sync is **not** implemented, and the
+  import + CI + release engineering；**3.0.0 = 核心服务化（已实现）**；
+  **4.0 = 自部署同步 / 密钥体系改造（orgKey 分层，未动工）**。Sync is **not** implemented, and the
   health report is (login entries only).
 - **Protocol versioning (2.2.1+):** 核心把 `protocolVersion` + `pid` + `coreVersion` + `exe`
   写进 `daemon.json`，`getStatus` 也回 `protocolVersion`。
@@ -637,6 +624,7 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
   **照样注册了托盘图标**，托盘菜单的 "Open EasyPass" 能把那个空窗口 `ShowWindow` 出来
   （2026-10-17 用 `WM_COMMAND(1001)` 实测复现）。3.0.0 的修法不是加门控，而是**根本
   没有无 UI 的 Flutter 进程**：核心是纯 Dart 控制台程序，托盘只属于 UI。
+
 
 
 
