@@ -1,4 +1,4 @@
-// Linux 系统字体目录扫描测试。
+// 系统字体目录扫描测试（注入目录列表；本分支只有 Windows 的真实目录）。
 //
 // 用 [FontDiscoveryService.debugSetSystemFontDirectoriesForTesting] 把系
 // 统字体目录列表替换成临时目录，**不**真读 `~/.local/share/fonts` 或
@@ -6,17 +6,17 @@
 //   1. 临时目录里放一份最小合法 .ttf → discoverSystemFonts 找到。
 //   2. 临时目录里放一份非字体文件（.bin）→ 不被发现。
 //   3. 临时目录**不存在** → 不抛异常，返回空列表。
-//   4. 子目录里放字体 → Linux 默认开递归，能找到；非 Linux 不递归（用
-//      override 也能强制覆盖 recursive 行为）。
+//   4. 子目录里放字体 → 注入 override 时开递归，能找到；生产路径只扫顶层（
+//      override 可以强制覆盖 recursive 行为）。
 //   5. 多个目录扫到的字体名合并去重排序（family 名来自最小化 TTF 头）。
 //   6. 临时目录存在但为空 → 返回空列表，不抛。
 //   7. 目录列表包含"不存在 + 存在"混合 → 只有存在的贡献字体。
 //
 // 不可自动化的项：
-//   - 真实 Linux 桌面上 `/usr/share/fonts` 的成百个家族名确实被列出来
+//   - 真实 Windows 机器上 `C:\Windows\Fonts` 的成百个家族名确实被列出来。
 //     （手测：`flutter test` 跑过一遍，断言 size > 100 即可验证）。
-//   - GTK 主题颜色变更后 Flutter MaterialApp 是否立刻跟随 —— 已确认由
-//     embedder 自动处理，本仓库不需要改任何代码。
+
+
 
 import 'dart:io';
 import 'dart:typed_data';
@@ -80,7 +80,7 @@ void main() {
     File(path).writeAsBytesSync(bytes);
   }
 
-  group('Linux 系统字体目录扫描（注入目录列表）', () {
+  group('系统字体目录扫描（注入目录列表）', () {
     test('注入空目录列表 → 返回空', () async {
       FontDiscoveryService.debugSetSystemFontDirectoriesForTesting(const []);
       final names = await FontDiscoveryService.discoverSystemFonts();
@@ -175,3 +175,4 @@ void main() {
     });
   });
 }
+

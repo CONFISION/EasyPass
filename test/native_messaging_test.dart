@@ -890,7 +890,7 @@ void main() {
 
   // ─── C 方案：会话跨连接保持 ──────────────────────────────
 
-  group('VaultSession 共享（daemon 注入同一实例）', () {
+  group('VaultSession 共享（核心把同一实例注入每个连接）', () {
     Future<Map<String, dynamic>> ask(
             NativeMessagingService svc, String action,
             [Map<String, dynamic> extra = const {}]) =>
@@ -1231,3 +1231,4 @@ void main() {
     });
   });
 }
+

@@ -1,20 +1,14 @@
-// `AppPaths.dataDirectory` / `configDirectory` / `autostartDirectory`
-// 在同进程内必须复用同一个 `Directory` 实例，避免每次 `daemonInfoFile` 等
-// 调用都重读 env + `p.join`。
+// `AppPaths.dataDirectory`
+
+// `AppPaths.dataDirectory` 在同进程内必须复用同一个 `Directory` 实例，
+// 避免每次 `daemonInfoFile` 等调用都重读环境与重拼路径。
 //
 // 设计要点：
 //   - 同进程两次连续 `dataDirectory` 应 `identical(...)` 为真。
 //   - `debugResetAppPathsCacheForTesting()` 必须真正清空缓存，下一次访问
-//     重新解析（用于测试 env 变化场景）。
-//   - 失败语义保留：HOME 缺失时 `dataDirectory` 必须抛 `StateError`，不静默
-//     兜底（不允许静默兜底）。
-//   - 三条 getter (`dataDirectory` / `configDirectory` / `autostartDirectory`)
-//     缓存相互独立 —— reset 一个不影响其他（实现是三个独立字段）。
-//
-// 跨平台：
-//   - 这些都是「解析逻辑在 Linux 上才有 XDG 行为」的 getter，但缓存机制本
-//     身是平台无关的 —— 测试在 Linux CI 上运行就够了；非 Linux 路径只走
-//     `executableDirectory` 分支，逻辑更简单。
+//     重新解析。
+//   - 解析逻辑只依赖 exe 目录结构（父目录有 `easypass.exe` 则取父目录），
+//     与平台无关；Linux 的 XDG 语义随 `linux` 分支维护。
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -80,3 +74,4 @@ void main() {
     });
   });
 }
+

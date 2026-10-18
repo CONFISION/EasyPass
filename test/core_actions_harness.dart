@@ -164,7 +164,7 @@ class CoreHarness {
 
 /// 可注入写入失败的 [SecretStore] 包装。
 ///
-/// 模拟"校验材料落盘失败"（Linux Secret Service 上锁 / Windows 低完整性降权
+/// 模拟"校验材料落盘失败"（钥匙串不可用 / 存储写失败
 /// 写不了 `%APPDATA%`；M4 之后对应"写不进库文件的 `vault_meta`"）。
 class FailingSecretStore implements SecretStore {
   FailingSecretStore(this.inner);

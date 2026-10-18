@@ -11,7 +11,7 @@ import 'package:easypass/protocol/events.dart';
 
 import 'fake_vault_api.dart';
 
-/// 核心推送 × 流式 provider 的交叉回归（原 `encryption_rotation_providers_test`）。
+/// 核心推送 × 流式 provider 的交叉回归。
 ///
 /// 历史：2.3.1 审查发现 `VaultRepository.watch*` 在**创建流的那一刻**抓一把会话
 /// 密钥，provider 不监听密钥变化就会一直用旧钥匙解密 —— 宽容模式不报错，把
@@ -157,3 +157,4 @@ void main() {
     );
   });
 }
+

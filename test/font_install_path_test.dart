@@ -1,4 +1,4 @@
-// 字体安装路径与加载器期望路径**两平台必须一致**。
+// 字体安装路径与加载器期望路径必须一致（本分支只断言 Windows 的 CMake）。
 //
 // 曾有断言称："`FONTS_SRC` 安装路径是 `${CMAKE_INSTALL_PREFIX}/assets/fonts`
 // 而 `windows/CMakeLists.txt` 是 `data/`" —— 事实核验发现这条断言**错误**：
@@ -8,9 +8,6 @@
 //     $<TARGET_FILE_DIR:${BINARY_NAME}>` = exe 所在目录（Windows 不是
 //     sub-bundle 模式，而是 in-place，所以 bundle 与 exe 同目录）。
 //   - `installer/easypass_setup.iss:115-116` 再 stamp 一次到 `{app}\assets\fonts`。
-//   - `linux/CMakeLists.txt:217-223` 同样装到 `${CMAKE_INSTALL_PREFIX}/assets/fonts`，
-//     Linux 这里 `CMAKE_INSTALL_PREFIX` = `BUILD_BUNDLE_DIR` = bundle 根（在
-//     通用 `flutter build linux` 下与 `<exedir>` 重合）。
 //   - `lib/data/services/font_discovery_service.dart:35-39` 加载器从
 //     `Platform.resolvedExecutable` 的 dirname 取 `assets/fonts/`。
 //
@@ -123,3 +120,4 @@ String _repoRoot() {
   // Tests run from the project root, so cwd == package root.
   return Directory.current.path;
 }
+

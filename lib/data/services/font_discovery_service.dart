@@ -43,17 +43,13 @@ class FontDiscoveryService {
     return _scanDirectory(_bundledFontDir());
   }
 
-  /// Fonts registered in the system font folders (Windows + Linux).
+  /// Fonts registered in the system font folders（本分支只有 Windows）。
   ///
-  /// Windows: `C:\Windows\Fonts` + `%LOCALAPPDATA%\Microsoft\Windows\Fonts`.
-  /// Linux: 按 freedesktop.org Fontconfig 默认扫描顺序加入 4 个
-  /// 目录 —— `~/.local/share/fonts`（用户级，优先级最高）、`~/.fonts`（旧
-  /// 路径，仍有发行版沿用）、`/usr/local/share/fonts`（系统管理员级）、
-  /// `/usr/share/fonts`（发行版打包）。子目录递归开（Fontconfig 默认行为；
-  /// 用户按 family 分子目录的习惯很常见）。
+  /// Windows: `C:\Windows\Fonts` + `%LOCALAPPDATA%\Microsoft\Windows\Fonts`。
+  /// 其它平台返回空列表 —— Linux 的 Fontconfig 目录扫描随 `linux` 分支维护。
   ///
   /// 测试可通过 [_systemFontDirectories] 的可注入替身替换路径列表，无需
-  /// 真 `~/.local/share/fonts`、NFS / 容器里无 `/usr/share/fonts` 也能跑。
+  /// 真实系统字体目录也能跑。
   static Future<List<String>> discoverSystemFonts() async {
     final override = _systemFontDirectoriesOverride;
     final dirs = override ?? _systemFontDirectories();
