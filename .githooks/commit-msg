@@ -1,0 +1,30 @@
+#!/bin/sh
+# Reject commit messages that leak private conversation context into a public repo.
+#
+# 规则（2026-10 起）：commit message 是给所有人看的，不许写入私聊/内部决策来源。
+#   - 不写「谁说的」「按谁的指示」这类来源（人名、昵称、私聊、对话记录）
+#   - 决策要写成技术理由，而不是「某人要求」
+# 命中的提交会被拒绝；需要技术性改写后重试。
+set -eu
+
+msg_file="$1"
+subject=$(head -n 1 "$msg_file")
+
+# 硬性拦截：私密称呼与对话痕迹。
+if grep -nE '小玖|小鲸鱼|私聊|对话记录|聊天记录|我们私下|他要求' "$msg_file" >/dev/null 2>&1; then
+  echo "commit-msg: 拒绝 —— 提交说明里出现了私下对话内容（人名/私聊/来源）。" >&2
+  echo "            commit message 是公开的，请改写成技术理由。" >&2
+  echo "            命中：" >&2
+  grep -nE '小玖|小鲸鱼|私聊|对话记录|聊天记录|我们私下|他要求' "$msg_file" >&2 || true
+  exit 1
+fi
+
+# 软性提示：项目约定 <type>(<scope>): 中文说明，标题 <= 72 字符。
+if ! printf '%s' "$subject" | grep -qE '^(feat|fix|docs|test|refactor|perf|style|build|ci|chore|revert|add|merge)(\([a-z0-9._-]+\))?!?: .+'; then
+  echo "commit-msg: 提示 —— 标题建议写成 '<type>(<scope>): 说明'（feat/fix/docs/test/ci/chore…）。" >&2
+fi
+if [ "$(printf '%s' "$subject" | wc -m)" -gt 72 ]; then
+  echo "commit-msg: 提示 —— 标题超过 72 字符，建议精简。" >&2
+fi
+
+exit 0

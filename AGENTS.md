@@ -108,14 +108,13 @@ flutter build linux --release   # Linux bundle → build/linux/x64/release/bundl
   - **Linux（这台开发机 lagoon，Ubuntu 26.04）上，构建与打包由 agent 自己做**：
     `flutter build linux --release`、`tool/build_core.sh`、`installer/deb/build_deb.sh`、
     一键脚本 `tool/build_release_linux.sh`，以及 `flutter analyze` / `flutter test`。
-    交付物不再外包给用户 —— 旧的"agent 一律不执行最终打包"这条在 Linux 侧作废
-    。
+    交付物不再外包给维护者 —— 旧的"agent 一律不执行最终打包"这条在 Linux 侧作废。
   - **Windows 原生构建仍由用户执行**（`flutter build windows` / `flutter run -d windows` /
     ISCC 安装包）：agent 的环境与 MSBuild 存在兼容问题（FileTracker 崩溃），
     不要尝试、也不要把 agent 侧结果当交付依据。
-  - **git push 由 agent 执行，但必须等维护者明确指示**（本机 gh 已配好；日常只做
-    本地提交，不主动推、不顺手补推）。**代码签名、打 tag、GitHub Release 仍不归 agent**，
-    那些归维护者或 CI。
+  - **git push 由 agent 执行，但必须等维护者明确指示**（本机 gh 已配好；日常只做本地
+    提交，不主动推、不顺手补推、不批量推未批准的提交）。**代码签名、打 tag、
+    GitHub Release 仍不归 agent**，那些归维护者或 CI。
   - Linux 侧 agent 跑完打包后必须给出证据：`dpkg-deb --info`、`dpkg -i`/`dpkg -r` 体检、
     `flutter analyze`、`flutter test`（`XDG_CONFIG_HOME`/`XDG_DATA_HOME` 未导出）与
     `tool/probe_core.dart` 的结果，缺一项就算没验完。
@@ -433,6 +432,12 @@ Rule of thumb: 功能变更 → `y`，纯优化/修复 → `z`，架构/安全�
 
 - Branch: `master`; commits are few and direct-to-master (no PR workflow yet).
 - Commit messages are **Chinese**, `type: description` style (e.g. `add:添加了浏览器扩展的图标`, `init`).
+  规范写法：`<type>(<scope>): 说明`（`feat` / `fix` / `docs` / `test` / `refactor` / `ci` / `chore` /
+  `build` / `perf` / `style`；`merge` 用于合并提交），标题 ≤ 72 字符，正文分条写**技术理由**。
+- **提交说明是公开内容，禁止写入私下对话与决策来源。** 不写「谁要求的」「按谁的指示」「私聊里说的」
+  以及任何昵称、对话摘录、内部频道信息；决策只写成技术理由（例如"因为 Linux runner 从未编译过
+  `linux/runner`，所以 CI 增加编译检查"）。仓库内的 `.githooks/commit-msg` 会拒绝含私下内容的提交，
+  启用方式：`git config core.hooksPath .githooks`。
 - `.gitignore` ignores the whole `build/` output tree; `windows/flutter/ephemeral/` is
   ignored by `windows/.gitignore`. **The rest of `windows/` IS tracked** (runner sources,
   CMake files, icon) — treat it as normal source, not as disposable generated output.
