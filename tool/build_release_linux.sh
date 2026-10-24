@@ -42,11 +42,16 @@ command -v flutter >/dev/null 2>&1 || {
 echo "== 1/6 flutter pub get"
 flutter pub get
 
+# `browser_host_installer_test.dart` 用临时 $HOME 断言 vendor 根/manifest 落在那里，
+# 而 `install()` 会回落到环境里的 $XDG_CONFIG_HOME —— 一旦本机导出了它，测试就写进真实
+# ~/.config 并连带 8~9 条假失败。CI runner 不导出这两个变量，这里对齐。
+TEST_ENV=(env -u XDG_CONFIG_HOME -u XDG_DATA_HOME)
+
 if [ "$SKIP_TESTS" -eq 0 ]; then
   echo "== 2/6 flutter analyze"
   flutter analyze --no-pub
   echo "== 3/6 flutter test"
-  flutter test --no-pub
+  "${TEST_ENV[@]}" flutter test --no-pub
 else
   echo "== 2-3/6 tests skipped (--skip-tests)"
 fi
