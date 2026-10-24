@@ -15,7 +15,7 @@ installer/release/
 └── lib/release_common.mjs       共用：pubspec 版本号读取、参数解析、输出
 ```
 
-版本号只有一个来源：`pubspec.yaml` 的 `version:`（读法与 `installer/appimage/build_appimage.sh`
+版本号只有一个来源：`pubspec.yaml` 的 `version:`（读法与 `installer/deb/build_deb.sh`
 一致：取 `x.y.z+build` 里的 `x.y.z`）。脚本里不写死版本号。
 
 ## 发布时跑什么
@@ -26,8 +26,8 @@ flutter build windows
 "C:\Program Files\Inno Setup 7\ISCC.exe" installer\easypass_setup.iss
 #   → build\installer\EasypassSetup.exe
 flutter build linux --release
-bash installer/appimage/build_appimage.sh build/linux/x64/release/bundle release/EasyPass-<version>-linux-x86_64.AppImage
-#   → release/EasyPass-<version>-linux-x86_64.AppImage（名字里带版本号，脚本才认得出）
+bash installer/deb/build_deb.sh build/linux/x64/release/bundle dist/easypass_<version>_amd64.deb
+#   → release/EasyPass-<version>-linux-x86_64..deb（名字里带版本号，脚本才认得出）
 
 # 2) 收集：拷进 dist/release/<version>/，写出 SHA256SUMS.txt + release-manifest.json
 node installer/release/collect_artifacts.mjs
@@ -41,14 +41,14 @@ node installer/release/generate_release_notes.mjs
   加 `--strict` 就可以像正式运行一样以非零码失败）。
 - 这一版只发 Windows：`node installer/release/collect_artifacts.mjs --skip linux`。
 - 扩展商店包也要一起发（默认它是可选项，存在就收）：加 `--require extension`。
-- 产物不在默认位置：`--installer <path>` / `--appimage <path>` / `--extension <path>` / `--extra <path>`。
+- 产物不在默认位置：`--installer <path>` / `--deb <path>` / `--extension <path>` / `--extra <path>`。
 
 ## 产物与默认路径
 
 | 产物 | 默认路径 | 必需 | 由谁产出 |
 | --- | --- | --- | --- |
 | Windows 安装包 | `build/installer/EasypassSetup.exe` | 是 | `ISCC.exe installer/easypass_setup.iss` |
-| Linux AppImage | 自动发现（`release/` `dist/` `dist/release/` `installer/appimage/` `build/` 仓库根，各一层，优先文件名含版本号的那个） | 是 | `installer/appimage/build_appimage.sh` |
+| Linux .deb | 自动发现（`release/` `dist/` `dist/release/` `build/` 仓库根，各一层，优先文件名含版本号的那个） | 是 | `installer/deb/build_deb.sh` |
 | 扩展商店包 | `dist/easypass-extension-<version>.zip` | 否 | `node browser_extension/tools/build_extension_zip.mjs` |
 
 ## 产出（默认 `dist/release/<version>/`）

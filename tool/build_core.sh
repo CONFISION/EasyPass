@@ -136,6 +136,15 @@ mkdir -p "$CORE_DIR" || die "cannot create $CORE_DIR"
 DST_EXE="$CORE_DIR/$EXE_NAME"
 cp -f "$SRC_EXE" "$DST_EXE" || die "cannot write $DST_EXE (is a running easypass_core locking it?)"
 chmod +x "$DST_EXE"
+
+# NOTE: no post-link patchelf here on purpose. `patchelf --set-rpath` on the
+# `dart build cli` image corrupts its AOT loading (the binary then behaves like
+# the plain Dart VM: `--version` prints the SDK version and `--serve` prints
+# `dartvm` usage). The library path is provided at runtime instead:
+#   * the UI passes LD_LIBRARY_PATH=<core>/../lib when it spawns the core
+#     (lib/core_service/bridge_forwarder.dart), and
+#   * the .deb installs a `easypass-core` wrapper that exports the same path.
+# Keep this binary untouched.
 echo "build_core: core    $DST_EXE ($(file_size "$DST_EXE") bytes)"
 
 # --- 2. the core's libraries: <out>/lib, never clobbering Flutter's ---------

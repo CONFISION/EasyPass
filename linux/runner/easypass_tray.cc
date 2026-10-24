@@ -159,7 +159,9 @@ void show_error_dialog(const gchar* primary, const gchar* detail) {
     parent = g_window;
   }
   GtkWidget* dialog = gtk_message_dialog_new(
-      parent, GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+      parent,
+      static_cast<GtkDialogFlags>(GTK_DIALOG_MODAL |
+                                  GTK_DIALOG_DESTROY_WITH_PARENT),
       GTK_MESSAGE_ERROR, GTK_BUTTONS_CLOSE, "%s", primary);
   if (detail != nullptr) {
     gtk_message_dialog_format_secondary_text(GTK_MESSAGE_DIALOG(dialog), "%s",

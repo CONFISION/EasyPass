@@ -357,9 +357,12 @@ void main() {
       expect(probe.exitCode, 127);
       final stderr = (probe.stderr as String).trim();
       expect(stderr, contains('easypass-native-host:'));
-      expect(stderr, contains('cannot locate easypass binary'));
-      expect(stderr, contains('APPIMAGE (unset)'));
-      expect(stderr, contains('command -v easypass (not on PATH)'));
+      // 3.0.0 起 wrapper 找的是核心二进制（`easypass_core --bridge`），
+      // 不是 2.x 的 `easypass` —— 报错文案也跟着改了。
+      expect(stderr, contains('cannot locate easypass_core binary'));
+      // wrapper 的 AppImage 探测现在看 `$APPDIR`（3.0.0 起宿主是核心）。
+      expect(stderr, contains('APPDIR (unset'));
+      expect(stderr, contains('command -v easypass_core (not on PATH)'));
       // stdout 必须为空 —— 浏览器从 stdout 读 native messaging 帧，任何
       // 字节都会让 4B 长度前缀失同步。
       expect((probe.stdout as String), isEmpty);

@@ -47,14 +47,15 @@ Flutter 界面 ┘     回环 TCP · 协议 5 · 全帧加密
 `EasypassSetup.exe` 直接运行：按用户安装、免管理员、可选随系统启动。安装包**未代码签名**，
 SmartScreen 可能提示未知发布者。
 
-**Linux** —— 下载 AppImage 后：
+**Linux** —— 下载 `.deb`（`easypass_<版本>_amd64.deb`）后安装：
 
 ```bash
-chmod +x EasyPass-3.0.0-linux-x86_64.AppImage
-./EasyPass-3.0.0-linux-x86_64.AppImage --install   # 写入应用菜单
+sudo apt install ./easypass_3.0.0_amd64.deb
 ```
 
-需要 FUSE 2（`libfuse2`）；没有就加 `--appimage-extract-and-run`。
+安装到 `/opt/easypass`，并把 `easypass` / `easypass-core` 放进 `PATH`，同时写入
+应用菜单项、hicolor 图标与浏览器 native-messaging 清单。GTK 3、libayatana-appindicator3、
+libsecret 等依赖由 apt 解析 —— 不再需要 FUSE，也不带自带运行时。
 **本版的 Linux 产物未经真机验证** —— 目前只过了语法检查，请当作未验证产物。
 
 保险库位置：Windows 在 `easypass.exe` 旁边（`%LOCALAPPDATA%\Programs\EasyPass\`），
@@ -67,8 +68,9 @@ flutter build windows    # → build\windows\x64\runner\Release\easypass.exe
 ```
 
 这一条命令同时产出 x86 浏览器桥与核心服务。构建前先停掉正在运行的 EasyPass：构建要替换
-界面与核心正打开的文件。Linux 用 `flutter build linux --release`（GTK 3 依赖与 AppImage
-打包见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
+界面与核心正打开的文件。Linux 用 `tool/build_release_linux.sh`（analyze → test →
+`flutter build linux --release` → 核心服务 → `.deb`；GTK 3 与
+libayatana-appindicator3 依赖见 [CONTRIBUTING.md](CONTRIBUTING.md)）。
 
 ## 浏览器扩展
 

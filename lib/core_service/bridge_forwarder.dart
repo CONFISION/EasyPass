@@ -165,16 +165,39 @@ String? coreExecutablePath() {
   return null;
 }
 
+/// 核心自己的库目录：`<core exe 目录>/../lib`。
+///
+/// `package:sqlite3` 的 Linux 钩子是 `source: system`，运行时按**裸名**
+/// `libsqlite3.so` 去 dlopen。UI 侧由 CMake 给了 `$ORIGIN/lib` 的 rpath，
+/// 但核心是 `dart build cli` 出的 AOT 镜像，没有 rpath —— 所以拉起它时必须把
+/// 这个目录塞进 `LD_LIBRARY_PATH`，否则用户机器只要没装 `libsqlite3-dev`
+/// 就会在第一次开库时 `Failed to load dynamic library 'libsqlite3.so'`。
+String? coreLibraryDirectory(String coreExecutablePath) {
+  if (Platform.isWindows) return null;
+  final libDir = Directory(
+    '${File(coreExecutablePath).parent.parent.path}/lib',
+  );
+  return libDir.existsSync() ? libDir.path : null;
+}
+
 /// 若同目录有核心可执行文件则后台拉起（分离进程，不阻塞调用方）。
 Future<bool> launchCoreIfPresent() async {
   final path = coreExecutablePath();
   if (path == null) return false;
   try {
+    final environment = Map<String, String>.from(Platform.environment);
+    final libDir = coreLibraryDirectory(path);
+    if (libDir != null) {
+      final existing = environment['LD_LIBRARY_PATH'];
+      environment['LD_LIBRARY_PATH'] =
+          existing == null || existing.isEmpty ? libDir : '$libDir:$existing';
+    }
     await Process.start(
       path,
       const ['--serve'],
       mode: ProcessStartMode.detached,
       workingDirectory: File(path).parent.path,
+      environment: environment,
     );
     return true;
   } catch (error) {

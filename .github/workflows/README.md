@@ -8,7 +8,7 @@
 | 文件 | 触发 | 做什么 |
 | --- | --- | --- |
 | `ci.yml` | push 到 `master`、任何 `pull_request` | Windows 上跑 analyze / test / 扩展静态检查 + 三个 jsdom 冒烟 / runner 语法检查 |
-| `release.yml` | 推送 `v*` 形式的 tag（如 `v2.4.0`） | Windows 装包、Linux AppImage，汇总 `SHA256SUMS.txt` 并创建 GitHub Release |
+| `release.yml` | 推送 `v*` 形式的 tag（如 `v2.4.0`） | Windows 装包、Linux `.deb`，汇总 `SHA256SUMS.txt` 并创建 GitHub Release |
 
 两个文件的注释都是中文；`name:`（Actions 界面里显示的步骤名）保持英文，便于在
 GitHub 网页上扫读。改动工作流后建议本地跑一次 `actionlint`（见文末）。
@@ -121,12 +121,12 @@ on:
 | --- | --- | --- |
 | `verify` | ubuntu-latest | 校验 tag ↔ `pubspec.yaml`，再跑 `check_extension.mjs`（四处版本号契约） |
 | `windows` | windows-latest | `flutter build windows` → `tool/build_core.ps1` → ISCC → `EasyPass-<版本>-windows-x64-setup.exe` |
-| `linux` | ubuntu-latest | `flutter build linux --release` → `tool/build_core.sh` → `build_appimage.sh` → `EasyPass-<版本>-linux-x86_64.AppImage` |
+| `linux` | ubuntu-latest | `flutter build linux --release` → `tool/build_core.sh` → `installer/deb/build_deb.sh` → `easypass_<版本>_amd64.deb`（含 `dpkg -i` 安装体检） |
 | `release` | ubuntu-latest | 下载两个 artifact、跑 `installer/release/collect_artifacts.mjs`、创建/更新 GitHub Release |
 
 产物名带版本号是为了发布页上好认。Release 里的资产是：`EasyPass-<版本>-windows-x64-setup.exe`
 （安装包本体仍是 `build\installer\EasypassSetup.exe`，只是上传前改了名）、
-`EasyPass-<版本>-linux-x86_64.AppImage`、`SHA256SUMS.txt` 以及 `release-manifest.json`。
+`easypass_<版本>_amd64.deb`、`SHA256SUMS.txt` 以及 `release-manifest.json`。
 
 ### 核心服务（3.0.0 起）
 
@@ -146,7 +146,7 @@ on:
   - Windows：`Release\core\easypass_core.exe` + `Release\lib\sqlite3.dll`；
   - Linux：`bundle/core/easypass_core` + `bundle/lib/`（复用 Flutter bundle 自带的
     lib 目录，脚本**不覆盖**已有的 `libsqlite3.so`）；
-  - AppImage 里即 `usr/bin/core/easypass_core` + `usr/bin/lib/...`。
+  - Linux 的 `.deb` 里即 `/opt/easypass/core/easypass_core` + `/opt/easypass/lib/...`。
   Flutter 自己那份 `Release\sqlite3.dll`（UI 用）保持不动。
 - **数据坐标不变**：`AppPaths._resolveDataDirectory()`（`lib/core/platform/app_paths.dart`）
   发现父目录里有 UI 二进制（`easypass.exe`）就取父目录，所以核心在 `{app}\core\` 时
@@ -183,20 +183,21 @@ on:
 - 依赖：`build-essential clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev
   libayatana-appindicator3-dev libsqlite3-dev`。刻意不写 `libstdc++-12-dev` 这类带版本号的包名 ——
   `ubuntu-latest` 的默认 GCC 会随镜像升级，写死版本号会在镜像换代后直接 apt 失败。
-  `libsqlite3-dev` 只为核心构建（`source: system` 钩子）准备。
+  不再安装 `libsqlite3-dev`：bundle 自带 `libsqlite3.so`，核心靠 `LD_LIBRARY_PATH` 找它。
 - `linux/CMakeLists.txt` 会用 `sqlite3_flutter_libs` 里的 sqlite.org 源码现编一份
   `libsqlite3.so`（`pubspec.yaml` 的 linux-scoped `source: system` 钩子要求这个名字），
   配置阶段需要联网拉源码，runner 上有网。
-- appimagetool 用官方 1.9.1 的 `appimagetool-x86_64.AppImage`（URL 是固定 tag，
-  不用每天重建的 `continuous`）。它自己就是个 AppImage，runner 上没有 FUSE2，
-  所以打包时用 `APPIMAGE_EXTRACT_AND_RUN=1` 让运行时解包后直接执行；
-  依赖步骤里也顺手试装 `libfuse2t64`/`libfuse2`，装不上不影响。
-- 版本号由 `build_appimage.sh` 自己从 `pubspec.yaml` 读，与 `dist` 里的文件名一致。
+- 打包用 `installer/deb/build_deb.sh`：bundle 原样进 `/opt/easypass`，另配 `/usr/bin` 入口、
+  desktop entry、hicolor 图标与 native-messaging 清单，最后 `dpkg-deb --root-owner-group` 出包。
+  版本号由脚本自己从 `pubspec.yaml` 读。
+- 之后还有一步**真实的安装体检**：`dpkg -i` → 断言 `/opt/easypass` 布局 →
+  `desktop-file-validate` → `/usr/bin/easypass-core --version` → `dpkg -r`。
+  只跑 `dpkg-deb --info` 不能证明这个包装得上。
 
 ### Release 任务
 
 - **校验和与清单不在这里手搓**：跑 `node installer/release/collect_artifacts.mjs
-  --installer incoming/<安装包> --appimage incoming/<AppImage> --skip extension`，
+  --installer incoming/<安装包> --deb incoming/easypass_<版本>_amd64.deb --skip extension`，
   也就是仓库里唯一一份 `SHA256SUMS.txt` 实现（本地手工发布走同一条路，见
   `installer/release/README.md`）。它把两个产物拷进 `dist/release/<version>/`，
   写出 `SHA256SUMS.txt`（`<hex>  <文件名>`、按文件名排序、LF、无注释行 —— Linux 上
@@ -260,14 +261,12 @@ on:
 - ci.yml 里"准备 `windows/flutter/ephemeral`"那一步的耗时：它包含一次引擎产物下载
   （约百 MB）和一次 Dart kernel 编译。命令本身已在本机（隔离副本里）验证过，但没在
   runner 上计时。
-- `APPIMAGE_EXTRACT_AND_RUN=1` 在 ubuntu-latest 上运行 appimagetool 1.9.1 的表现
-  （若该版本不认这个环境变量，就装 `libfuse2t64` 走 FUSE 路径，依赖步骤里已经试装）。
-- **核心服务构建只在 Windows 上实跑过**：`dart build cli` 的 Windows 产物
-  （`bundle/bin/easypass_core.exe` + `bundle/lib/sqlite3.dll`）、`tool/build_core.ps1`
-  的 `core\` + `lib\` 布局、以及核心能起/能查库/能 `--shutdown`（`LOCALAPPDATA`
-  重定向到沙箱里跑通）都已实测。Linux 侧只有 `tool/build_core.sh` 在 Cygwin 下用假
-  bundle 冒烟过复制逻辑；真机上 `dart build cli` 是否顺利用到系统 libsqlite3、
-  AppImage 里 `usr/bin/core/../lib` 能否命中 `usr/bin/lib`，第一次跑 CI 才能确认。
+- **核心服务与 .deb 已在 Linux 真机验证（2026-10-25）**：`dart build cli` 在 Ubuntu 26.04
+  上产出 `easypass_core`（8.9 MB），`tool/build_core.sh` 摊平布局正确；核心探针
+  `dart run tool/probe_core.dart` 在空库上 **19/19 通过**；UI（Xvfb 下）能拉起核心并握手；
+  `installer/deb/build_deb.sh` 打出的 `.deb` 能 `dpkg -i` 安装、`/usr/bin/easypass-core --version`
+  正常、从 `/opt` 启动后核心加载的是 `/opt/easypass/lib/libsqlite3.so`，卸载干净。
+  CI 上的 ubuntu-latest 仍需第一次真实跑一遍确认耗时与镜像差异。
 - **`.iss` 的新增 `[Code]`（安装/卸载前停核心）没有用 ISCC 编过**：本机按约定不跑
   ISCC，语法与运行时行为（`ewNoWait` 的优雅停机 + `taskkill` 兜底）要到 `release.yml`
   或人工打包时才第一次真正执行。

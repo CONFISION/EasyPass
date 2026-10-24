@@ -16,9 +16,6 @@ permissions:
 env:
   # 与 ci.yml 保持一致：见那里的注释（Dart ^3.12.2 / .metadata revision / owner 本机）。
   FLUTTER_VERSION: 3.47.5
-  # appimagetool 1.9.1 x86_64 —— 官方 release 资产，URL 已验证存在。
-  # 刻意不用 `continuous` 那个滚动 tag：它是每天重建的，无法复现。
-  APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
 
 jobs:
   # ─── 门禁：版本号四方契约 + tag 一致性 ───────────────────────────────────
@@ -199,9 +196,9 @@ jobs:
           path: dist/*.exe
           if-no-files-found: error
 
-  # ─── Linux：flutter build linux --release + AppImage ────────────────────
+  # ─── Linux：flutter build linux --release + 核心服务 + .deb ──────────────
   linux:
-    name: Linux AppImage
+    name: Linux .deb
     runs-on: ubuntu-latest
     needs: verify
     timeout-minutes: 60
@@ -216,12 +213,16 @@ jobs:
           channel: stable
           cache: true
 
-      # GTK 3 + libayatana-appindicator3-dev 是 linux/runner 的依赖（AGENTS.md）。
-      # libsqlite3-dev 是核心构建（`dart build cli` + pubspec.yaml 的
-      # `source: {linux: system}` 钩子）需要的；Flutter 侧自己编 sqlite3，不依赖它。
+      # linux/runner 的依赖（AGENTS.md）：GTK 3 + libayatana-appindicator3。
+      # libsecret-1-dev 是 flutter_secure_storage_linux 的构建依赖。
       # 刻意不写 libstdc++-12-dev 这种带版本号的包名：ubuntu-latest 的默认 GCC
       # 版本会随镜像升级而变，写死版本号会让 apt 在镜像升级后直接失败；
       # build-essential 一定存在，且会把当前默认的 libstdc++-dev 一起装上。
+      #
+      # 这里**不再**装 libsqlite3-dev：bundle 自带 libsqlite3.so（CMake 用
+      # sqlite3_flutter_libs 的 sqlite.org 源码现编），核心在运行时通过
+      # LD_LIBRARY_PATH=<bundle>/lib 找到它。装了反而会掩盖"用户机器上没有
+      # -dev 包"这一类真实缺陷。
       - name: Install Linux build dependencies
         shell: bash
         run: |
@@ -229,13 +230,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential clang cmake ninja-build pkg-config \
-            libgtk-3-dev liblzma-dev libayatana-appindicator3-dev libsqlite3-dev
-          # appimagetool 自己就是个 AppImage，正常跑需要 FUSE2（24.04 起包名是
-          # libfuse2t64）。装得上最好；装不上也不影响打包 —— 打包步骤用
-          # APPIMAGE_EXTRACT_AND_RUN=1 让运行时解包后直接执行，完全绕开 FUSE。
-          sudo apt-get install -y --no-install-recommends libfuse2t64 \
-            || sudo apt-get install -y --no-install-recommends libfuse2 \
-            || echo 'no FUSE2 package available; packaging will use APPIMAGE_EXTRACT_AND_RUN=1'
+            libgtk-3-dev liblzma-dev libayatana-appindicator3-dev libsecret-1-dev \
+            fakeroot dpkg-dev imagemagick
 
       - name: flutter pub get
         run: flutter pub get
@@ -246,8 +242,7 @@ jobs:
       - name: flutter build linux --release
         run: flutter build linux --release
 
-      # 核心服务同样进 bundle（core/easypass_core，库复用 bundle 的 lib/）：
-      # build_appimage.sh 把 bundle 原样拷进 usr/bin/，所以核心自动进 AppImage。
+      # 核心服务同样进 bundle（core/easypass_core；库复用 bundle 的 lib/）。
       # 工具与 Windows 侧同源（tool/build_core.sh 对应 tool/build_core.ps1）。
       - name: Build core service (dart build cli)
         shell: bash
@@ -262,41 +257,47 @@ jobs:
           bundle=build/linux/x64/release/bundle
           test -x "$bundle/easypass" || { echo "::error::$bundle/easypass 不存在"; exit 1; }
           test -x "$bundle/core/easypass_core" || { echo "::error::$bundle/core/easypass_core 不存在（核心服务未构建）"; exit 1; }
-          test -f "$bundle/assets/icons/Easypass.png" || echo "::warning::缺少 $bundle/assets/icons/Easypass.png（AppImage 将不带图标）"
+          test -f "$bundle/assets/icons/Easypass.png" || echo "::warning::缺少 $bundle/assets/icons/Easypass.png（deb 将不带图标）"
+          # 核心必须能自己找到 bundle 里的 libsqlite3.so；这里把 PATH 里的系统
+          # sqlite 隐掉再跑一次 --version，能过说明打包脚本的 LD_LIBRARY_PATH
+          # 方案成立（详见 installer/deb/build_deb.sh 与 bridge_forwarder）。
+          "$bundle/core/easypass_core" --version || { echo "::error::核心 --version 失败（缺 libsqlite3.so？）"; exit 1; }
           ls -l "$bundle" "$bundle/core"
 
-      - name: Download appimagetool
+      # installer/deb/build_deb.sh：bundle → /opt/easypass + /usr/bin 入口 +
+      # desktop entry + 图标 + native-messaging manifests → dpkg-deb 打包。
+      # 版本号由脚本自己从 pubspec.yaml 读。
+      - name: Package .deb
         shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/tools"
-          tool="$RUNNER_TEMP/tools/appimagetool.AppImage"
-          curl -fsSL -o "$tool" "$APPIMAGETOOL_URL"
-          chmod +x "$tool"
-          # 只做一次"能不能跑"的自检；--version 不受支持也不致命，真正的失败会在
-          # 打包步骤里以明确的错误暴露出来。
-          APPIMAGE_EXTRACT_AND_RUN=1 "$tool" --version 2>&1 | head -n 2 || true
-
-      # build_appimage.sh <bundle_dir> <output .AppImage>：
-      # 版本号由脚本自己从 pubspec.yaml 读，appimagetool 的路径走 $APPIMAGETOOL。
-      - name: Package AppImage
-        shell: bash
-        env:
-          APPIMAGE_EXTRACT_AND_RUN: '1'
         run: |
           set -euo pipefail
           mkdir -p dist
-          APPIMAGETOOL="$RUNNER_TEMP/tools/appimagetool.AppImage" \
-            bash installer/appimage/build_appimage.sh \
-              build/linux/x64/release/bundle \
-              "dist/EasyPass-${{ needs.verify.outputs.version }}-linux-x86_64.AppImage"
+          bash installer/deb/build_deb.sh \
+            build/linux/x64/release/bundle \
+            "dist/easypass_${{ needs.verify.outputs.version }}_amd64.deb"
           ls -l dist
 
-      - name: Upload AppImage artifact
+      # 安装体检：真正的 dpkg -i + 从 /opt 启动核心 + 卸载。
+      # 这一步是"这个 .deb 到底能不能装"的唯一证据，别只靠 dpkg-deb --info。
+      - name: Install smoke test (dpkg -i / run / remove)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo dpkg -i dist/easypass_${{ needs.verify.outputs.version }}_amd64.deb
+          test -x /opt/easypass/core/easypass_core
+          test -L /usr/bin/easypass
+          test -f /usr/share/applications/easypass.desktop
+          desktop-file-validate /usr/share/applications/easypass.desktop
+          # CLI 包装器要能在没有 libsqlite3-dev 的机器上跑起来。
+          /usr/bin/easypass-core --version
+          sudo dpkg -r easypass
+          test ! -e /opt/easypass/easypass
+
+      - name: Upload .deb artifact
         uses: actions/upload-artifact@v7
         with:
-          name: linux-appimage
-          path: dist/*.AppImage
+          name: linux-deb
+          path: dist/*.deb
           if-no-files-found: error
 
   # ─── 汇总：SHA256SUMS.txt + GitHub Release ──────────────────────────────
@@ -321,10 +322,10 @@ jobs:
           name: windows-installer
           path: incoming
 
-      - name: Download Linux AppImage
+      - name: Download Linux .deb
         uses: actions/download-artifact@v8
         with:
-          name: linux-appimage
+          name: linux-deb
           path: incoming
 
       # 校验和与发布清单交给 installer/release/collect_artifacts.mjs —— 仓库里
@@ -341,7 +342,7 @@ jobs:
           set -euo pipefail
           node installer/release/collect_artifacts.mjs \
             --installer "incoming/EasyPass-${{ needs.verify.outputs.version }}-windows-x64-setup.exe" \
-            --appimage "incoming/EasyPass-${{ needs.verify.outputs.version }}-linux-x86_64.AppImage" \
+            --deb "incoming/easypass_${{ needs.verify.outputs.version }}_amd64.deb" \
             --skip extension
           out="dist/release/${{ needs.verify.outputs.version }}"
           ls -l "$out"

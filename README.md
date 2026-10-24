@@ -52,16 +52,16 @@ window. Details: [docs/technical-spec.md](docs/technical-spec.md).
 install, no administrator rights, optional start at logon. It is **not code-signed**,
 so SmartScreen may warn about an unknown publisher.
 
-**Linux** — download the AppImage, then:
+**Linux** — download the `.deb` (`easypass_<version>_amd64.deb`) and install it:
 
 ```bash
-chmod +x EasyPass-3.0.0-linux-x86_64.AppImage
-./EasyPass-3.0.0-linux-x86_64.AppImage --install   # application-menu entry
+sudo apt install ./easypass_3.0.0_amd64.deb
 ```
 
-Needs FUSE 2 (`libfuse2`); without it add `--appimage-extract-and-run`.
-**The Linux build is not verified on real hardware for this release** — it has only
-passed a syntax check, so treat the AppImage as unverified.
+The package installs into `/opt/easypass`, adds `easypass` / `easypass-core` to
+`PATH`, the application-menu entry, hicolor icons and the native-messaging host
+manifests. Dependencies (GTK 3, libayatana-appindicator3, libsecret) come from apt —
+no bundled runtime, no FUSE.
 
 The vault lives next to `easypass.exe` on Windows
 (`%LOCALAPPDATA%\Programs\EasyPass\`) and in `$XDG_DATA_HOME/easypass/` on Linux.
@@ -74,8 +74,9 @@ flutter build windows    # → build\windows\x64\runner\Release\easypass.exe
 
 That one command also builds the x86 browser bridge and the core service. Stop a
 running EasyPass first: the build replaces files the UI and the core have open.
-On Linux use `flutter build linux --release` (GTK 3 dependencies and AppImage
-packaging: [CONTRIBUTING.md](CONTRIBUTING.md)).
+On Linux use `tool/build_release_linux.sh` (analyze → test → `flutter build linux
+--release` → core service → `.deb`); GTK 3 and `libayatana-appindicator3-dev` are
+required. Details: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Browser extension
 

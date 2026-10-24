@@ -10,7 +10,7 @@ and Phase 2 (browser extension, native messaging, encrypted export/import, TOTP)
 are implemented. **2.3.x** adds four entry types (login / secure note / identity /
 SSH key) with custom fields, live TOTP codes, folder management (icons, rename,
 guarded delete), type filtering and `type:`/`folder:`/`url:` search prefixes.
-**2.3.3** adds the **Linux desktop port** (AppImage): tray + close-to-tray in the GTK
+**2.3.3** adds the **Linux desktop port** (shipped as a native `.deb` since 3.0.0): tray + close-to-tray in the GTK
 runner, single instance with a unix-socket wake-up, XDG autostart, the desktop-entry
 CLI (`--install` / `--uninstall` / `--desktop-status`) and browser-host registration
 (`--install-browser-host` / `--uninstall-browser-host` / `--browser-host-status`),
@@ -66,8 +66,8 @@ flutter build linux --release   # Linux bundle → build/linux/x64/release/bundl
   `lib\sqlite3.dll` 摊平进 Release 目录。**不要再手动跑一遍** `tool/build_core.ps1`
   （幂等，但纯属浪费）。只想调 UI 时跳过核心：
   `flutter build windows -- -DEASYPASS_SKIP_CORE_BUILD=ON`。
-  Linux 侧没有对应 hook（`linux/CMakeLists.txt` 未改），AppImage 与 CI 仍单独调
-  `tool/build_core.sh --out-dir <bundle>`。
+  Linux 侧没有对应 hook（`linux/CMakeLists.txt` 未改），`tool/build_release_linux.sh` 与 CI
+  仍单独调 `tool/build_core.sh --out-dir <bundle>`，再交给 `installer/deb/build_deb.sh` 打包。
 - **构建卡在 `Building native assets failed` 时，先查网络/代理，不要改依赖版本。**
   `package:sqlite3` 的 build hook 在 Windows 上默认**从 GitHub 下载**预编译
   `sqlite3.x64.windows.dll`；代理没开时 `flutter build windows` 在 `build_hooks`
@@ -109,7 +109,7 @@ flutter build linux --release   # Linux bundle → build/linux/x64/release/bundl
   代码审查与修复）。agent 的执行环境与 MSBuild 存在兼容问题（FileTracker 崩溃），
   不要尝试在 agent 侧执行原生构建，也不要将其结果作为交付依据。
 - **同理：凡是产出最终交付物的构建/打包，都交给用户** —— 安装包（ISCC）、`flutter build linux`、
-  AppImage（`installer/appimage/build_appimage.sh`）、`docker build`、`npm run build`、代码签名、
+  .deb（`installer/deb/build_deb.sh`）、`docker build`、`npm run build`、代码签名、
   发布上传等，agent 一律不自行执行；交付前把**确切命令**与验收要点写清楚即可。
   只读/轻量验证（测试、lint、语法检查、协议探针）agent 应当自己跑。
 - **版本号约定（`major.minor.patch`，见下方 Versioning）** — 推进版本时同步更新 `pubspec.yaml` 的
@@ -124,9 +124,12 @@ flutter build linux --release   # Linux bundle → build/linux/x64/release/bundl
   只带 app/ICU/插件 DLL/字体/资源）：`installer/copy_vc_runtime.bat` 负责拷贝，并由
   `windows/runner/CMakeLists.txt` 的 POST_BUILD 调用（**该文件入库受版本控制，别把这段 hook 删了**）；
   `.iss` 里还有一层系统目录兜底，缺文件时不会中止编译。
-- **打包 AppImage** — `installer/appimage/build_appimage.sh <bundle 目录> <输出 .AppImage>`
-  （用户执行；bundle 来自 `flutter build linux --release`，脚本从 `pubspec.yaml` 读版本号，
-  `appimagetool` 可用 `$APPIMAGETOOL` 覆盖）。
+- **打包 .deb** — `installer/deb/build_deb.sh [bundle 目录] [输出 .deb]`
+  （用户执行；bundle 来自 `flutter build linux --release` + `tool/build_core.sh`，脚本从
+  `pubspec.yaml` 读版本号）。安装到 `/opt/easypass`，`/usr/bin/easypass` 指向它，
+  `easypass-core` / `easypass-native-host` 是设置 `LD_LIBRARY_PATH` 的包装器
+  （核心按裸名 dlopen `libsqlite3.so`，bundle 自带而系统没有 `-dev` 包时不加这个就崩）。
+  一键流程：`tool/build_release_linux.sh`（pub get → analyze → test → build → core → deb）。
 
 - Regenerating code: after editing `lib/data/database/tables.drift`, you **must**
   rerun build_runner — `AppDatabase` and companions in `database.g.dart` are generated.
@@ -331,8 +334,9 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
 - **`linux/runner/`** — the GTK runner: `my_application.cc` (window, min size,
   `com.easypass.app/window` method channel), `easypass_tray.cc` (AppIndicator +
   StatusNotifier host probe).
-- **`installer/appimage/build_appimage.sh`** — AppImage packaging (version from
-  `pubspec.yaml`).
+- **`installer/deb/build_deb.sh`** — Debian package layout (`/opt/easypass`, desktop
+  entry, icons, native-messaging manifests; version from `pubspec.yaml`).
+- **`tool/build_release_linux.sh`** — one-shot Linux release (analyze/test/build/core/deb).
 - **`Plan.md`** — roadmap (Chinese, **local-only**; not in a fresh clone).
 - **`README.md`** / **`README_zh.md`** — product READMEs (features, security model, build, extension status).
 
@@ -411,7 +415,7 @@ Rule of thumb: 功能变更 → `y`，纯优化/修复 → `z`，架构/安全�
 
 CI exists as of v2.4.0. `.github/workflows/ci.yml` runs on every push and pull
 request; `.github/workflows/release.yml` runs on tags matching `v*` to build the
-installer and the AppImage and publish them with `SHA256SUMS.txt`. Triggers and the
+installer and the Linux `.deb` and publish them with `SHA256SUMS.txt`. Triggers and the
 Flutter version pinning decision are documented in `.github/workflows/README.md`.
 
 The same gates are still run by hand by the agent before handing a build to the user
@@ -524,6 +528,31 @@ prose. The version comes from `pubspec.yaml` only. Runbook: `installer/release/R
   `native_host/`), is dependency-free and reproducible, and fails the build unless the
   extension ID derived from `manifest.key` matches the Dart constant, the `.iss` and
   `native_host/com.easypass.app.json`.
+
+## Linux .deb packaging (3.0.0)
+
+- **The core is a plain AOT image with no rpath.** `dart build cli` does not let us
+  set one, and `patchelf --set-rpath` **corrupts the image** (afterwards it behaves
+  like the plain Dart VM: `--version` prints the SDK version, `--serve` prints
+  `dartvm` usage). Never patch it. Instead the library directory is supplied at
+  runtime: `launchCoreIfPresent()` prepends `<core>/../lib` to `LD_LIBRARY_PATH`
+  when it spawns the core, and `/usr/bin/easypass-core` does the same for CLI use.
+- **Your dev machine needs `libsqlite3-dev`, end users must not.** Ubuntu installs
+  only `libsqlite3.so.0`; the hook asks for the bare `libsqlite3.so`. The bundle
+  ships its own copy next to the app, so the deb works without the `-dev` package —
+  but `dart run tool/probe_core.dart` runs in *your* shell and needs the system
+  symlink. `sudo apt-get install -y libsqlite3-dev` is a dev-only requirement.
+- **Run `flutter test` with `XDG_CONFIG_HOME`/`XDG_DATA_HOME` unset.** Several
+  `browser_host_installer_test.dart` cases build a temp `$HOME` and assert the vendor
+  roots/manifests land there; `install()` falls back to the *environment's*
+  `XDG_CONFIG_HOME`, so an exported value makes them write into your real `~/.config`
+  and 9 cases fail. `env -u XDG_CONFIG_HOME -u XDG_DATA_HOME flutter test --no-pub` is
+  the honest gate (CI runners do not export those).
+- **Linux has no CMake hook for the core.** `flutter build linux` wipes the bundle,
+  so `tool/build_core.sh --out-dir <bundle>` must run *after* it — that is exactly
+  what `tool/build_release_linux.sh` and CI do. Do not "fix" this by adding a
+  POST_BUILD hook that runs `dart build cli` under CMake; the tool invocation needs
+  the Flutter SDK's Dart, not CMake's environment.
 
 ## Pitfalls we already paid for
 
