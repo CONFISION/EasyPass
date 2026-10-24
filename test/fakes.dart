@@ -11,8 +11,8 @@ class FakeSecureStorage extends FlutterSecureStorage implements SecretStore {
   final Map<String, String> store = {};
 
   /// When non-null, every [read] call throws this exception. Used by the
-  /// "secure storage unavailable" recovery tests to simulate a Linux
-  /// machine with a locked Secret Service — the [AuthNotifier] boot probe
+  /// "secure storage unavailable" recovery tests to simulate a machine whose
+  /// secret store is unavailable (locked OS keychain) — the boot probe
   /// should publish `storageUnavailable`, the user should see Retry/Exit
   /// instead of a half-broken unlock form, and a successful retry should
   /// clear the banner.
@@ -89,3 +89,4 @@ class FakeSecureStorage extends FlutterSecureStorage implements SecretStore {
     store.remove(key);
   }
 }
+

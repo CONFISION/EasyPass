@@ -407,6 +407,27 @@ in-app version shown on the Settings screen:
 Rule of thumb: 功能变更 → `y`，纯优化/修复 → `z`，架构/安全模型重构 → `x`。
 新增平台（如 2.3.3 的 Linux 桌面端）按"功能变更"走 `y`。
 
+## 分支与上游同步（2026-10-25 定）
+
+`master` 是 **Windows only**（`9fed3f9 refactor:主分支移除 Linux 支持` 之后），Linux 支持
+只存在于本分支。因此同步方向永远是 **master → linux**，本分支的 Linux 改动不回流 master。
+
+- **不要在本分支删除 `windows/`**：Windows 改动只会出现在 master，删掉后每次同步都会变成
+  delete/modify 冲突，比保留更贵。
+- 同步命令：`git fetch origin && git merge origin/master`（merge 而非 rebase：保留可追溯的
+  同步点，冲突只出现一次）。
+- **冲突处理口径**：
+  | 来源 | 处理 |
+  |---|---|
+  | `linux/**`、`lib/**/linux_*.dart`、`lib/**/other_*.dart`、`tool/build_core.sh`、`installer/deb/**`、Linux 专属测试 | **保留本分支**（master 已删除这些文件，`git checkout HEAD -- <path>` 恢复） |
+  | `lib/core/platform/app_paths.dart`、`lib/main.dart`、`lib/features/desktop_*/**` 的 facade、`pubspec.yaml`、`test/app_paths_cache_test.dart` 等被 `9fed3f9` 改成 Windows-only 的共享文件 | **保留本分支**（同样是 `git checkout HEAD --`，否则 Linux 能力被静默剥掉） |
+  | `lib/client/**`、`lib/core_service/**`、`lib/protocol/**`、`lib/data/**` 的共享实现、`test/` 里的通用用例 | **跟 master**（合并带来的真实 bugfix 必须吃进来） |
+  | `README*`、`AGENTS.md`、`.github/**`、`installer/release/**`、`installer/easypass_setup.iss`、`installer/languages/**` | 人工合并：Windows 与 Linux 两侧内容都保留 |
+- 同步后必须跑：`flutter analyze --no-pub`、`env -u XDG_CONFIG_HOME -u XDG_DATA_HOME flutter test --no-pub`、
+  `bash tool/build_release_linux.sh --skip-tests`、`tool/probe_core.dart`（空库 19 项）。缺一项不算同步完成。
+- 判别技巧：`git show --name-status --diff-filter=M 9fed3f9` 列出的文件，都是"master 用删 Linux 的方式改过"的，
+  同步时一律回到本分支版本；`--diff-filter=D` 的则是被整份删除、需要 `git checkout HEAD --` 恢复的。
+
 ## Git Workflow
 
 - Branch: `master`; commits are few and direct-to-master (no PR workflow yet).
@@ -477,11 +498,14 @@ prose. The version comes from `pubspec.yaml` only. Runbook: `installer/release/R
   `AppDatabase.forTesting()` + `NativeDatabase.memory()` 并注册
   `InMemorySecretStore`（`lib/core/storage/secret_store.dart`）。实机排查"库里到底有什么"
   请用 `easypass_core --status`，不要从 UI 进程去读文件。
-- **`pubspec.yaml`'s sqlite3 hook must stay Linux-scoped.** It reads
-  `hooks: user_defines: sqlite3: source: {linux: system}` — the `linux:` key, with **no
-  `default:`**. Removing the hook or adding a default makes the Windows build download
-  package binaries instead of using `sqlite3_flutter_libs`, and `flutter test` then fails
-  with `Failed to load dynamic library 'sqlite3.dll'` (206 tests at once).
+- **`pubspec.yaml` 里的 sqlite3 hook 必须是 map 形式或整段省略。**
+  当前是 `hooks: user_defines: sqlite3: source: {linux: system}`。它是给 `linux` 分支
+  留的配置，对 Windows 没有影响：`source` 查不到当前平台条目时落到 `null`，Windows 走
+  "从 GitHub 下载预编译二进制"那条路（与整段 hooks 不存在同一条路径；实测删掉整段
+  hooks 后 `flutter test` 照常通过）。
+  **真正会炸的是写成裸 `source: system`（不带 map）** —— 那样 Windows 也会去
+  `LookupSystem('sqlite3')`，而 Windows 上没有系统 libsqlite3，于是 `flutter test`
+  一次性 206 个用例失败在 `Failed to load dynamic library 'sqlite3.dll'`。
 - **The native host exe IS built by the Windows build.** `windows/runner/CMakeLists.txt`
   (tracked in git) has a POST_BUILD step that runs `browser_extension/native_host/build_bridge.bat`
   (cl.exe, x86, no MSBuild) next to `easypass.exe`; a second POST_BUILD step copies the MSVC

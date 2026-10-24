@@ -111,17 +111,13 @@ class CoreSession {
     _client = client;
     client.events.listen((event) {
       if (_disposed) return;
-      switch (event['event']) {
-        case Events.changed:
-          final topic = event['topic'];
-          if (topic is String) _changes.add(topic);
-        case Events.sessionLocked:
-          _sessionEvents.add('locked');
-        case Events.sessionUnlocked:
-          _sessionEvents.add('unlocked');
-        case Events.coreShuttingDown:
-          _sessionEvents.add('shuttingDown');
+      final changed = event['topic'];
+      if (event['event'] == Events.changed) {
+        if (changed is String) _changes.add(changed);
+        return;
       }
+      final sessionEvent = uiSessionEvent(event);
+      if (sessionEvent != null) _sessionEvents.add(sessionEvent);
     });
   }
 
@@ -386,5 +382,26 @@ bool coreExecutableExists() => coreExecutablePath() != null;
 /// 平台判断的薄封装（UI 侧不需要 import dart:io 的地方用它）。
 bool get isWindowsHost => Platform.isWindows;
 
-
-
+/// 把核心的会话事件翻译成 **UI 关心** 的事件；不关心时返回 null。
+///
+/// 关键：**只认 `ui` 域**。核心的两个会话域各自广播带 `domain` 的
+/// `sessionLocked/sessionUnlocked`，而 UI 的状态只应该由 `ui` 域驱动 ——
+/// 否则"浏览器扩展解锁"会让桌面端也显示成解锁态（D4：解锁必须是显式动作，
+/// 桌面端与扩展不能互相代解锁）。`lockAll()` 会同时广播两个域，ui 那条会
+/// 正常触发；bridge 那条被忽略。
+///
+/// `coreShuttingDown` 没有 domain，一律转发（核心要退出了，UI 得回锁屏）。
+String? uiSessionEvent(Map<String, dynamic> event) {
+  final domain = event['domain'];
+  final isUi = domain == null || domain == 'ui';
+  switch (event['event']) {
+    case Events.sessionLocked:
+      return isUi ? 'locked' : null;
+    case Events.sessionUnlocked:
+      return isUi ? 'unlocked' : null;
+    case Events.coreShuttingDown:
+      return 'shuttingDown';
+    default:
+      return null;
+  }
+}

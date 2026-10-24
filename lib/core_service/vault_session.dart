@@ -37,6 +37,16 @@ class VaultSession {
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
+  /// 状态翻转回调（解锁 / 锁定后立即触发）。
+  ///
+  /// 由 [SessionDomains] 注入，用来把 `sessionLocked` / `sessionUnlocked`
+  /// 广播出去。**这是修复"关窗上锁只生效一次"的关键**：早期只靠
+  /// `SessionDomains` 的 5 秒节拍器比对 `isUnlocked`，导致"解锁后 5 秒内关窗"
+  /// 时 `_lastKnown` 还停在 `false`，`lockAll()` 看到 `false → false` 判定
+  /// "没变化"，于是**不广播** —— UI 收不到 `sessionLocked`，停在解锁态，
+  /// 而核心其实已经锁了（界面拿不到数据）。
+  void Function()? onStateChanged;
+
   /// 是否处于解锁态。惰性过期：读取时若已空闲超时 → 先行锁定。
   bool get isUnlocked {
     _expireIfIdle();
@@ -66,12 +76,16 @@ class VaultSession {
     _wipe();
     _key = key;
     _lastActiveAt = _clock();
+    onStateChanged?.call();
   }
 
   /// 锁定：先把密钥字节清零，再丢弃引用，避免内存中残留明文密钥。
   void lock() {
+    final hadKey = _key != null;
     _wipe();
     _lastActiveAt = null;
+    // 本来就没有密钥时不回调：避免无变化的空转广播。
+    if (hadKey) onStateChanged?.call();
   }
 
   /// 刷新活跃时间（保险库读操作成功后调用）。
@@ -99,3 +113,5 @@ class VaultSession {
     }
   }
 }
+
+

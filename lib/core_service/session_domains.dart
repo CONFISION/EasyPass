@@ -22,6 +22,10 @@ class SessionDomains {
     _bridge = VaultSession(idleTimeout: idleTimeout);
     _lastKnown[SessionDomain.ui] = false;
     _lastKnown[SessionDomain.bridge] = false;
+    // 解锁/锁定**立即**触发比对与广播，不等 5 秒节拍器 ——
+    // 见 `VaultSession.onStateChanged` 的注释（"关窗上锁只生效一次"的根因）。
+    _ui.onStateChanged = notifyIfChanged;
+    _bridge.onStateChanged = notifyIfChanged;
   }
 
   late VaultSession _ui;
@@ -29,6 +33,7 @@ class SessionDomains {
 
   final Map<SessionDomain, bool> _lastKnown = {};
   Timer? _timer;
+  bool _notifying = false;
 
   /// 状态翻转回调（域, 是否解锁）。核心用它广播 `sessionLocked/sessionUnlocked`。
   void Function(SessionDomain domain, bool unlocked)? onStateChanged;
@@ -69,13 +74,25 @@ class SessionDomains {
   Duration get idleTimeout => _ui.idleTimeout;
 
   /// 检查两个域的状态并在翻转时回调。
+  ///
+  /// 防重入：读 `isUnlocked` 可能触发惰性过期 → `lock()` → 又回调到这里。
+  /// 没有这个标记会绕成一个（无害但没必要的）递归。
   void notifyIfChanged() {
-    for (final domain in SessionDomain.values) {
-      final unlocked = of(domain).isUnlocked;
-      if (_lastKnown[domain] != unlocked) {
-        _lastKnown[domain] = unlocked;
-        onStateChanged?.call(domain, unlocked);
+    if (_notifying) return;
+    _notifying = true;
+    try {
+      for (final domain in SessionDomain.values) {
+        final unlocked = of(domain).isUnlocked;
+        if (_lastKnown[domain] != unlocked) {
+          _lastKnown[domain] = unlocked;
+          onStateChanged?.call(domain, unlocked);
+        }
       }
+    } finally {
+      _notifying = false;
     }
   }
 }
+
+
+

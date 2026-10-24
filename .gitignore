@@ -17,6 +17,8 @@ docs/*
 !docs/technical-spec.md
 !docs/protocol-api.md
 !docs/data-model.md
+# 发布说明要入库：CI 的 release job 会用 `gh release create --notes-file` 读它。
+!docs/release-*.md
 dist/
 .codegraph/
 
@@ -80,5 +82,6 @@ log/
 *.pdb
 *.ilk
 /easypass_native_host.exe
+
 
 
