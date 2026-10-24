@@ -440,10 +440,21 @@ Rule of thumb: 功能变更 → `y`，纯优化/修复 → `z`，架构/安全�
 
 ## CI/CD
 
-CI exists as of v2.4.0. `.github/workflows/ci.yml` runs on every push and pull
-request; `.github/workflows/release.yml` runs on tags matching `v*` to build the
-installer and the Linux `.deb` and publish them with `SHA256SUMS.txt`. Triggers and the
-Flutter version pinning decision are documented in `.github/workflows/README.md`.
+CI exists as of v2.4.0. Three workflows, split by branch（细节见
+`.github/workflows/README.md`）：
+
+- `ci.yml` — push 到 `master`/`linux`、任何 PR、手动。Windows 任务（master 侧）跑
+  analyze/test/扩展冒烟/runner 语法检查；Linux 任务跑 analyze/test/扩展冒烟 +
+  **`flutter build linux --release` 编译检查**。推到 `linux` 时 Windows 任务跳过。
+- `linux-build.yml` — push 到 `linux`、手动。**只出包**：`flutter build linux` →
+  `tool/build_core.sh` → `installer/deb/build_deb.sh` → `dpkg-deb` 体检 + `dpkg -i/-r`
+  安装体检 → artifact `easypass-deb`（30 天）。**不打 tag、不生成 release notes、
+  不创建 Release** —— 这是 linux 分支唯一的"构建工作流"。
+- `release.yml` — 推送 `v*` tag 时构建 Windows 安装包并汇总 `SHA256SUMS.txt`，属于
+  master 的发布流；linux 分支按约定不打 tag，因此不会触发它。
+
+`flutter test` 在 Linux 任务里必须 `env -u XDG_CONFIG_HOME -u XDG_DATA_HOME`（原因见
+下方 Linux 测试小节）；Flutter 版本 pin 在三个工作流的 `env.FLUTTER_VERSION`。
 
 The same gates are still run by hand by the agent before handing a build to the user
 (a green CI run does not cover a local change that has not been pushed):

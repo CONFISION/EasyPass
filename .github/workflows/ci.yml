@@ -1,13 +1,16 @@
 name: CI
 
 # ─── 触发条件 ─────────────────────────────────────────────────────────────
-# · push 到 master
+# · push 到 master / linux（本仓库的双主线：master = Windows only，
+#   linux = 同时保留 Linux 支持）
 # · 任何 pull_request（GitHub 默认的 opened / synchronize / reopened）
+# · 手动 workflow_dispatch（改工作流本身上线前先点一次）
 # 说明见 .github/workflows/README.md。
 on:
   push:
-    branches: [master]
+    branches: [master, linux]
   pull_request:
+  workflow_dispatch:
 
 # 同一分支/PR 再推一次时取消上一次运行：CI 只关心最新一次提交。
 concurrency:
@@ -33,8 +36,11 @@ env:
 jobs:
   windows:
     name: Windows — analyze / test / extension / runner syntax
-    # Windows 是仓库的基准平台：545 个用例在这里跑全，Linux-only 的用例在
-    # Windows 上不注册用例（见 AGENTS.md），所以门禁放在 Windows 上。
+    # Windows 是 master 的基准平台：Linux-only 的用例在 Windows 上不注册用例
+    # （见 AGENTS.md），所以 Windows 门禁只在 master 侧有意义。
+    # 推到 `linux` 分支时跳过（那边的门禁是下面的 linux job），避免每次同步都
+    # 白跑 20 分钟 Windows 任务；PR 与手动触发仍然两边都跑。
+    if: github.event_name != 'push' || github.ref_name != 'linux'
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -116,3 +122,78 @@ jobs:
 
       - name: Runner syntax check (check_syntax.bat)
         run: cmd /c windows\runner\check_syntax.bat
+
+  linux:
+    name: Linux — analyze / test / extension
+    # linux 分支保留了 Linux 平台层（linux/**、lib/features/desktop_*/linux_*、
+    # XDG 路径、native-messaging wrapper…），这些用例只在 Linux runner 上注册；
+    # 与 master 的 Windows job 互补，而不是重复。
+    #
+    # 真正的出包（.deb）在 `.github/workflows/linux-build.yml`：CI 只管"代码对不对"，
+    # 构建工作流管"包能不能下"。两者分开是为了让 PR 反馈快，而 artifact 只在
+    # push 到 linux 时生成。
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # GTK 3 + libayatana-appindicator3 是 linux/runner 的编译依赖；
+      # libsecret-1-dev 供 flutter_secure_storage_linux。
+      # 刻意不装 libsqlite3-dev：bundle 自带 libsqlite3.so，核心靠
+      # LD_LIBRARY_PATH 找它（见 AGENTS.md「Linux .deb packaging」）。
+      - name: Install Linux build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libayatana-appindicator3-dev libsecret-1-dev
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: flutter analyze
+        run: flutter analyze --no-pub
+
+      # `XDG_CONFIG_HOME` / `XDG_DATA_HOME` 必须**不存在**：browser_host 的用例
+      # 用临时 $HOME 断言 vendor 根与 manifest 落在那里，install() 会回落到环境
+      # 变量；导出它们会让用例写进真实 ~/.config 并连带 8 条假失败（本机踩过）。
+      # GitHub runner 默认不导出，这里显式清一遍，防止将来 runner 镜像带上。
+      - name: flutter test
+        run: env -u XDG_CONFIG_HOME -u XDG_DATA_HOME flutter test --no-pub
+
+      - name: npm ci
+        run: npm ci --no-audit --no-fund
+
+      - name: Extension static check (check_extension.mjs)
+        run: node browser_extension/tools/check_extension.mjs
+
+      - name: Content-script smoke (jsdom)
+        run: node browser_extension/tools/smoke_content.mjs
+
+      - name: Popup smoke (jsdom)
+        run: node browser_extension/tools/smoke_popup.mjs
+
+      - name: Popup extra smoke (jsdom)
+        run: node browser_extension/tools/smoke_popup_extra.mjs
+
+      # Amazon 上的 runner 没有 X 显示；`flutter build linux` 本身不需要它，
+      # 但把这个前置检查放这里，顺便验证 `linux/runner` 的 C++ 能编过 ——
+      # 3.0.0 的 `easypass_tray.cc` 就因为 GTK_DIALOG_MODAL 的类型错误只在
+      # Linux 上炸，而 master 的 Windows-only CI 从没编译过它。
+      - name: Build Linux runner (compile check)
+        run: flutter build linux --release

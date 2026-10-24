@@ -7,8 +7,14 @@
 
 | 文件 | 触发 | 做什么 |
 | --- | --- | --- |
-| `ci.yml` | push 到 `master`、任何 `pull_request` | Windows 上跑 analyze / test / 扩展静态检查 + 三个 jsdom 冒烟 / runner 语法检查 |
-| `release.yml` | 推送 `v*` 形式的 tag（如 `v2.4.0`） | Windows 装包、Linux `.deb`，汇总 `SHA256SUMS.txt` 并创建 GitHub Release |
+| `ci.yml` | push 到 `master` / `linux`、任何 `pull_request`、手动 | Windows 任务（master 侧）：analyze / test / 扩展冒烟 / runner 语法检查；Linux 任务：analyze / test / 扩展冒烟 / **编译 Linux runner** |
+| `linux-build.yml` | push 到 `linux`、手动 | **只出包**：`flutter build linux` → 核心服务 → `.deb` → artifact `easypass-deb`（不打 tag、不发 release notes、不创建 Release） |
+| `release.yml` | 推送 `v*` 形式的 tag（如 `v2.4.0`） | master 的 tag 发布流：Windows 装包、汇总 `SHA256SUMS.txt` 并创建 GitHub Release |
+
+> **分支与工作流**：`master` 是 Windows only，走 `ci.yml` 的 Windows 任务 + tag 触发的
+> `release.yml`；`linux` 分支额外保留 Linux 平台层，走 `ci.yml` 的 Linux 任务 +
+> `linux-build.yml` 出包。linux 分支**按约定不打 tag、不发 release**，
+> 所以 `release.yml` 在那边实际不会被触发。
 
 两个文件的注释都是中文；`name:`（Actions 界面里显示的步骤名）保持英文，便于在
 GitHub 网页上扫读。改动工作流后建议本地跑一次 `actionlint`（见文末）。
@@ -101,6 +107,27 @@ flutter assemble --no-version-check --output=build `
   `flutter test --no-pub`），代价是多机位维护。
 - **不做 `dart format` 检查**：本仓库刻意不跑 `dart format`（见 AGENTS.md），
   门禁只有 `flutter analyze`。
+
+### Linux 任务（`linux` 分支）
+
+`ci.yml` 里的 `linux` job 跑在 `ubuntu-latest`，与 Windows 任务互补而非重复：
+Linux-only 的用例（`browser_host_installer_test.dart`、`linux_window_controller_test.dart`、
+POSIX 位的 `desktop_integration_test.dart`）只在这里注册。
+
+1. `flutter pub get` / `flutter analyze --no-pub`
+2. `env -u XDG_CONFIG_HOME -u XDG_DATA_HOME flutter test --no-pub`
+   —— 这两个变量**必须不存在**：browser_host 的用例用临时 `$HOME` 断言 vendor 根与
+   manifest 落在那里，而 `install()` 会回落到环境变量；导出它们会让用例写进真实
+   `~/.config` 并连带 8 条假失败（本机踩过，`tool/build_release_linux.sh` 里同样处理）。
+3. `npm ci` + `check_extension.mjs` + 三个 jsdom 冒烟
+4. `flutter build linux --release` —— **编译检查**：3.0.0 的 `linux/runner/easypass_tray.cc`
+   就因为 `GTK_DIALOG_MODAL` 的 int/GtkDialogFlags 类型错误在 Linux 上编译失败，
+   而 master 的 Windows-only CI 从来没编过它。编译通过才算 CI 绿。
+
+推送到 `linux` 分支时 Windows 任务会被跳过
+（`if: github.event_name != 'push' || github.ref_name != 'linux'`）；
+PR 与手动触发仍然两边都跑。
+
 
 ---
 
@@ -216,6 +243,36 @@ on:
   想要 CI 也生成的话，得先决定发布说明是否入库。
 - 如果想在发布前人工确认，把 `gh release create` 加上 `--draft` 即可（一行改动）。
   当前是直接发布正式 Release。
+
+---
+
+## linux-build.yml（出包工作流）
+
+只做一件事：**构建一个可下载的 `.deb`**。明确不做：打 tag、生成 release notes、
+创建 GitHub Release、任何发布动作。
+
+```yaml
+on:
+  push: { branches: [linux] }
+  workflow_dispatch:
+```
+
+- 触发即出包：`flutter build linux --release` → `tool/build_core.sh`（Linux 没有
+  CMake POST_BUILD hook，核心必须单独构建，且必须在 `flutter build linux` **之后**，
+  因为后者会清空 bundle）→ `installer/deb/build_deb.sh`
+- 打包后做三件事：`dpkg-deb --info/--contents` 元数据与清单、真实的
+  `dpkg -i` → `/usr/bin/easypass-core --version` → `dpkg -r` 安装体检、
+  把版本/大小/SHA-256 写进 `$GITHUB_STEP_SUMMARY`
+- 产物：artifact **`easypass-deb`**，保留 30 天，在 run 页面底部 Artifacts 区下载
+- 同一分支连续推送会取消上一轮（`concurrency: linux-deb-${{ github.ref }}`）
+- 权限只有 `contents: read`，不依赖任何仓库写权限
+
+不装 `libsqlite3-dev`：bundle 自带 `libsqlite3.so`，核心运行时通过
+`LD_LIBRARY_PATH` 找到它（见 AGENTS.md「Linux .deb packaging」）。装上反而会掩盖
+"用户机器没有 `-dev` 包"这类真实缺陷。
+
+本地等价命令：`bash tool/build_release_linux.sh`（多了 analyze + test），
+只想出包用 `bash tool/build_release_linux.sh --skip-tests`。
 
 ---
 

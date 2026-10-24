@@ -1,0 +1,143 @@
+name: Linux .deb build
+
+# ─── 这个工作流只做一件事：构建一个可下载的 .deb ─────────────────────────
+# · 触发：push 到 `linux` 分支、手动 workflow_dispatch
+# · 不做：打 tag、生成 release notes、创建 GitHub Release、任何上传发布动作
+# · 产物：GitHub Actions artifact `easypass-deb`（run 页面右下角可下载，保留 30 天）
+#
+# 与另外两个工作流的分工（详见 .github/workflows/README.md）：
+#   ci.yml          —— 门禁：analyze / test / 扩展冒烟 / Linux runner 编译检查
+#   linux-build.yml —— 本文件：出包（每推一次 linux 都产出一个 .deb）
+#   release.yml     —— master 的 tag 发布流（Windows 安装包 + 校验和 + GitHub Release）；
+#                      linux 分支按约定不打 tag、不发 release，因此不会用到它
+#
+# 构建内容与本地 `tool/build_release_linux.sh` 一致（少了重复的 analyze/test，
+# 那两步已经由 ci.yml 负责）：
+#   flutter build linux --release → tool/build_core.sh → installer/deb/build_deb.sh
+
+on:
+  push:
+    branches: [linux]
+  workflow_dispatch:
+
+# 同一个分支连续推送时，取消上一轮还在跑的构建：只保留最新提交的包。
+concurrency:
+  group: linux-deb-${{ github.ref }}
+  cancel-in-progress: true
+
+# 只需要读仓库；artifact 上传用的是 Actions 自带的 token，不需要 contents: write。
+permissions:
+  contents: read
+
+env:
+  # 与 ci.yml / release.yml 同一个 pin（见 ci.yml 里的三条依据）。
+  FLUTTER_VERSION: 3.47.5
+
+jobs:
+  build-deb:
+    name: Build .deb (${{ github.ref_name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      # 编译依赖 + 打包依赖：
+      #   · GTK 3 / libayatana-appindicator3 / libsecret  → linux/runner + 插件
+      #   · fakeroot / dpkg-dev                            → dpkg-deb 组装
+      #   · imagemagick                                    → 图标多尺寸渲染
+      # 不装 libsqlite3-dev：bundle 自带 libsqlite3.so，核心运行时靠
+      # LD_LIBRARY_PATH 找到它（见 AGENTS.md「Linux .deb packaging」）。
+      # 装了反而会掩盖"用户机器没有 -dev 包"这类真实缺陷。
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libayatana-appindicator3-dev libsecret-1-dev \
+            fakeroot dpkg-dev imagemagick desktop-file-utils
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      - name: flutter build linux --release
+        run: flutter build linux --release
+
+      # Linux 侧没有 CMake POST_BUILD hook（Windows 有），核心必须单独构建，
+      # 且顺序不能反：`flutter build linux` 会清空 bundle 目录。
+      - name: Build core service
+        run: bash tool/build_core.sh --out-dir build/linux/x64/release/bundle
+
+      - name: Package .deb
+        id: package
+        run: |
+          set -euo pipefail
+          bash installer/deb/build_deb.sh
+          deb="$(ls -1 dist/*.deb | head -n 1)"
+          test -n "$deb"
+          version="$(dpkg-deb -f "$deb" Version)"
+          sha="$(sha256sum "$deb" | awk '{print $1}')"
+          size="$(du -h "$deb" | awk '{print $1}')"
+          echo "deb=$deb" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "size=$size" >> "$GITHUB_OUTPUT"
+          {
+            echo "### EasyPass .deb — \`$version\`"
+            echo
+            echo "| 项目 | 值 |"
+            echo "| --- | --- |"
+            echo "| 文件 | \`$(basename "$deb")\` |"
+            echo "| 大小 | $size |"
+            echo "| SHA-256 | \`$sha\` |"
+            echo "| 提交 | \`${GITHUB_SHA:0:12}\` |"
+            echo
+            echo "下载：本次 run 页面底部的 **Artifacts → easypass-deb**。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 元数据 + 内容清单：只跑 dpkg-deb 的读操作，能立刻发现"打成空包 / 少文件"。
+      - name: Inspect package
+        run: |
+          set -euo pipefail
+          deb="${{ steps.package.outputs.deb }}"
+          dpkg-deb --info "$deb"
+          echo '--- 顶层路径 ---'
+          dpkg-deb --contents "$deb" | awk '{print $6}' | cut -d/ -f1-3 | sort -u | head -n 20
+
+      # 真正的安装体检：能装上、能从 /opt 启动核心、能卸载干净。
+      # 这一步是"这个包不是只长得像 deb"的唯一证据（与 release.yml 的口径一致）。
+      - name: Install smoke test (dpkg -i / core --version / dpkg -r)
+        run: |
+          set -euo pipefail
+          deb="${{ steps.package.outputs.deb }}"
+          sudo dpkg -i "$deb"
+          test -x /opt/easypass/core/easypass_core
+          test -L /usr/bin/easypass
+          test -f /usr/share/applications/easypass.desktop
+          desktop-file-validate /usr/share/applications/easypass.desktop
+          if [ ! -x /usr/bin/easypass-core ]; then
+            sudo dpkg -r easypass || true
+            echo '::error::/usr/bin/easypass-core 不在包里或不可执行'
+            exit 1
+          fi
+          /usr/bin/easypass-core --version
+          sudo dpkg -r easypass
+          test ! -e /opt/easypass/easypass
+          echo '安装 / 卸载体检通过'
+
+      # 30 天足够"最近一次能装的包"随手可取；仓库不靠 artifact 做长期发布。
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: easypass-deb
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 30
