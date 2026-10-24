@@ -113,8 +113,9 @@ flutter build linux --release   # Linux bundle → build/linux/x64/release/bundl
   - **Windows 原生构建仍由用户执行**（`flutter build windows` / `flutter run -d windows` /
     ISCC 安装包）：agent 的环境与 MSBuild 存在兼容问题（FileTracker 崩溃），
     不要尝试、也不要把 agent 侧结果当交付依据。
-  - 仍然只由用户/CI 负责：**代码签名**、**发布上传**（git push / GitHub Release）。
-    agent 只做本地提交。
+  - **git push 由 agent 执行，但必须等维护者明确指示**（本机 gh 已配好；日常只做
+    本地提交，不主动推、不顺手补推）。**代码签名、打 tag、GitHub Release 仍不归 agent**，
+    那些归维护者或 CI。
   - Linux 侧 agent 跑完打包后必须给出证据：`dpkg-deb --info`、`dpkg -i`/`dpkg -r` 体检、
     `flutter analyze`、`flutter test`（`XDG_CONFIG_HOME`/`XDG_DATA_HOME` 未导出）与
     `tool/probe_core.dart` 的结果，缺一项就算没验完。
