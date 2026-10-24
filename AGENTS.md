@@ -104,14 +104,20 @@ flutter build linux --release   # Linux bundle → build/linux/x64/release/bundl
   Linux 在 `linux/runner/my_application.cc` 用 `gtk_widget_set_size_request`，同样先夹到
   `gdk_monitor_get_workarea`。这两个值必须与 `lib/features/vault/screens/vault_screen.dart` 里侧边栏的
   固定宽度保持一致，否则窄窗又会溢出。
-- **构建分工（重要约定）** — Windows 原生构建（`flutter build windows` / `flutter run -d windows`）
-  由用户亲自执行；agent 负责到构建前的完整测试与 debug（`flutter analyze`、`flutter test`、
-  代码审查与修复）。agent 的执行环境与 MSBuild 存在兼容问题（FileTracker 崩溃），
-  不要尝试在 agent 侧执行原生构建，也不要将其结果作为交付依据。
-- **同理：凡是产出最终交付物的构建/打包，都交给用户** —— 安装包（ISCC）、`flutter build linux`、
-  .deb（`installer/deb/build_deb.sh`）、`docker build`、`npm run build`、代码签名、
-  发布上传等，agent 一律不自行执行；交付前把**确切命令**与验收要点写清楚即可。
-  只读/轻量验证（测试、lint、语法检查、协议探针）agent 应当自己跑。
+- **构建分工（2026-10-25 修订）** —
+  - **Linux（这台开发机 lagoon，Ubuntu 26.04）上，构建与打包由 agent 自己做**：
+    `flutter build linux --release`、`tool/build_core.sh`、`installer/deb/build_deb.sh`、
+    一键脚本 `tool/build_release_linux.sh`，以及 `flutter analyze` / `flutter test`。
+    交付物不再外包给用户 —— 旧的"agent 一律不执行最终打包"这条在 Linux 侧作废
+    。
+  - **Windows 原生构建仍由用户执行**（`flutter build windows` / `flutter run -d windows` /
+    ISCC 安装包）：agent 的环境与 MSBuild 存在兼容问题（FileTracker 崩溃），
+    不要尝试、也不要把 agent 侧结果当交付依据。
+  - 仍然只由用户/CI 负责：**代码签名**、**发布上传**（git push / GitHub Release）。
+    agent 只做本地提交。
+  - Linux 侧 agent 跑完打包后必须给出证据：`dpkg-deb --info`、`dpkg -i`/`dpkg -r` 体检、
+    `flutter analyze`、`flutter test`（`XDG_CONFIG_HOME`/`XDG_DATA_HOME` 未导出）与
+    `tool/probe_core.dart` 的结果，缺一项就算没验完。
 - **版本号约定（`major.minor.patch`，见下方 Versioning）** — 推进版本时同步更新 `pubspec.yaml` 的
   `version` 字段、`settings_screen.dart` 中显示的版本号、扩展 `manifest.json` 的 `version`
   与 `installer/easypass_setup.iss` 的 `MyAppVersion` / `VersionInfoVersion`
