@@ -609,10 +609,8 @@ class FakeVaultApi implements VaultApi {
   @override
   Future<void> revokeAgentPairing(String id) async {
     calls.add('revokeAgentPairing');
-    for (final pairing in agentPairings) {
-      if (pairing['id'] == id) pairing['revoked'] = true;
-    }
-    agentUnlocked = false;
+    // 与核心一致：撤销 = 彻底移除记录（不是打标记留着）。
+    agentPairings.removeWhere((pairing) => pairing['id'] == id);
   }
 
   @override

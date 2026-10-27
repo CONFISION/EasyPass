@@ -159,20 +159,67 @@ void main() {
   });
 
   group('撤销', () {
-    test('撤销会立刻锁 agent 域，记录保留（审计要对得上昵称）', () async {
+    test('撤销 = 彻底移除记录，列表里不再出现（真机反馈：留着像没生效）', () async {
       final created =
           await core.call(Actions.createAgentPairing, {'nickname': 'DSH'});
       final id = created['id'] as String;
-      await core.call(Actions.unlockAgentDomain, {'password': password});
-      expect(core.sessions.agent.isUnlocked, isTrue);
 
       await core.call(Actions.revokeAgentPairing, {'id': id});
 
-      expect(core.sessions.agent.isUnlocked, isFalse);
-      final pairing = await store().findById(id);
-      expect(pairing, isNotNull);
-      expect(pairing!.isRevoked, isTrue);
-      expect(pairing.nickname, 'DSH');
+      expect(await store().findById(id), isNull, reason: '记录必须真的被删掉');
+      final listed = await core.call(Actions.listAgentPairings);
+      expect((listed['pairings'] as List), isEmpty);
+    });
+
+    test('撤销一个配对不会锁掉整个 agent 域（其它配对可能还在用）', () async {
+      final a = await core.call(Actions.createAgentPairing, {'nickname': 'A'});
+      await core.call(Actions.createAgentPairing, {'nickname': 'B'});
+      await core.call(Actions.unlockAgentDomain, {'password': password});
+
+      final result =
+          await core.call(Actions.revokeAgentPairing, {'id': a['id']});
+
+      expect(core.sessions.agent.isUnlocked, isTrue,
+          reason: '总开关还开着，撤一个配对不该殃及其它智能体');
+      expect(result['remaining'], 1);
+    });
+
+    test('撤销不存在的配对 ⇒ notFound', () async {
+      await expectLater(
+        core.call(Actions.revokeAgentPairing, {'id': 'p_nope'}),
+        throwsA(anything),
+      );
+    });
+  });
+
+  group('重名', () {
+    test('同名配对只能有一个（真机反馈：连点两次出现两个 DSH）', () async {
+      await core.call(Actions.createAgentPairing, {'nickname': 'DSH'});
+
+      await expectLater(
+        core.call(Actions.createAgentPairing, {'nickname': 'DSH'}),
+        throwsA(anything),
+      );
+
+      final listed = await core.call(Actions.listAgentPairings);
+      expect((listed['pairings'] as List).length, 1);
+    });
+
+    test('首尾空白也算同一个昵称', () async {
+      await core.call(Actions.createAgentPairing, {'nickname': 'DSH'});
+      await expectLater(
+        core.call(Actions.createAgentPairing, {'nickname': '  DSH  '}),
+        throwsA(anything),
+      );
+    });
+
+    test('撤销后可以用回同一个昵称', () async {
+      final first =
+          await core.call(Actions.createAgentPairing, {'nickname': 'DSH'});
+      await core.call(Actions.revokeAgentPairing, {'id': first['id']});
+
+      final again = await core.call(Actions.createAgentPairing, {'nickname': 'DSH'});
+      expect(again['id'], isNot(first['id']));
     });
   });
 }

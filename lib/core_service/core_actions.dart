@@ -200,13 +200,15 @@ class CoreActions {
     final pairings = await _pairingStore.list();
     return {
       'pairings': [
-        for (final p in pairings)
+        // 已撤销的记录是历史墓碑：界面不该再显示（否则用户以为"撤销没生效"）。
+        // 真正的审计靠 `agent_audit`（后续阶段），不靠留一条看不见的配对。
+        for (final p in pairings.where((p) => !p.isRevoked))
           {
             'id': p.id,
             'nickname': p.nickname,
             'mode': p.mode.name,
             'trusted': p.trusted,
-            'revoked': p.isRevoked,
+            'revoked': false,
             'createdAt': p.createdAt,
             'lastUsedAt': p.lastUsedAt,
             'calls': p.calls,
@@ -223,6 +225,14 @@ class CoreActions {
     final nickname = (params['nickname'] as String? ?? '').trim();
     if (nickname.isEmpty) {
       throw CoreActionException(ErrorCodes.invalidRequest, '昵称必填');
+    }
+    // 重名会让审计与界面都分不清是谁（真机实测：连点两次出现两个 DSH）。
+    final existing = await _pairingStore.list();
+    if (existing.any((p) => !p.isRevoked && p.nickname.trim() == nickname)) {
+      throw CoreActionException(
+        ErrorCodes.invalidRequest,
+        '已经有一个叫「$nickname」的配对了，请换个昵称或先撤销旧的',
+      );
     }
     final mode = (params['mode'] as String?) == 'trusted'
         ? AgentMode.trusted
@@ -241,14 +251,29 @@ class CoreActions {
     return {'id': id, 'key': key, 'nickname': nickname, 'mode': mode.name};
   }
 
+  /// 撤销配对 = **彻底移除**这条配对记录（不是打标记留着）。
+  ///
+  /// 为什么不保留墓碑：
+  /// - 界面若把它过滤掉，用户会以为"撤销没生效"（真机反馈）；
+  /// - 若显示出来，又多出一条永远删不掉的垃圾。
+  /// 审计需求由后续的 `agent_audit` 表承担（它存昵称快照，不依赖配对记录存在）。
+  ///
+  /// **不锁 agent 域**：可能有其它配对仍在使用同一个总开关。被撤销的那把钥匙
+  /// 在 `authenticate` 阶段就已经查不到了，自然失效。
   Future<Map<String, dynamic>> _revokeAgentPairing(String id) async {
     if (id.isEmpty) {
       throw CoreActionException(ErrorCodes.invalidRequest, 'id 必填');
     }
-    await _pairingStore.revoke(id);
-    // 撤销即锁：别让已撤销的智能体继续用旧会话读数据。
-    _sessions.agent.lock();
-    return {'ok': true, 'agentUnlocked': false};
+    final pairing = await _pairingStore.findById(id);
+    if (pairing == null) {
+      throw CoreActionException(ErrorCodes.notFound, '配对不存在');
+    }
+    await _pairingStore.delete(id);
+    return {
+      'ok': true,
+      'agentUnlocked': _sessions.agent.isUnlocked,
+      'remaining': (await _pairingStore.list()).where((p) => !p.isRevoked).length,
+    };
   }
 
   Future<Map<String, dynamic>> _setAgentAccessMode(
