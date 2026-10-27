@@ -6,17 +6,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../client/api_providers.dart';
 import '../../../l10n/app_localizations.dart';
 
-/// 方式 1（逐次审批）的审批弹窗宿主。
+/// 方式 1（逐次审批）的审批界面宿主。
 ///
-/// 挂在 `MaterialApp.builder` 上，任何页面都会弹出来 —— 因为审批是"智能体在等
-/// 你回话"，用户此刻可能停在生成器或设置页，不能要求他必须打开某个页面。
+/// 挂在 `MaterialApp.builder` 上，任何页面都会显示 —— 审批是"智能体在等你回话"，
+/// 用户此刻可能停在生成器或设置页。
 ///
-/// 设计纪律（都是踩过的坑）：
-/// - **完整展示**参数：操作类型（读/写/删）、来自哪个智能体、哪个条目。
-///   截断/摘要式对话框等于没做（已有实例证明藏起参数的弹窗照样被利用）；
-/// - 只有"同意 / 拒绝"，外加「本会话内允许读取」——**只在普通读时出现**；
-/// - 关闭对话框 = 拒绝（不提供"稍后再说"这种模糊态）；
-/// - 同一时刻只弹一个，避免叠加。
+/// **为什么不用 `showDialog`**（真机踩过）：`builder` 的 context 位于 Navigator
+/// **之上**，`showDialog` 找不到 Navigator 会抛异常，兜底逻辑就立刻回一个"拒绝"
+/// —— 表现是调用 0.1 秒返回 denied、弹窗根本不出现。这里改成**自绘浮层**
+/// （Stack + 遮罩 + AlertDialog 组件本身），完全不依赖 Navigator。
+///
+/// 其余纪律：
+/// - 完整展示：来自哪个智能体、什么操作、哪个条目、哪个工具；
+/// - 只有「同意 / 拒绝」，外加「本会话内允许读取」（只在普通读时出现）；
+/// - 关掉 = 拒绝；同一时刻只显示一个，其余排队。
 class AgentApprovalHost extends ConsumerStatefulWidget {
   const AgentApprovalHost({required this.child, super.key});
 
@@ -28,7 +31,8 @@ class AgentApprovalHost extends ConsumerStatefulWidget {
 
 class _AgentApprovalHostState extends ConsumerState<AgentApprovalHost> {
   StreamSubscription<Map<String, dynamic>>? _subscription;
-  bool _showing = false;
+  final List<Map<String, dynamic>> _queue = [];
+  Map<String, dynamic>? _current;
 
   @override
   void initState() {
@@ -36,7 +40,7 @@ class _AgentApprovalHostState extends ConsumerState<AgentApprovalHost> {
     _subscription = ref
         .read(vaultApiProvider)
         .agentApprovalRequests
-        .listen(_onRequest);
+        .listen(_enqueue);
   }
 
   @override
@@ -45,127 +49,139 @@ class _AgentApprovalHostState extends ConsumerState<AgentApprovalHost> {
     super.dispose();
   }
 
-  Future<void> _onRequest(Map<String, dynamic> request) async {
-    if (_showing || !mounted) return;
-    _showing = true;
-    final api = ref.read(vaultApiProvider);
+  void _enqueue(Map<String, dynamic> request) {
+    if (!mounted) return;
+    setState(() {
+      _queue.add(request);
+      _current ??= _queue.removeAt(0);
+    });
+  }
+
+  Future<void> _decide({required bool allow, bool standing = false}) async {
+    final request = _current;
+    if (request == null) return;
+    setState(() {
+      _current = _queue.isEmpty ? null : _queue.removeAt(0);
+    });
     final approvalId = request['approvalId'] as String? ?? '';
-    final allowStandingOption = request['allowStanding'] == true;
-
-    var allow = false;
-    var allowStanding = false;
+    if (approvalId.isEmpty) return;
     try {
-      final choice = await showDialog<_ApprovalChoice>(
-        context: context,
-        barrierDismissible: false, // 关掉对话框算拒绝，但别让它被误触关掉
-        builder: (dialogContext) => _ApprovalDialog(
-          request: request,
-          allowStandingOption: allowStandingOption,
-        ),
-      );
-      allow = choice != null && choice.allow;
-      allowStanding = choice?.standing ?? false;
-    } catch (_) {
-      allow = false;
-    } finally {
-      _showing = false;
-    }
-
-    // 无论同意与否都要回话，否则核心那条调用会一直挂到超时。
-    try {
-      await api.respondAgentApproval(
-        approvalId: approvalId,
-        allow: allow,
-        allowStandingRead: allowStanding,
-      );
+      await ref.read(vaultApiProvider).respondAgentApproval(
+            approvalId: approvalId,
+            allow: allow,
+            allowStandingRead: standing,
+          );
     } catch (_) {
       // 回话失败：核心会按超时拒绝，不需要 UI 再做什么。
     }
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) {
+    final request = _current;
+    return Stack(
+      children: [
+        widget.child,
+        if (request != null)
+          Positioned.fill(
+            child: _ApprovalOverlay(
+              request: request,
+              onAllow: () => _decide(allow: true),
+              onDeny: () => _decide(allow: false),
+              onAllowStanding: () => _decide(allow: true, standing: true),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
-class _ApprovalChoice {
-  const _ApprovalChoice({required this.allow, this.standing = false});
-
-  final bool allow;
-  final bool standing;
-}
-
-class _ApprovalDialog extends StatelessWidget {
-  const _ApprovalDialog({
+class _ApprovalOverlay extends StatelessWidget {
+  const _ApprovalOverlay({
     required this.request,
-    required this.allowStandingOption,
+    required this.onAllow,
+    required this.onDeny,
+    required this.onAllowStanding,
   });
 
   final Map<String, dynamic> request;
-  final bool allowStandingOption;
+  final VoidCallback onAllow;
+  final VoidCallback onDeny;
+  final VoidCallback onAllowStanding;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
 
     final nickname = request['nickname'] as String? ?? '';
     final tool = request['tool'] as String? ?? '';
     final op = request['op'] as String? ?? 'read';
     final entryName = request['entryName'] as String?;
-    final isRead = op == 'read';
+    final allowStanding = request['allowStanding'] == true && op == 'read';
 
-    return AlertDialog(
-      icon: Icon(Icons.smart_toy_outlined, color: scheme.tertiary),
-      title: Text(l10n.agentApprovalTitle),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _row(l10n.agentApprovalAgent, nickname, theme),
-          const SizedBox(height: 8),
-          _row(l10n.agentApprovalOperation, _opLabel(l10n, op), theme,
-              emphasize: true),
-          if (entryName != null) ...[
-            const SizedBox(height: 8),
-            _row(l10n.agentApprovalEntry, entryName, theme, emphasize: true),
-          ],
-          const SizedBox(height: 8),
-          _row(l10n.agentApprovalTool, tool, theme),
-          const SizedBox(height: 12),
-          Text(
-            l10n.agentApprovalHint,
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: scheme.onSurfaceVariant),
-          ),
-        ],
-      ),
-      actionsAlignment: MainAxisAlignment.spaceBetween,
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, const _ApprovalChoice(allow: false)),
-          child: Text(l10n.agentApprovalDeny),
-        ),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (allowStandingOption && isRead)
-              TextButton(
-                onPressed: () => Navigator.pop(
-                  context,
-                  const _ApprovalChoice(allow: true, standing: true),
-                ),
-                child: Text(l10n.agentApprovalAllowStanding),
+    // 模态遮罩：挡住下面的点击，避免用户误以为还能操作主界面。
+    // 必须自带 Material：这个浮层是 Scaffold 的**兄弟节点**，
+    // 没有 Material 祖先时 AlertDialog 会直接抛异常。
+    return Material(
+      type: MaterialType.transparency,
+      child: ColoredBox(
+        color: Colors.black.withValues(alpha: 0.5),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: AlertDialog(
+            icon: Icon(Icons.smart_toy_outlined,
+                color: theme.colorScheme.tertiary),
+            title: Text(l10n.agentApprovalTitle),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _row(l10n.agentApprovalAgent, nickname, theme),
+                  const SizedBox(height: 8),
+                  _row(l10n.agentApprovalOperation, _opLabel(l10n, op), theme,
+                      emphasize: true),
+                  if (entryName != null) ...[
+                    const SizedBox(height: 8),
+                    _row(l10n.agentApprovalEntry, entryName, theme,
+                        emphasize: true),
+                  ],
+                  const SizedBox(height: 8),
+                  _row(l10n.agentApprovalTool, tool, theme),
+                  const SizedBox(height: 12),
+                  Text(
+                    l10n.agentApprovalHint,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
-            const SizedBox(width: 4),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.pop(context, const _ApprovalChoice(allow: true)),
-              child: Text(l10n.agentApprovalAllow),
             ),
-          ],
+            // 三个按钮交给 AlertDialog 的 OverflowBar 自己排：
+            // 嵌套 Row 在窄宽度 + 长文案（英文「Allow reads this session」）时
+            // 会直接溢出 —— 这是仓库里记过的同类坑，别再包一层 Row。
+            actions: [
+              TextButton(
+                onPressed: onDeny,
+                child: Text(l10n.agentApprovalDeny),
+              ),
+              if (allowStanding)
+                TextButton(
+                  onPressed: onAllowStanding,
+                  child: Text(l10n.agentApprovalAllowStanding),
+                ),
+              FilledButton(
+                onPressed: onAllow,
+                child: Text(l10n.agentApprovalAllow),
+              ),
+            ],
+          ),
         ),
-      ],
+      ),
+      ),
     );
   }
 
@@ -182,15 +198,17 @@ class _ApprovalDialog extends StatelessWidget {
           width: 72,
           child: Text(
             label,
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
         Expanded(
           child: Text(
             value,
             style: emphasize
-                ? theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600)
+                ? theme.textTheme.bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w600)
                 : theme.textTheme.bodyMedium,
           ),
         ),
