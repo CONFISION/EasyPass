@@ -20,6 +20,7 @@ import 'package:easypass/data/models/vault_item.dart';
 import 'package:easypass/data/repositories/vault_repository.dart';
 import 'package:easypass/mcp/mcp_handler.dart';
 import 'package:easypass/mcp/mcp_http_server.dart';
+import 'package:easypass/mcp/mcp_tools.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// 端到端：真 socket + 真仓储 + 真策略 + 真配对存储。
@@ -188,7 +189,7 @@ void main() {
     expect((init['result'] as Map)['protocolVersion'], '2025-06-18');
 
     final listed = await rpc(trustedKey, 'tools/list');
-    expect(((listed['result'] as Map)['tools'] as List).length, 6);
+    expect(((listed['result'] as Map)['tools'] as List).length, 11);
   });
 
   test('未配对 / 已撤销的密钥在 HTTP 层就被 401 挡住', () async {
@@ -485,5 +486,325 @@ void main() {
         .join('\n');
     expect(dump.contains(trustedKey), isFalse);
     expect(dump.contains(password), isFalse);
+  });
+
+  // ─── 写 / 删 / 回收站（3.1.0 阶段 2）────────────────────
+
+  group('写 / 删 / 回收站', () {
+    late List<Map<String, Object?>> requests;
+    late bool approve;
+
+    setUp(() {
+      requests = <Map<String, Object?>>[];
+      approve = true;
+      actions.onApprovalRequested = (req) {
+        requests.add(req);
+        scheduleMicrotask(() {
+          actions.respondApproval(req['approvalId'] as String, approve);
+        });
+      };
+    });
+
+    tearDown(() => actions.onApprovalRequested = null);
+
+    test('create_entry：落库成功，但新条目默认对智能体「永久拒绝」', () async {
+      final created = await callToolPayload(trustedKey, 'create_entry', {
+        'type': 'login',
+        'name': '新建的条目',
+        'url': 'https://example.com',
+        'username': 'carol',
+        'password': 'pw-from-agent',
+        'notes': '备注',
+      });
+      final id = created['id'] as String;
+      expect(id, isNotEmpty);
+
+      final stored = await repository.getItem(id);
+      expect(stored, isNotNull);
+      expect(stored!.name, '新建的条目');
+      expect(stored.agentOpen, isFalse, reason: '智能体不能给自己开访问权限');
+      expect(stored.loginOrEmpty.password, 'pw-from-agent');
+      expect(stored.loginOrEmpty.url, 'https://example.com');
+
+      // 对智能体自己不可见：默认永久拒绝是硬闸。
+      final list = await callToolPayload(trustedKey, 'list_entries');
+      expect((list['entries'] as List).any((e) => e['id'] == id), isFalse);
+      final read = await callToolPayload(trustedKey, 'get_entry', {'id': id});
+      expect(read['errorCode'], 'denied');
+    });
+
+    test('create_entry 的 generate 模式：核心生成并加密入库，明文不回传', () async {
+      final created = await callToolPayload(trustedKey, 'create_entry', {
+        'name': '生成的密码',
+        'password': {'generate': true, 'length': 24},
+      });
+      expect(created.containsKey('password'), isFalse);
+
+      final stored = await repository.getItem(created['id'] as String);
+      final generated = stored!.loginOrEmpty.password;
+      expect(generated.length, 24);
+      expect(jsonEncode(created).contains(generated), isFalse,
+          reason: '生成的密码只能进库，不能回给模型');
+    });
+
+    test('create_entry 拒绝 identity / ssh_key 与缺失 name', () async {
+      final identity = await callToolPayload(
+        trustedKey,
+        'create_entry',
+        {'name': 'x', 'type': 'identity'},
+      );
+      expect(identity['errorCode'], 'invalidRequest');
+
+      final missing = await callToolPayload(trustedKey, 'create_entry', {});
+      expect(missing['errorCode'], 'invalidRequest');
+    });
+
+    test('update_entry：只改传入字段，返回值只有字段名与结果', () async {
+      final updated = await callToolPayload(trustedKey, 'update_entry', {
+        'id': 'e-open',
+        'username': 'alice2',
+        'password': 'new-secret',
+      });
+      expect(updated['ok'], isTrue);
+      expect(updated['updatedFields'], containsAll(['username', 'password']));
+      expect(jsonEncode(updated).contains('new-secret'), isFalse,
+          reason: '写进去的值不能回显给模型');
+
+      final stored = await repository.getItem('e-open');
+      expect(stored!.loginOrEmpty.username, 'alice2');
+      expect(stored.loginOrEmpty.password, 'new-secret');
+    });
+
+    test('update_entry：folder 可设置 / 移出，不存在的 id 报错', () async {
+      await repository.addFolder(FoldersCompanion.insert(
+        id: 'f-work',
+        name: '工作',
+        createdAt: 1,
+        updatedAt: 1,
+      ));
+
+      final set = await callToolPayload(
+        trustedKey,
+        'update_entry',
+        {'id': 'e-open', 'folder': 'f-work'},
+      );
+      expect(set['updatedFields'], ['folder']);
+      expect((await repository.getItem('e-open'))!.folderId, 'f-work');
+
+      final clear = await callToolPayload(
+        trustedKey,
+        'update_entry',
+        {'id': 'e-open', 'folder': null},
+      );
+      expect(clear['ok'], isTrue);
+      expect((await repository.getItem('e-open'))!.folderId, isNull);
+
+      final bad = await callToolPayload(
+        trustedKey,
+        'update_entry',
+        {'id': 'e-open', 'folder': 'f-nope'},
+      );
+      expect(bad['errorCode'], 'invalidRequest');
+    });
+
+    test('update_entry：未开放条目被拒；回收站里的条目要求先恢复', () async {
+      final closed = await callToolPayload(
+        trustedKey,
+        'update_entry',
+        {'id': 'e-closed', 'name': '改名尝试'},
+      );
+      expect(closed['errorCode'], 'denied');
+
+      await callToolPayload(trustedKey, 'delete_entry', {'id': 'e-open'});
+      final trashed = await callToolPayload(
+        trustedKey,
+        'update_entry',
+        {'id': 'e-open', 'name': '改名尝试'},
+      );
+      expect(trashed['errorCode'], 'invalidRequest');
+    });
+
+    test('delete_entry：软删进回收站，list_entries 看不到、list_trash 看得到', () async {
+      final deleted =
+          await callToolPayload(trustedKey, 'delete_entry', {'id': 'e-open'});
+      expect(deleted['ok'], isTrue);
+      expect(deleted['trashed'], isTrue);
+
+      final list = await callToolPayload(trustedKey, 'list_entries');
+      expect((list['entries'] as List).any((e) => e['id'] == 'e-open'), isFalse);
+
+      final trash = await callToolPayload(trustedKey, 'list_trash');
+      final trashedEntries = (trash['entries'] as List).cast<Map>();
+      expect(trashedEntries.map((e) => e['id']), contains('e-open'));
+      expect(
+        trashedEntries.firstWhere((e) => e['id'] == 'e-open')['deletedAt'],
+        isNotNull,
+      );
+
+      // 行与密文都还在：删除只是打了一个 deleted_at。
+      final raw = await db.getEntryById('e-open');
+      expect(raw, isNotNull);
+      expect(raw!.deletedAt, isNotNull);
+      expect(await db.countTrashedEntries(), 1);
+    });
+
+    test('delete_entry 对「永久拒绝」条目同样被硬闸挡住（不会被删）', () async {
+      final denied =
+          await callToolPayload(trustedKey, 'delete_entry', {'id': 'e-closed'});
+      expect(denied['errorCode'], 'denied');
+      expect(await repository.getItem('e-closed'), isNotNull);
+      expect(await db.countTrashedEntries(), 0);
+    });
+
+    test('restore_entry：从回收站恢复；不在回收站时报错', () async {
+      final notTrashed =
+          await callToolPayload(trustedKey, 'restore_entry', {'id': 'e-open'});
+      expect(notTrashed['errorCode'], 'invalidRequest');
+
+      await callToolPayload(trustedKey, 'delete_entry', {'id': 'e-open'});
+      final restored =
+          await callToolPayload(trustedKey, 'restore_entry', {'id': 'e-open'});
+      expect(restored['ok'], isTrue);
+
+      expect(await repository.getItem('e-open'), isNotNull);
+      final list = await callToolPayload(trustedKey, 'list_entries');
+      expect((list['entries'] as List).any((e) => e['id'] == 'e-open'), isTrue);
+      expect(await db.countTrashedEntries(), 0);
+    });
+
+    test('智能体没有「彻底删除」能力：软删后行还在库里', () async {
+      await callToolPayload(trustedKey, 'delete_entry', {'id': 'e-open'});
+      expect((await db.getAllEntries()).length, 3);
+      // 工具面里根本没有 permanently_delete / empty_trash。
+      expect(agentToolNames, isNot(contains('permanently_delete_entry')));
+      expect(agentToolNames, isNot(contains('empty_trash')));
+    });
+
+    test('方式 1：写 / 删 / 恢复都要逐次审批，免询问不覆盖写', () async {
+      // 第一次普通读就勾上「本会话内允许读取」。
+      actions.onApprovalRequested = (req) {
+        requests.add(req);
+        scheduleMicrotask(() {
+          actions.respondApproval(
+            req['approvalId'] as String,
+            true,
+            allowStandingRead: true,
+          );
+        });
+      };
+      await callToolPayload(approvalKey, 'list_entries');
+      final before = requests.length;
+
+      final created = await callToolPayload(
+        approvalKey,
+        'create_entry',
+        {'name': '审批创建'},
+      );
+      expect(requests.length, before + 1, reason: '写操作不享受免询问');
+      expect(requests.last['tool'], 'create_entry');
+      expect(requests.last['op'], 'write');
+      expect(requests.last['allowStanding'], isFalse);
+      expect(requests.last['detail'], contains('新建'));
+
+      // 打开它才能继续做写/删（默认永久拒绝）。
+      final item = await repository.getItem(created['id'] as String);
+      await repository.saveItem(item!.copyWith(agentOpen: true));
+
+      final updated = await callToolPayload(
+        approvalKey,
+        'update_entry',
+        {'id': item.id, 'name': '审批改名'},
+      );
+      expect(updated['updatedFields'], ['name']);
+      expect(requests.last['op'], 'write');
+      expect(requests.last['detail'], contains('name'));
+
+      final deleted = await callToolPayload(
+        approvalKey,
+        'delete_entry',
+        {'id': item.id},
+      );
+      expect(deleted['trashed'], isTrue);
+      expect(requests.last['op'], 'delete');
+      expect(requests.last['detail'], contains('回收站'));
+
+      final restored = await callToolPayload(
+        approvalKey,
+        'restore_entry',
+        {'id': item.id},
+      );
+      expect(restored['restored'], isTrue);
+      expect(requests.last['op'], 'write');
+    });
+
+    test('方式 1：拒绝写操作 ⇒ denied，库里没有任何变化', () async {
+      approve = false;
+      final denied = await callToolPayload(
+        approvalKey,
+        'create_entry',
+        {'name': '不该创建'},
+      );
+      expect(denied['errorCode'], 'denied');
+      expect(await repository.getItems(), hasLength(3));
+    });
+
+    test('status.entryCount = 开放条目数（方式 1 下不再恒为 0）', () async {
+      final status = await callToolPayload(approvalKey, 'status');
+      expect(status['mode'], 'approval');
+      expect(status['locked'], isFalse);
+      expect(status['entryCount'], 2,
+          reason: '两条开放条目；status 不该被自己的审批语义算成 0');
+    });
+
+    test('审计：免询问放行记 allowed_standing，与"本次点了同意"可区分', () async {
+      // 第一次：批准 + 勾「本会话内允许读取」；第二次：走免询问。
+      actions.onApprovalRequested = (req) {
+        requests.add(req);
+        scheduleMicrotask(() {
+          actions.respondApproval(
+            req['approvalId'] as String,
+            true,
+            allowStandingRead: true,
+          );
+        });
+      };
+      await callToolPayload(approvalKey, 'list_entries');
+      await callToolPayload(approvalKey, 'list_entries');
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+
+      final rows = await db.recentAgentAudit();
+      final decisions = rows.map((r) => r.decision).toList();
+      expect(decisions, contains('allowed'), reason: '第一次是当面同意');
+      expect(decisions, contains('allowed_standing'), reason: '第二次是免询问放行');
+    });
+
+    test('审计：执行失败补一条 error，且一次调用只有一行', () async {
+      await callToolPayload(trustedKey, 'get_entry', {'id': 'no-such-entry'});
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+
+      final rows = await db.recentAgentAudit();
+      final failed = rows.where((r) => r.tool == 'get_entry').toList();
+      expect(failed, hasLength(1));
+      expect(failed.single.decision, 'error');
+      expect(failed.single.entryId, 'no-such-entry');
+    });
+
+    test('审计：写 / 删成功也各记一行 allowed', () async {
+      await callToolPayload(trustedKey, 'create_entry', {'name': '审计创建'});
+      await callToolPayload(trustedKey, 'delete_entry', {'id': 'e-open'});
+      await callToolPayload(trustedKey, 'restore_entry', {'id': 'e-open'});
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+
+      final rows = await db.recentAgentAudit();
+      expect(
+        rows.where((r) => r.tool == 'create_entry').single.decision,
+        'allowed',
+      );
+      final deleteRow = rows.where((r) => r.tool == 'delete_entry').single;
+      expect(deleteRow.decision, 'allowed');
+      expect(deleteRow.op, 'delete');
+      expect(rows.where((r) => r.tool == 'restore_entry').single.decision,
+          'allowed');
+    });
   });
 }

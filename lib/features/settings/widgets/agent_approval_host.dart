@@ -129,6 +129,8 @@ class _ApprovalOverlay extends StatelessWidget {
     final tool = request['tool'] as String? ?? '';
     final op = request['op'] as String? ?? 'read';
     final entryName = request['entryName'] as String?;
+    // 写/删的"详细"：核心只给字段名与动作，**不会**有值。
+    final detail = request['detail'] as String?;
     final allowStanding = request['allowStanding'] == true && op == 'read';
 
     // 模态遮罩：挡住下面的点击，避免用户误以为还能操作主界面。
@@ -233,6 +235,24 @@ class _ApprovalOverlay extends StatelessWidget {
                                   color: scheme.onSurface,
                                 ),
                                 maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                          // 写/删的"详细"：必须让用户看清"到底要做什么"，
+                          // 但这里只有字段名与动作，**没有任何值**（密码不显示）。
+                          if (detail != null && detail.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            _infoRow(
+                              theme: theme,
+                              icon: Icons.edit_note_outlined,
+                              label: l10n.agentApprovalDetail,
+                              value: Text(
+                                detail,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: scheme.onSurface,
+                                ),
+                                maxLines: 3,
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),

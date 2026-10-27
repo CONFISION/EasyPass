@@ -189,6 +189,14 @@ void main() {
     ));
   }
 
+  testWidgets('侧边栏有回收站入口（可见，不藏在手势/菜单后面）', (tester) async {
+    final l10n = await pumpVaultScreen(tester);
+
+    expect(find.text(l10n.trashTitle), findsOneWidget,
+        reason: '删除的条目要有个看得见的去处，否则用户以为"删了就没了"');
+    expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+  });
+
   testWidgets('最小窗口尺寸下无溢出；侧边栏固定 248 且没有生成器入口', (tester) async {
     final l10n = await pumpVaultScreen(tester);
 

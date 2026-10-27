@@ -57,6 +57,10 @@ class FakeVaultApi implements VaultApi {
   final Map<String, VaultItem> items = <String, VaultItem>{};
   final Map<String, WireFolder> folders = <String, WireFolder>{};
 
+  /// 回收站（schema 5 的软删语义）：[deleteItem] 把条目从 [items] 搬到这里，
+  /// [listTrash] 读它，[restoreItem] 搬回去，[permanentlyDeleteItem] 才真删。
+  final Map<String, VaultItem> trash = <String, VaultItem>{};
+
   /// [listItems] 收到过的过滤条件，按顺序（断言"UI 把三个维度原样交给了核心"）。
   final List<({String? folderId, EntryType? type, bool favoritesOnly})>
       listItemRequests =
@@ -446,8 +450,49 @@ class FakeVaultApi implements VaultApi {
   @override
   Future<void> deleteItem(String id) async {
     calls.add('deleteItem');
-    items.remove(id);
+    // 与真核心一致：删除 = 移到回收站（软删）。
+    final item = items.remove(id);
+    if (item != null) {
+      trash[id] = item.copyWith(
+        deletedAt: DateTime.now().millisecondsSinceEpoch,
+      );
+    }
     _emitAll();
+  }
+
+  @override
+  Future<List<VaultItem>> listTrash() async {
+    calls.add('listTrash');
+    _requireUnlocked();
+    final list = trash.values.toList()
+      ..sort((a, b) => (b.deletedAt ?? 0).compareTo(a.deletedAt ?? 0));
+    return list;
+  }
+
+  @override
+  Future<void> restoreItem(String id) async {
+    calls.add('restoreItem');
+    final item = trash.remove(id);
+    if (item != null) {
+      items[id] = item.copyWith(deletedAt: null);
+    }
+    _emitAll();
+  }
+
+  @override
+  Future<void> permanentlyDeleteItem(String id) async {
+    calls.add('permanentlyDeleteItem');
+    trash.remove(id);
+    _emitAll();
+  }
+
+  @override
+  Future<int> emptyTrash() async {
+    calls.add('emptyTrash');
+    final count = trash.length;
+    trash.clear();
+    _emitAll();
+    return count;
   }
 
   @override
@@ -499,7 +544,9 @@ class FakeVaultApi implements VaultApi {
     calls.add('deleteAllData');
     final failure = deleteAllDataFailure;
     if (failure != null) _throw(failure);
+    // 清库连回收站一起清（真核心的 deleteAllData 遍历全部行）。
     items.clear();
+    trash.clear();
     folders.clear();
     _emitAll();
   }

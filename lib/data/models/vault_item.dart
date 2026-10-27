@@ -27,6 +27,12 @@ class VaultItem {
 
   final bool isFavorite;
 
+  /// 回收站标记（schema 5）：`null` = 正常，非 null = 删除时间（毫秒）。
+  ///
+  /// 「删除」只打这个标记、行与密文都不动，所以恢复是零成本的；它**不是**
+  /// 加密载荷的一部分（"这条在回收站"不是秘密，而且列表查询要按它过滤）。
+  final int? deletedAt;
+
   /// 智能体可访问性（智能体接口 v1）：`true` = 开放，`false` = **永久拒绝**（默认）。
   ///
   /// 存储落在加密载荷 `EntryPayload.agentOpen`（不是明文列），所以库里看不到
@@ -55,6 +61,7 @@ class VaultItem {
     required this.name,
     this.notes = '',
     this.isFavorite = false,
+    this.deletedAt,
     this.agentOpen = false,
     this.login,
     this.identity,
@@ -164,6 +171,7 @@ class VaultItem {
     String? name,
     String? notes,
     bool? isFavorite,
+    Object? deletedAt = _unset,
     bool? agentOpen,
     LoginData? login,
     IdentityData? identity,
@@ -180,6 +188,8 @@ class VaultItem {
       name: name ?? this.name,
       notes: notes ?? this.notes,
       isFavorite: isFavorite ?? this.isFavorite,
+      deletedAt:
+          identical(deletedAt, _unset) ? this.deletedAt : deletedAt as int?,
       agentOpen: agentOpen ?? this.agentOpen,
       login: login ?? this.login,
       identity: identity ?? this.identity,
@@ -199,6 +209,7 @@ class VaultItem {
       name: name,
       notes: notes,
       isFavorite: isFavorite,
+      deletedAt: deletedAt,
       agentOpen: agentOpen,
       customFields: customFields,
       createdAt: createdAt,
@@ -217,6 +228,9 @@ class VaultItem {
         'name': name,
         'notes': notes,
         'is_favorite': isFavorite,
+        // 只有回收站里的条目才带这个字段：普通导出/UI JSON 不会多出一个恒为
+        // null 的噪音键，而回收站界面靠它显示"删除于"。
+        if (deletedAt != null) 'deleted_at': deletedAt,
         // UI / 导出都拿到显值（"开放"/"永久拒绝"），避免"缺省"与"拒绝"两种空态并存。
         'agent_access': agentOpen ? 'open' : 'denied',
         'created_at': createdAt,
@@ -260,6 +274,7 @@ class VaultItem {
       name: decodeString(json['name']),
       notes: decodeString(json['notes']),
       isFavorite: json['is_favorite'] == true,
+      deletedAt: decodeInt(json['deleted_at']),
       agentOpen: json['agent_access'] == 'open',
       login: type == EntryType.login
           ? (rawLogin is Map

@@ -130,6 +130,41 @@ void main() {
       expect(find.text(l10n.agentApprovalOpSensitiveRead), findsOneWidget);
     });
 
+    testWidgets('写操作弹窗展示「详细」行（只有字段名），且没有免询问按钮', (tester) async {
+      await pumpApprovalHost(tester);
+      api.emitAgentApproval({
+        ...approvalRequest(op: 'write', allowStanding: false),
+        'tool': 'update_entry',
+        'detail': '修改字段：url、password',
+      });
+      await tester.pumpAndSettle();
+
+      expect(find.text(l10n.agentApprovalOpWrite), findsOneWidget);
+      expect(find.text(l10n.agentApprovalDetail), findsOneWidget);
+      expect(find.text('修改字段：url、password'), findsOneWidget);
+      // 写操作永远没有「本会话内允许读取」。
+      expect(find.text(l10n.agentApprovalAllowStanding), findsNothing);
+      expect(find.text(l10n.agentApprovalAllow), findsOneWidget);
+      expect(find.text(l10n.agentApprovalDeny), findsOneWidget);
+    });
+
+    testWidgets('删除操作弹窗写明"移入回收站、可恢复"', (tester) async {
+      await pumpApprovalHost(tester);
+      api.emitAgentApproval({
+        ...approvalRequest(op: 'delete', allowStanding: false),
+        'tool': 'delete_entry',
+        'detail': '移到回收站（可恢复，不会彻底删除）',
+      });
+      await tester.pumpAndSettle();
+
+      expect(find.text(l10n.agentApprovalOpDelete), findsOneWidget);
+      expect(
+        find.text('移到回收站（可恢复，不会彻底删除）'),
+        findsOneWidget,
+      );
+      expect(find.text(l10n.agentApprovalAllowStanding), findsNothing);
+    });
+
     testWidgets('没有条目时（status 之类）不显示条目标签', (tester) async {
       await pumpApprovalHost(tester);
       api.emitAgentApproval(approvalRequest(entryName: null));

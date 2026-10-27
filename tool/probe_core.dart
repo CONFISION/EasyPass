@@ -10,8 +10,8 @@
 /// 那对 `dart run` 通常找不到 —— 所以显式给路径最省事）。
 ///
 /// 它做的是"UI 会做的那一串事"：握手 → 首设主密码 → 解锁 → 建文件夹 →
-/// 存条目 → 列表/搜索/单条 → 计数 → 健康报告 → 删条目 → 清库 →
-/// （默认）请求核心退出。
+/// 存条目 → 列表/搜索/单条 → 计数 → 健康报告 → 删条目 → 回收站（删/列/恢复/
+/// 彻底删）→ 清库 →（默认）请求核心退出。
 ///
 /// **安全纪律**：只在**空库**上跑。库里已有主密码时会拒绝执行任何写操作
 /// —— 否则这个脚本就成了"一条命令清空用户保险库"。
@@ -179,10 +179,25 @@ Future<void> main(List<String> args) async {
     final relisted = await client.request(Actions.listItems);
     _check('重新解锁后 1 条还在', (relisted['items'] as List).length == 1);
 
-    stdout.writeln('\n-- 清理 --');
+    stdout.writeln('\n-- 清理 / 回收站（schema 5）--');
     await client.request(Actions.deleteItem, {'id': 'probe-entry-1'});
     final afterDelete = await client.request(Actions.listItems);
-    _check('删除条目', (afterDelete['items'] as List).isEmpty, afterDelete);
+    _check('删除条目（列表不再显示）', (afterDelete['items'] as List).isEmpty,
+        afterDelete);
+
+    final trash = await client.request(Actions.listTrash);
+    _check('删除进回收站（listTrash = 1）', (trash['items'] as List).length == 1,
+        trash);
+    await client.request(Actions.restoreItem, {'id': 'probe-entry-1'});
+    final restored = await client.request(Actions.listItems);
+    _check('从回收站恢复（listItems = 1）',
+        (restored['items'] as List).length == 1, restored);
+
+    await client.request(Actions.deleteItem, {'id': 'probe-entry-1'});
+    await client.request(Actions.permanentlyDeleteItem, {'id': 'probe-entry-1'});
+    final purged = await client.request(Actions.listTrash);
+    _check('彻底删除后回收站为空', (purged['items'] as List).isEmpty, purged);
+
     await client.request(Actions.removeFolder, {'id': folderId});
     final afterFolder = await client.request(Actions.listFolders);
     _check('删除文件夹', (afterFolder['folders'] as List).isEmpty, afterFolder);

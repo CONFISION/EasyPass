@@ -12,11 +12,12 @@ class AppDatabase extends _$AppDatabase {
 
   AppDatabase.forTesting(super.e);
 
+  /// 5 = 回收站（`password_entries.deleted_at` 列，3.1.0）。
   /// 4 = 智能体访问审计（`agent_audit` 表，3.1.0）。
   /// 3 = 改主密码的轮换日志（`vault_meta` 表，v2.4）。
   /// 2 = 2.3.0 多条目类型（`type` + `data_encrypted`）。
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   /// 迁移策略。
   ///
@@ -25,6 +26,8 @@ class AppDatabase extends _$AppDatabase {
   /// 2 → 3：新增 `vault_meta` 键值表（改主密码的轮换日志）。纯新增表，
   /// 不动任何已有数据。
   /// 3 → 4：新增 `agent_audit` 审计表（智能体访问日志）。纯新增表 + 索引。
+  /// 4 → 5：`password_entries` 新增可空列 `deleted_at`（回收站）+ 索引。
+  /// 旧行该列自动为 NULL = 不在回收站，**不需要回填**。
   /// **每加一列/一表都必须同时改这里**，否则老用户升级后一开库就抛
   /// "no such column" / "no such table"（1.x 的 `onUpgrade` 是空实现，
   /// 没有先例可抄）。
@@ -50,6 +53,13 @@ class AppDatabase extends _$AppDatabase {
         await customStatement(
           'CREATE INDEX IF NOT EXISTS idx_agent_audit_at '
           'ON agent_audit(at)',
+        );
+      }
+      if (from < 5) {
+        await m.addColumn(passwordEntries, passwordEntries.deletedAt);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_password_entries_deleted '
+          'ON password_entries(deleted_at)',
         );
       }
     },
@@ -166,6 +176,11 @@ class AppDatabase extends _$AppDatabase {
 
   // ─── Password Entries ──────────────────────────────────
 
+  /// **全部行，包含回收站**。
+  ///
+  /// 只给"必须遍历全库"的路径用：主密码轮换（漏掉回收站行 = 那些密文留在旧钥匙
+  /// 上，恢复后永久解不开）、钥匙探测、清空全部数据。普通列表请用
+  /// [watchEntriesFiltered] / [getEntriesFiltered]（默认排除回收站）。
   Future<List<PasswordEntry>> getAllEntries() => select(passwordEntries).get();
 
   Stream<List<PasswordEntry>> watchAllEntries() {
@@ -186,24 +201,31 @@ class AppDatabase extends _$AppDatabase {
     final lowerQuery = '%${query.toLowerCase()}%';
     return (select(passwordEntries)..where(
           (t) =>
-              t.name.lower().like(lowerQuery) |
-              t.url.lower().like(lowerQuery) |
-              t.username.lower().like(lowerQuery),
+              (t.name.lower().like(lowerQuery) |
+                  t.url.lower().like(lowerQuery) |
+                  t.username.lower().like(lowerQuery)) &
+              t.deletedAt.isNull(),
         ))
         .get();
   }
 
-  /// 按文件夹 / 类型 / 收藏过滤条目（2.3.0 新增）。
+  /// 按文件夹 / 类型 / 收藏过滤条目（2.3.0 新增；3.1.0 起默认**不含回收站**）。
   ///
   /// - [folderId] 为 null：不按文件夹过滤；
   /// - [type] 为 null：不限类型；传 `'login'` 可只取登录条目（自动填充只认它）；
-  /// - [favoritesOnly]：只返回收藏。
+  /// - [favoritesOnly]：只返回收藏；
+  /// - [includeDeleted]：`true` 时连回收站里的行一起返回（**只有**回收站界面与
+  ///   轮换/清库这类"必须看到全部行"的路径用；普通列表一律默认排除）。
   Stream<List<PasswordEntry>> watchEntriesFiltered({
     String? folderId,
     String? type,
     bool favoritesOnly = false,
+    bool includeDeleted = false,
   }) {
     final query = select(passwordEntries);
+    if (!includeDeleted) {
+      query.where((t) => t.deletedAt.isNull());
+    }
     if (folderId != null) {
       query.where((t) => t.folderId.equals(folderId));
     }
@@ -216,13 +238,17 @@ class AppDatabase extends _$AppDatabase {
     return query.watch();
   }
 
-  /// [watchEntriesFiltered] 的一次性版本。
+  /// [watchEntriesFiltered] 的一次性版本（默认不含回收站）。
   Future<List<PasswordEntry>> getEntriesFiltered({
     String? folderId,
     String? type,
     bool favoritesOnly = false,
+    bool includeDeleted = false,
   }) {
     final query = select(passwordEntries);
+    if (!includeDeleted) {
+      query.where((t) => t.deletedAt.isNull());
+    }
     if (folderId != null) {
       query.where((t) => t.folderId.equals(folderId));
     }
@@ -248,11 +274,15 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Stream<List<PasswordEntry>> watchFavoriteEntries() {
-    return (select(
-      passwordEntries,
-    )..where((t) => t.isFavorite.equals(true))).watch();
+    return (select(passwordEntries)
+          ..where((t) => t.isFavorite.equals(true) & t.deletedAt.isNull()))
+        .watch();
   }
 
+  /// 单行读取：**故意包含回收站**。
+  ///
+  /// 调用方语义由仓储层裁决（`getItem` 默认把回收站行当不存在，恢复/彻底删除
+  /// 才需要看到它们）；表本身不做"看不见"的过滤，否则恢复流程没法按 id 找行。
   Future<PasswordEntry?> getEntryById(String id) {
     return (select(
       passwordEntries,
@@ -276,24 +306,83 @@ class AppDatabase extends _$AppDatabase {
     )..where((t) => t.id.equals(id))).write(entry);
   }
 
+  /// **硬删除**：整行（连同密文）从库里消失，不可恢复。
+  ///
+  /// 只给两条路用：彻底删除回收站里的某一条、以及"清空全部数据"。
+  /// 普通删除请用 [trashEntry]。
   Future<void> deleteEntry(String id) {
     return (delete(passwordEntries)..where((t) => t.id.equals(id))).go();
   }
 
+  // ─── 回收站（schema 5）──────────────────────────────────
+
+  /// 标记为已删除（软删）：只写 `deleted_at`，**不动任何密文**。
+  ///
+  /// 返回受影响行数（0 = 没有这条或已经在回收站里）。
+  Future<int> trashEntry(String id, int at) {
+    return (update(passwordEntries)
+          ..where((t) => t.id.equals(id) & t.deletedAt.isNull()))
+        .write(PasswordEntriesCompanion(deletedAt: Value(at)));
+  }
+
+  /// 从回收站恢复：`deleted_at` 置回 NULL，行与密文原样还在。
+  ///
+  /// 返回受影响行数（0 = 没有这条或它本来就不在回收站）。
+  Future<int> restoreEntry(String id) {
+    return (update(passwordEntries)
+          ..where((t) => t.id.equals(id) & t.deletedAt.isNotNull()))
+        .write(const PasswordEntriesCompanion(deletedAt: Value(null)));
+  }
+
+  /// 回收站列表（最近删除的在前）。
+  Future<List<PasswordEntry>> getTrashedEntries() {
+    return (select(passwordEntries)
+          ..where((t) => t.deletedAt.isNotNull())
+          ..orderBy([
+            (t) => OrderingTerm(
+                  expression: t.deletedAt,
+                  mode: OrderingMode.desc,
+                ),
+          ]))
+        .get();
+  }
+
+  /// 回收站里的行数（不取行、不解密）。
+  Future<int> countTrashedEntries() {
+    final count = passwordEntries.id.count();
+    return (selectOnly(passwordEntries)
+          ..addColumns([count])
+          ..where(passwordEntries.deletedAt.isNotNull()))
+        .map((row) => row.read(count) ?? 0)
+        .getSingle();
+  }
+
+  /// 清空回收站（硬删除全部已删除行），返回删除条数。
+  Future<int> emptyTrash() {
+    return (delete(passwordEntries)
+          ..where((t) => t.deletedAt.isNotNull()))
+        .go();
+  }
+
+  /// 正常条目总数（**不含回收站**）。
   Future<int> getEntryCount() {
     return (selectOnly(passwordEntries)
-          ..addColumns([passwordEntries.id.count()]))
+          ..addColumns([passwordEntries.id.count()])
+          ..where(passwordEntries.deletedAt.isNull()))
         .map((row) => row.read(passwordEntries.id.count()) ?? 0)
         .getSingle();
   }
 
   /// 条目计数（不取行，只取 count）；[type] / [folderId] 非空时只数对应的行。
+  /// **不含回收站**（删文件夹前的提示不该把已删除的条目算进去）。
   ///
   /// [folderId] 用于"删文件夹前先数一数里面有多少条目"：不能为了弹个提示
   /// 就把整库解密一遍（`getItems` 会解密每个字段）。
   Future<int> countEntriesFiltered({String? type, String? folderId}) {
     final count = passwordEntries.id.count();
-    final query = selectOnly(passwordEntries)..addColumns([count]);
+    final query = selectOnly(passwordEntries)
+      ..addColumns([count])
+      ..where(passwordEntries.deletedAt.isNull());
     if (type != null) {
       query.where(passwordEntries.type.equals(type));
     }

@@ -502,6 +502,7 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
     final l10n = AppLocalizations.of(context);
     final messenger = ScaffoldMessenger.of(context);
     final api = ref.read(vaultApiProvider);
+    final entryId = widget.entryId!;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -515,7 +516,7 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
           FilledButton(
             onPressed: () async {
               try {
-                await api.deleteItem(widget.entryId!);
+                await api.deleteItem(entryId);
               } catch (error) {
                 // 删不掉就明说（对话框留着，用户可以重试或取消）。
                 if (ctx.mounted) Navigator.pop(ctx);
@@ -526,11 +527,27 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
               }
               if (ctx.mounted) Navigator.pop(ctx);
               if (context.mounted) context.pop();
+              // 与详情页一致：删除进回收站，给一次撤销机会。
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text(l10n.trashMoved),
+                  action: SnackBarAction(
+                    label: l10n.undo,
+                    onPressed: () async {
+                      try {
+                        await api.restoreItem(entryId);
+                      } catch (_) {
+                        // 恢复失败不打扰（例如已被彻底删除）。
+                      }
+                    },
+                  ),
+                ),
+              );
             },
             style: FilledButton.styleFrom(
               backgroundColor: Theme.of(context).colorScheme.error,
             ),
-            child: Text(l10n.delete),
+            child: Text(l10n.trashMoveAction),
           ),
         ],
       ),

@@ -119,9 +119,45 @@
       }
     }
   },
-  "deleteEntryTitle": "Delete Entry",
-  "deleteEntryMessage": "Are you sure? This cannot be undone.",
-  "deleteEntryDetailMessage": "Are you sure you want to delete this entry? This action cannot be undone.",
+  "deleteEntryTitle": "Move to Trash?",
+  "trashMoveAction": "Move to Trash",
+  "deleteEntryMessage": "Move this entry to the trash? You can restore it later.",
+  "deleteEntryDetailMessage": "Move this entry to the trash? You can restore it, or delete it permanently, later.",
+  "trashTitle": "Trash",
+  "trashSubtitle": "Deleted entries land here first: restore them or delete them for good.",
+  "trashEmptyTitle": "Trash is empty",
+  "trashEmptyMessage": "Deleted entries show up here first, and can always be restored.",
+  "trashDeletedAt": "Deleted {time}",
+  "@trashDeletedAt": {
+    "placeholders": { "time": { "type": "String" } }
+  },
+  "trashRestore": "Restore",
+  "trashRestored": "Restored \"{name}\"",
+  "@trashRestored": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "trashDeletePermanently": "Delete permanently",
+  "trashDeletePermanentlyTitle": "Delete entry permanently",
+  "trashDeletePermanentlyMessage": "\"{name}\" will be permanently deleted. This cannot be undone.",
+  "@trashDeletePermanentlyMessage": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "trashDeletedPermanently": "Permanently deleted \"{name}\"",
+  "@trashDeletedPermanently": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "trashEmptyAction": "Empty trash",
+  "trashEmptyConfirmTitle": "Empty the trash?",
+  "trashEmptyConfirmMessage": "{count} entries will be permanently deleted. This cannot be undone.",
+  "@trashEmptyConfirmMessage": {
+    "placeholders": { "count": { "type": "String" } }
+  },
+  "trashEmptied": "Trash emptied ({count} entries)",
+  "@trashEmptied": {
+    "placeholders": { "count": { "type": "String" } }
+  },
+  "trashMoved": "Moved to Trash",
+  "undo": "Undo",
   "entryDetailsTitle": "Entry Details",
   "failedToLoadEntry": "Failed to load entry",
   "entryNotFound": "Entry not found",
@@ -593,6 +629,8 @@
   "agentAuditDecisionDenied": "Denied",
   "agentAuditDecisionTimeout": "Timed out",
   "agentAuditDecisionError": "Failed",
+  "agentAuditDecisionAllowedStanding": "Allowed (session exemption)",
+  "agentApprovalDetail": "Details",
   "agentModeSwitchTitle": "Access mode",
   "agentSwitchToApproval": "Switch to “ask every time”",
   "agentSwitchToTrusted": "Switch to trusted (no prompts)",

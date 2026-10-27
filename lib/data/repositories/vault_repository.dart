@@ -82,12 +82,15 @@ class VaultRepository {
     return rows.map((row) => mapper.fromRow(row, key)).toList();
   }
 
-  /// 读取单个条目；不存在或未解锁时返回 null。
-  Future<VaultItem?> getItem(String id) async {
+  /// 读取单个条目；不存在 / **在回收站里** / 未解锁时返回 null。
+  ///
+  /// [includeDeleted] 只给恢复流程与回收站界面用：它们必须能看到已删除的行。
+  Future<VaultItem?> getItem(String id, {bool includeDeleted = false}) async {
     final key = _keyOrNull();
     if (key == null) return null;
     final row = await db.getEntryById(id);
     if (row == null) return null;
+    if (!includeDeleted && row.deletedAt != null) return null;
     return mapper.fromRow(row, key);
   }
 
@@ -96,13 +99,16 @@ class VaultRepository {
   /// 详情页必须用这个而不是 `getItem`：一次性读取 + 手写失效的写法，
   /// 只要漏掉一处（例如"编辑保存后弹回详情页"），用户看到的就还是旧条目 ——
   /// 新增的自定义字段不显示就是这么来的。
-  Stream<VaultItem?> watchItem(String id) {
+  /// 条目被移入回收站时会推 `null`（默认视作"不存在"）。
+  Stream<VaultItem?> watchItem(String id, {bool includeDeleted = false}) {
     final key = _keyOrNull();
     if (key == null) return Stream.value(null);
     final itemMapper = mapper;
-    return db
-        .watchEntryById(id)
-        .map((row) => row == null ? null : itemMapper.fromRow(row, key));
+    return db.watchEntryById(id).map((row) {
+      if (row == null) return null;
+      if (!includeDeleted && row.deletedAt != null) return null;
+      return itemMapper.fromRow(row, key);
+    });
   }
 
   /// 新增或更新（按 id upsert）。
@@ -136,7 +142,45 @@ class VaultRepository {
     );
   }
 
-  Future<void> deleteItem(String id) => db.deleteEntry(id);
+  /// 删除 = **移到回收站**（软删：只写 `deleted_at`，密文一个字节都不动）。
+  ///
+  /// 返回 `false` 表示没有这条（或已经在回收站里）。恢复见 [restoreItem]，
+  /// 彻底删除见 [permanentlyDeleteItem]。
+  Future<bool> deleteItem(String id) async {
+    final affected = await db.trashEntry(
+      id,
+      DateTime.now().millisecondsSinceEpoch,
+    );
+    return affected > 0;
+  }
+
+  /// 回收站列表（最近删除的在前）。**会解密**，只给回收站界面用。
+  Future<List<VaultItem>> getTrashedItems() async {
+    final key = _keyOrNull();
+    if (key == null) return const [];
+    final rows = await db.getTrashedEntries();
+    return rows.map((row) => mapper.fromRow(row, key)).toList();
+  }
+
+  /// 回收站里的条目数（不解密，只 count）。
+  Future<int> countTrashedItems() => db.countTrashedEntries();
+
+  /// 从回收站恢复（`deleted_at` 置回 NULL）。返回 `false` = 没有这条。
+  Future<bool> restoreItem(String id) async => (await db.restoreEntry(id)) > 0;
+
+  /// 彻底删除一条**已在回收站**的条目（不可恢复）。
+  ///
+  /// 刻意只允许删回收站里的条目：正常条目必须先"删除"进回收站，再删一次。
+  /// 这是给 UI/智能体两端都保一条"误删还能捞回来"的缓冲。
+  Future<bool> permanentlyDeleteItem(String id) async {
+    final row = await db.getEntryById(id);
+    if (row == null || row.deletedAt == null) return false;
+    await db.deleteEntry(id);
+    return true;
+  }
+
+  /// 清空回收站（硬删除全部已删除行），返回删除条数。
+  Future<int> emptyTrash() => db.emptyTrash();
 
   /// 搜索（大小写不敏感，内存中匹配解密后的字段）。
   ///

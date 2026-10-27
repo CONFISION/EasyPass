@@ -455,7 +455,7 @@ void main() {
     expect(find.text(enL10n.deleteEntryTitle), findsOneWidget);
     expect(find.text(enL10n.deleteEntryMessage), findsOneWidget);
 
-    await tester.tap(find.text(enL10n.delete));
+    await tester.tap(find.text(enL10n.trashMoveAction));
     await tester.pumpAndSettle();
 
     expect(await harness.api.getItem('seed-login'), isNull);

@@ -484,6 +484,17 @@ class PasswordEntries extends Table
     $customConstraints: 'NOT NULL DEFAULT FALSE',
     defaultValue: const CustomExpression('FALSE'),
   );
+  static const VerificationMeta _deletedAtMeta = const VerificationMeta(
+    'deletedAt',
+  );
+  late final GeneratedColumn<int> deletedAt = GeneratedColumn<int>(
+    'deleted_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    $customConstraints: '',
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -519,6 +530,7 @@ class PasswordEntries extends Table
     totpSecretEncrypted,
     dataEncrypted,
     isFavorite,
+    deletedAt,
     createdAt,
     updatedAt,
   ];
@@ -615,6 +627,12 @@ class PasswordEntries extends Table
         isFavorite.isAcceptableOrUnknown(data['is_favorite']!, _isFavoriteMeta),
       );
     }
+    if (data.containsKey('deleted_at')) {
+      context.handle(
+        _deletedAtMeta,
+        deletedAt.isAcceptableOrUnknown(data['deleted_at']!, _deletedAtMeta),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -684,6 +702,10 @@ class PasswordEntries extends Table
         DriftSqlType.bool,
         data['${effectivePrefix}is_favorite'],
       )!,
+      deletedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}deleted_at'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}created_at'],
@@ -720,6 +742,11 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
   final String? totpSecretEncrypted;
   final String dataEncrypted;
   final bool isFavorite;
+
+  /// 回收站（schema 5，3.1.0）：NULL = 正常；非 NULL = 删除时间（毫秒）。
+  /// 「删除」只打这个标记，行与密文一个字节都不动；「恢复」就是置回 NULL。
+  /// 主密码轮换会照样遍历回收站行（getAllEntries），否则那些密文会留在旧钥匙上。
+  final int? deletedAt;
   final int createdAt;
   final int updatedAt;
   const PasswordEntry({
@@ -734,6 +761,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
     this.totpSecretEncrypted,
     required this.dataEncrypted,
     required this.isFavorite,
+    this.deletedAt,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -757,6 +785,9 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
     }
     map['data_encrypted'] = Variable<String>(dataEncrypted);
     map['is_favorite'] = Variable<bool>(isFavorite);
+    if (!nullToAbsent || deletedAt != null) {
+      map['deleted_at'] = Variable<int>(deletedAt);
+    }
     map['created_at'] = Variable<int>(createdAt);
     map['updated_at'] = Variable<int>(updatedAt);
     return map;
@@ -781,6 +812,9 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
           : Value(totpSecretEncrypted),
       dataEncrypted: Value(dataEncrypted),
       isFavorite: Value(isFavorite),
+      deletedAt: deletedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(deletedAt),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -807,6 +841,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
       ),
       dataEncrypted: serializer.fromJson<String>(json['data_encrypted']),
       isFavorite: serializer.fromJson<bool>(json['is_favorite']),
+      deletedAt: serializer.fromJson<int?>(json['deleted_at']),
       createdAt: serializer.fromJson<int>(json['created_at']),
       updatedAt: serializer.fromJson<int>(json['updated_at']),
     );
@@ -826,6 +861,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
       'totp_secret_encrypted': serializer.toJson<String?>(totpSecretEncrypted),
       'data_encrypted': serializer.toJson<String>(dataEncrypted),
       'is_favorite': serializer.toJson<bool>(isFavorite),
+      'deleted_at': serializer.toJson<int?>(deletedAt),
       'created_at': serializer.toJson<int>(createdAt),
       'updated_at': serializer.toJson<int>(updatedAt),
     };
@@ -843,6 +879,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
     Value<String?> totpSecretEncrypted = const Value.absent(),
     String? dataEncrypted,
     bool? isFavorite,
+    Value<int?> deletedAt = const Value.absent(),
     int? createdAt,
     int? updatedAt,
   }) => PasswordEntry(
@@ -861,6 +898,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
         : this.totpSecretEncrypted,
     dataEncrypted: dataEncrypted ?? this.dataEncrypted,
     isFavorite: isFavorite ?? this.isFavorite,
+    deletedAt: deletedAt.present ? deletedAt.value : this.deletedAt,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -887,6 +925,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
       isFavorite: data.isFavorite.present
           ? data.isFavorite.value
           : this.isFavorite,
+      deletedAt: data.deletedAt.present ? data.deletedAt.value : this.deletedAt,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -906,6 +945,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
           ..write('totpSecretEncrypted: $totpSecretEncrypted, ')
           ..write('dataEncrypted: $dataEncrypted, ')
           ..write('isFavorite: $isFavorite, ')
+          ..write('deletedAt: $deletedAt, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -925,6 +965,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
     totpSecretEncrypted,
     dataEncrypted,
     isFavorite,
+    deletedAt,
     createdAt,
     updatedAt,
   );
@@ -943,6 +984,7 @@ class PasswordEntry extends DataClass implements Insertable<PasswordEntry> {
           other.totpSecretEncrypted == this.totpSecretEncrypted &&
           other.dataEncrypted == this.dataEncrypted &&
           other.isFavorite == this.isFavorite &&
+          other.deletedAt == this.deletedAt &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -959,6 +1001,7 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
   final Value<String?> totpSecretEncrypted;
   final Value<String> dataEncrypted;
   final Value<bool> isFavorite;
+  final Value<int?> deletedAt;
   final Value<int> createdAt;
   final Value<int> updatedAt;
   final Value<int> rowid;
@@ -974,6 +1017,7 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
     this.totpSecretEncrypted = const Value.absent(),
     this.dataEncrypted = const Value.absent(),
     this.isFavorite = const Value.absent(),
+    this.deletedAt = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -990,6 +1034,7 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
     this.totpSecretEncrypted = const Value.absent(),
     this.dataEncrypted = const Value.absent(),
     this.isFavorite = const Value.absent(),
+    this.deletedAt = const Value.absent(),
     required int createdAt,
     required int updatedAt,
     this.rowid = const Value.absent(),
@@ -1010,6 +1055,7 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
     Expression<String>? totpSecretEncrypted,
     Expression<String>? dataEncrypted,
     Expression<bool>? isFavorite,
+    Expression<int>? deletedAt,
     Expression<int>? createdAt,
     Expression<int>? updatedAt,
     Expression<int>? rowid,
@@ -1027,6 +1073,7 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
         'totp_secret_encrypted': totpSecretEncrypted,
       if (dataEncrypted != null) 'data_encrypted': dataEncrypted,
       if (isFavorite != null) 'is_favorite': isFavorite,
+      if (deletedAt != null) 'deleted_at': deletedAt,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -1045,6 +1092,7 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
     Value<String?>? totpSecretEncrypted,
     Value<String>? dataEncrypted,
     Value<bool>? isFavorite,
+    Value<int?>? deletedAt,
     Value<int>? createdAt,
     Value<int>? updatedAt,
     Value<int>? rowid,
@@ -1061,6 +1109,7 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
       totpSecretEncrypted: totpSecretEncrypted ?? this.totpSecretEncrypted,
       dataEncrypted: dataEncrypted ?? this.dataEncrypted,
       isFavorite: isFavorite ?? this.isFavorite,
+      deletedAt: deletedAt ?? this.deletedAt,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -1105,6 +1154,9 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
     if (isFavorite.present) {
       map['is_favorite'] = Variable<bool>(isFavorite.value);
     }
+    if (deletedAt.present) {
+      map['deleted_at'] = Variable<int>(deletedAt.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<int>(createdAt.value);
     }
@@ -1131,6 +1183,7 @@ class PasswordEntriesCompanion extends UpdateCompanion<PasswordEntry> {
           ..write('totpSecretEncrypted: $totpSecretEncrypted, ')
           ..write('dataEncrypted: $dataEncrypted, ')
           ..write('isFavorite: $isFavorite, ')
+          ..write('deletedAt: $deletedAt, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -1964,6 +2017,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'idx_password_entries_type',
     'CREATE INDEX idx_password_entries_type ON password_entries (type)',
   );
+  late final Index idxPasswordEntriesDeleted = Index(
+    'idx_password_entries_deleted',
+    'CREATE INDEX idx_password_entries_deleted ON password_entries (deleted_at)',
+  );
   late final VaultMeta vaultMeta = VaultMeta(this);
   late final AgentAudit agentAudit = AgentAudit(this);
   late final Index idxAgentAuditAt = Index(
@@ -1981,6 +2038,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     idxPasswordEntriesName,
     idxPasswordEntriesFavorite,
     idxPasswordEntriesType,
+    idxPasswordEntriesDeleted,
     vaultMeta,
     agentAudit,
     idxAgentAuditAt,
@@ -2206,6 +2264,7 @@ typedef $PasswordEntriesCreateCompanionBuilder =
       Value<String?> totpSecretEncrypted,
       Value<String> dataEncrypted,
       Value<bool> isFavorite,
+      Value<int?> deletedAt,
       required int createdAt,
       required int updatedAt,
       Value<int> rowid,
@@ -2223,6 +2282,7 @@ typedef $PasswordEntriesUpdateCompanionBuilder =
       Value<String?> totpSecretEncrypted,
       Value<String> dataEncrypted,
       Value<bool> isFavorite,
+      Value<int?> deletedAt,
       Value<int> createdAt,
       Value<int> updatedAt,
       Value<int> rowid,
@@ -2289,6 +2349,11 @@ class $PasswordEntriesFilterComposer
 
   ColumnFilters<bool> get isFavorite => $composableBuilder(
     column: $table.isFavorite,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2367,6 +2432,11 @@ class $PasswordEntriesOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get deletedAt => $composableBuilder(
+    column: $table.deletedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -2430,6 +2500,9 @@ class $PasswordEntriesAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<int> get deletedAt =>
+      $composableBuilder(column: $table.deletedAt, builder: (column) => column);
+
   GeneratedColumn<int> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -2479,6 +2552,7 @@ class $PasswordEntriesTableManager
                 Value<String?> totpSecretEncrypted = const Value.absent(),
                 Value<String> dataEncrypted = const Value.absent(),
                 Value<bool> isFavorite = const Value.absent(),
+                Value<int?> deletedAt = const Value.absent(),
                 Value<int> createdAt = const Value.absent(),
                 Value<int> updatedAt = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -2494,6 +2568,7 @@ class $PasswordEntriesTableManager
                 totpSecretEncrypted: totpSecretEncrypted,
                 dataEncrypted: dataEncrypted,
                 isFavorite: isFavorite,
+                deletedAt: deletedAt,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,
@@ -2511,6 +2586,7 @@ class $PasswordEntriesTableManager
                 Value<String?> totpSecretEncrypted = const Value.absent(),
                 Value<String> dataEncrypted = const Value.absent(),
                 Value<bool> isFavorite = const Value.absent(),
+                Value<int?> deletedAt = const Value.absent(),
                 required int createdAt,
                 required int updatedAt,
                 Value<int> rowid = const Value.absent(),
@@ -2526,6 +2602,7 @@ class $PasswordEntriesTableManager
                 totpSecretEncrypted: totpSecretEncrypted,
                 dataEncrypted: dataEncrypted,
                 isFavorite: isFavorite,
+                deletedAt: deletedAt,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
                 rowid: rowid,

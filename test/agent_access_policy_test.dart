@@ -231,6 +231,14 @@ void main() {
       expect(entryToAgentJson(loginItem(), folderName: '工作')['folder'], '工作');
     });
 
+    test('deletedAt 只在显式传入时出现（普通 list_entries 不带回收站时间）', () {
+      expect(entryToAgentJson(loginItem()).containsKey('deletedAt'), isFalse);
+      expect(
+        entryToAgentJson(loginItem(), deletedAt: 1793120000000)['deletedAt'],
+        1793120000000,
+      );
+    });
+
     test('安全笔记：正文不出现，hasPassword/hasTotp 都是 false', () {
       final json = entryToAgentJson(VaultItem(
         id: 'e2',

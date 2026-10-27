@@ -421,4 +421,94 @@ void main() {
       expect(item.loginOrEmpty.password, 'pw');
     });
   });
+
+  group('回收站（schema 5）', () {
+    test('deleteItem 是软删：默认读不到，includeDeleted 读得到，deletedAt 有值', () async {
+      await repo.saveItem(loginItem());
+
+      expect(await repo.deleteItem('login-1'), isTrue);
+      expect(await repo.getItem('login-1'), isNull);
+      expect(await repo.getItem('login-1', includeDeleted: true), isNotNull);
+      expect(
+        (await repo.getItem('login-1', includeDeleted: true))!.deletedAt,
+        isNotNull,
+      );
+      expect(await repo.countItems(), 0);
+      expect(await repo.countTrashedItems(), 1);
+
+      // 对不存在的条目返回 false，不抛。
+      expect(await repo.deleteItem('nope'), isFalse);
+    });
+
+    test('getTrashedItems 会解密内容；watchItem 默认把回收站条目当不存在', () async {
+      await repo.saveItem(loginItem(password: 'trash-me'));
+      await repo.deleteItem('login-1');
+
+      final trashed = await repo.getTrashedItems();
+      expect(trashed.single.id, 'login-1');
+      expect(trashed.single.loginOrEmpty.password, 'trash-me');
+      expect(trashed.single.deletedAt, isNotNull);
+
+      expect(await repo.watchItem('login-1').first, isNull);
+      expect(
+        (await repo.watchItem('login-1', includeDeleted: true).first)!
+            .loginOrEmpty
+            .password,
+        'trash-me',
+      );
+    });
+
+    test('恢复后重新可见，且内容/收藏/文件夹原样保留', () async {
+      await db.insertFolder(FoldersCompanion.insert(
+        id: 'f1',
+        name: '工作',
+        createdAt: 1,
+        updatedAt: 1,
+      ));
+      await repo.saveItem(loginItem(folderId: 'f1', favorite: true));
+      await repo.deleteItem('login-1');
+      expect((await repo.getItems()).isEmpty, isTrue);
+
+      expect(await repo.restoreItem('login-1'), isTrue);
+      final item = (await repo.getItem('login-1'))!;
+      expect(item.folderId, 'f1');
+      expect(item.isFavorite, isTrue);
+      expect(item.loginOrEmpty.password, 'pw');
+      expect(await repo.countTrashedItems(), 0);
+      expect(await repo.restoreItem('login-1'), isFalse);
+    });
+
+    test('彻底删除只接受回收站里的条目；清空回收站返回条数', () async {
+      await repo.saveItem(loginItem());
+      // 正常条目必须先删进回收站。
+      expect(await repo.permanentlyDeleteItem('login-1'), isFalse);
+      expect(await repo.getItem('login-1'), isNotNull);
+
+      await repo.deleteItem('login-1');
+      expect(await repo.permanentlyDeleteItem('login-1'), isTrue);
+      expect(await repo.getItem('login-1', includeDeleted: true), isNull);
+      expect(await db.getAllEntries(), isEmpty);
+
+      for (var i = 0; i < 3; i++) {
+        await repo.saveItem(loginItem(id: 'e$i'));
+        await repo.deleteItem('e$i');
+      }
+      expect(await repo.emptyTrash(), 3);
+      expect(await repo.countTrashedItems(), 0);
+    });
+
+    test('对回收站条目再 saveItem 不会让它悄悄复活', () async {
+      await repo.saveItem(loginItem());
+      await repo.deleteItem('login-1');
+
+      final trashed = (await repo.getItem('login-1', includeDeleted: true))!;
+      await repo.saveItem(trashed.copyWith(name: '在回收站里改个名'));
+
+      // 还在回收站：默认查询依旧看不到。
+      expect(await repo.getItem('login-1'), isNull);
+      final again = (await repo.getItem('login-1', includeDeleted: true))!;
+      expect(again.name, '在回收站里改个名');
+      expect(again.deletedAt, isNotNull);
+    });
+  });
 }

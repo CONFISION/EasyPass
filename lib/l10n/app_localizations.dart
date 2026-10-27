@@ -587,20 +587,128 @@ abstract class AppLocalizations {
   /// No description provided for @deleteEntryTitle.
   ///
   /// In en, this message translates to:
-  /// **'Delete Entry'**
+  /// **'Move to Trash?'**
   String get deleteEntryTitle;
+
+  /// No description provided for @trashMoveAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to Trash'**
+  String get trashMoveAction;
 
   /// No description provided for @deleteEntryMessage.
   ///
   /// In en, this message translates to:
-  /// **'Are you sure? This cannot be undone.'**
+  /// **'Move this entry to the trash? You can restore it later.'**
   String get deleteEntryMessage;
 
   /// No description provided for @deleteEntryDetailMessage.
   ///
   /// In en, this message translates to:
-  /// **'Are you sure you want to delete this entry? This action cannot be undone.'**
+  /// **'Move this entry to the trash? You can restore it, or delete it permanently, later.'**
   String get deleteEntryDetailMessage;
+
+  /// No description provided for @trashTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Trash'**
+  String get trashTitle;
+
+  /// No description provided for @trashSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted entries land here first: restore them or delete them for good.'**
+  String get trashSubtitle;
+
+  /// No description provided for @trashEmptyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Trash is empty'**
+  String get trashEmptyTitle;
+
+  /// No description provided for @trashEmptyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted entries show up here first, and can always be restored.'**
+  String get trashEmptyMessage;
+
+  /// No description provided for @trashDeletedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted {time}'**
+  String trashDeletedAt(String time);
+
+  /// No description provided for @trashRestore.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore'**
+  String get trashRestore;
+
+  /// No description provided for @trashRestored.
+  ///
+  /// In en, this message translates to:
+  /// **'Restored \"{name}\"'**
+  String trashRestored(String name);
+
+  /// No description provided for @trashDeletePermanently.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete permanently'**
+  String get trashDeletePermanently;
+
+  /// No description provided for @trashDeletePermanentlyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete entry permanently'**
+  String get trashDeletePermanentlyTitle;
+
+  /// No description provided for @trashDeletePermanentlyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'\"{name}\" will be permanently deleted. This cannot be undone.'**
+  String trashDeletePermanentlyMessage(String name);
+
+  /// No description provided for @trashDeletedPermanently.
+  ///
+  /// In en, this message translates to:
+  /// **'Permanently deleted \"{name}\"'**
+  String trashDeletedPermanently(String name);
+
+  /// No description provided for @trashEmptyAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Empty trash'**
+  String get trashEmptyAction;
+
+  /// No description provided for @trashEmptyConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Empty the trash?'**
+  String get trashEmptyConfirmTitle;
+
+  /// No description provided for @trashEmptyConfirmMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} entries will be permanently deleted. This cannot be undone.'**
+  String trashEmptyConfirmMessage(String count);
+
+  /// No description provided for @trashEmptied.
+  ///
+  /// In en, this message translates to:
+  /// **'Trash emptied ({count} entries)'**
+  String trashEmptied(String count);
+
+  /// No description provided for @trashMoved.
+  ///
+  /// In en, this message translates to:
+  /// **'Moved to Trash'**
+  String get trashMoved;
+
+  /// No description provided for @undo.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get undo;
 
   /// No description provided for @entryDetailsTitle.
   ///
@@ -2293,6 +2401,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Failed'**
   String get agentAuditDecisionError;
+
+  /// No description provided for @agentAuditDecisionAllowedStanding.
+  ///
+  /// In en, this message translates to:
+  /// **'Allowed (session exemption)'**
+  String get agentAuditDecisionAllowedStanding;
+
+  /// No description provided for @agentApprovalDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'Details'**
+  String get agentApprovalDetail;
 
   /// No description provided for @agentModeSwitchTitle.
   ///

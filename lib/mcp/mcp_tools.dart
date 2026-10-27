@@ -36,10 +36,14 @@ class McpTool {
       };
 }
 
-/// 阶段 1 的工具面：**只读 + 会话窗口**。
+/// 3.1.0 的工具面：**读 + 写/删（走回收站）+ 敏感读**。
 ///
-/// 故意先不暴露写/删/明文：先把"读"这一侧的授权、审计、窗口做好，
-/// 写操作等 schema 4（回收站 + 审计落库）就位再加。
+/// 写操作的形状刻意保持"窄"：
+/// - `create_entry` 只开放 login / secure_note（identity / ssh_key 字段太多，
+///   用 UI 建更不容易出错）；新建条目**默认对智能体永久拒绝**，需用户在 UI 打开；
+/// - `delete_entry` 只做软删（进回收站），**永远不能彻底删除** —— 彻底删除是
+///   用户独占的决定，不在工具面里；
+/// - 所有返回值都不含秘密（密码/验证码/私钥只在剪贴板里落地）。
 const List<McpTool> agentTools = <McpTool>[
   McpTool(
     name: 'status',
@@ -100,6 +104,123 @@ const List<McpTool> agentTools = <McpTool>[
     },
   ),
   McpTool(
+    name: 'create_entry',
+    description:
+        '新建条目（只支持 login / secure_note）。'
+        'password 可传 {"generate": true} 让核心生成并直接加密入库 —— 明文不会返回。'
+        '**新建条目默认对智能体「永久拒绝」**，需要用户在 EasyPass 里打开'
+        '「允许智能体访问」后才能被读到。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'type': {
+          'type': 'string',
+          'enum': ['login', 'secure_note'],
+          'description': '默认 login',
+        },
+        'name': {'type': 'string'},
+        'folder': {'type': 'string', 'description': '文件夹 id（可空）'},
+        'url': {'type': 'string'},
+        'username': {'type': 'string'},
+        'password': {
+          'description': '字符串，或 {"generate": true, "length"?: int, '
+              '"useSymbols"?: bool} 让核心生成（明文不回传）',
+        },
+        'notes': {'type': 'string'},
+        'customFields': {
+          'type': 'array',
+          'items': {
+            'type': 'object',
+            'properties': {
+              'label': {'type': 'string'},
+              'value': {'type': 'string'},
+              'type': {
+                'type': 'string',
+                'enum': ['text', 'hidden', 'boolean'],
+              },
+            },
+            'required': ['label'],
+            'additionalProperties': false,
+          },
+        },
+      },
+      'required': ['name'],
+      'additionalProperties': false,
+    },
+    readOnly: false,
+  ),
+  McpTool(
+    name: 'update_entry',
+    description:
+        '局部更新条目（没传的字段不动）。只支持 login / secure_note 的字段；'
+        'identity / ssh_key 的字段请在 EasyPass 界面里修改。'
+        '审批弹窗只会列出**字段名**，不会显示密码等值。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'id': {'type': 'string'},
+        'name': {'type': 'string'},
+        'notes': {'type': 'string'},
+        'folder': {
+          'description': '文件夹 id；传 null 或空串表示移出文件夹',
+        },
+        'url': {'type': 'string'},
+        'username': {'type': 'string'},
+        'password': {
+          'description': '字符串，或 {"generate": true} 让核心生成',
+        },
+        'isFavorite': {'type': 'boolean'},
+        'customFields': {
+          'type': 'array',
+          'items': {'type': 'object'},
+        },
+      },
+      'required': ['id'],
+      'additionalProperties': false,
+    },
+    readOnly: false,
+  ),
+  McpTool(
+    name: 'delete_entry',
+    description:
+        '把条目移到**回收站**（软删除，可由用户恢复）。'
+        '智能体**不能**彻底删除条目 —— 清空回收站/永久删除只由用户在 EasyPass 里操作。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'id': {'type': 'string'},
+      },
+      'required': ['id'],
+      'additionalProperties': false,
+    },
+    readOnly: false,
+    destructive: true,
+  ),
+  McpTool(
+    name: 'list_trash',
+    description:
+        '列出回收站里**对智能体开放**的条目元数据（带删除时间）。'
+        '只能看到"开放"的条目；用户的「永久拒绝」是硬闸。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {},
+      'additionalProperties': false,
+    },
+  ),
+  McpTool(
+    name: 'restore_entry',
+    description: '把回收站里的条目恢复出来（写操作，逐次审批）。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'id': {'type': 'string'},
+      },
+      'required': ['id'],
+      'additionalProperties': false,
+    },
+    readOnly: false,
+  ),
+  McpTool(
     name: 'copy_to_clipboard',
     description:
         '把某个字段的值写进系统剪贴板，**只返回是否成功、不返回明文**。'
@@ -139,7 +260,10 @@ final Set<String> agentToolNames = {
 };
 
 /// 当前智能体工具面的版本。工具定义变化时必须递增（审计与排查要用）。
-const String agentToolSurfaceVersion = '1';
+///
+/// 1 → 2（3.1.0 阶段 2）：新增 create / update / delete / list_trash / restore，
+/// `status.entryCount` 的语义也从"此刻可读条数"改成"开放条数"。
+const String agentToolSurfaceVersion = '2';
 
 /// 引用了协议层的错误码，避免 MCP 层另造一套字符串。
 class McpErrorCodes {

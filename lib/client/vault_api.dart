@@ -100,7 +100,20 @@ abstract class VaultApi {
 
   Future<String> saveItem(VaultItem item);
 
+  /// 删除条目 = **移到回收站**（软删，可恢复；3.1.0 / schema 5 起）。
   Future<void> deleteItem(String id);
+
+  /// 回收站列表（已删除条目，最近删除的在前）。
+  Future<List<VaultItem>> listTrash();
+
+  /// 从回收站恢复条目。
+  Future<void> restoreItem(String id);
+
+  /// 彻底删除**回收站里的**条目（不可恢复）。
+  Future<void> permanentlyDeleteItem(String id);
+
+  /// 清空回收站，返回被删除的条数。
+  Future<int> emptyTrash();
 
   Future<String> addFolder(String name, {String icon = 'folder'});
 

@@ -264,13 +264,79 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get deleteEntryTitle => '删除条目';
+  String get deleteEntryTitle => '移到回收站？';
 
   @override
-  String get deleteEntryMessage => '确定要删除吗？此操作无法撤销。';
+  String get trashMoveAction => '移到回收站';
 
   @override
-  String get deleteEntryDetailMessage => '确定要删除此条目吗？此操作无法撤销。';
+  String get deleteEntryMessage => '确定要把这个条目移到回收站吗？之后可以在回收站里恢复。';
+
+  @override
+  String get deleteEntryDetailMessage => '确定要把这个条目移到回收站吗？之后可以在回收站里恢复，也可以彻底删除。';
+
+  @override
+  String get trashTitle => '回收站';
+
+  @override
+  String get trashSubtitle => '删除的条目会先放在这里：可以恢复，也可以彻底删除。';
+
+  @override
+  String get trashEmptyTitle => '回收站是空的';
+
+  @override
+  String get trashEmptyMessage => '删除的条目会先出现在这里，随时可以恢复。';
+
+  @override
+  String trashDeletedAt(String time) {
+    return '删除于 $time';
+  }
+
+  @override
+  String get trashRestore => '恢复';
+
+  @override
+  String trashRestored(String name) {
+    return '已恢复「$name」';
+  }
+
+  @override
+  String get trashDeletePermanently => '彻底删除';
+
+  @override
+  String get trashDeletePermanentlyTitle => '彻底删除条目';
+
+  @override
+  String trashDeletePermanentlyMessage(String name) {
+    return '「$name」将被永久删除，无法恢复。';
+  }
+
+  @override
+  String trashDeletedPermanently(String name) {
+    return '已彻底删除「$name」';
+  }
+
+  @override
+  String get trashEmptyAction => '清空回收站';
+
+  @override
+  String get trashEmptyConfirmTitle => '清空回收站？';
+
+  @override
+  String trashEmptyConfirmMessage(String count) {
+    return '$count 个条目将被永久删除，无法恢复。';
+  }
+
+  @override
+  String trashEmptied(String count) {
+    return '已清空回收站（$count 个条目）';
+  }
+
+  @override
+  String get trashMoved => '已移到回收站';
+
+  @override
+  String get undo => '撤销';
 
   @override
   String get entryDetailsTitle => '条目详情';
@@ -1174,6 +1240,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get agentAuditDecisionError => '失败';
+
+  @override
+  String get agentAuditDecisionAllowedStanding => '已允许（本会话免询问）';
+
+  @override
+  String get agentApprovalDetail => '详细';
 
   @override
   String get agentModeSwitchTitle => '访问方式';

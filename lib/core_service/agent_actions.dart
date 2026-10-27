@@ -11,12 +11,15 @@ import 'package:easypass/core/platform/system_clipboard.dart';
 import 'package:easypass/core_service/agent_access_policy.dart';
 import 'package:easypass/core_service/agent_access_store.dart';
 import 'package:easypass/core_service/agent_pairing_store.dart';
+import 'package:easypass/core_service/core_actions.dart' show generatePassword;
 import 'package:easypass/core_service/session_domains.dart';
+import 'package:easypass/data/models/entry_fields.dart';
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
 import 'package:easypass/data/repositories/vault_repository.dart';
 import 'package:easypass/mcp/mcp_handler.dart';
 import 'package:easypass/protocol/codecs.dart';
+import 'package:uuid/uuid.dart';
 
 /// 一次显式操作窗口（批量操作"提前沟通"的载体）。
 class AgentWindow {
@@ -155,6 +158,19 @@ class AgentActions {
 
   String get currentTool => _currentTool;
 
+  /// 本次 `tools/call` 是否已经写过审计行。
+  ///
+  /// 用途只有一个：失败落 `error` 之前先看它 —— 拒绝 / 超时 / 成功路径都各自
+  /// 写过审计，不能因为异常再补一行重复记录（审计的准则是"一次调用一行"）。
+  bool _auditedThisCall = false;
+
+  /// 失败审计用的条目上下文：工具在拿到条目之后立刻更新，
+  /// 于是 `notFound` / `denied` / 写入失败都能在审计里指出"动的是哪一条"。
+  String? _errorEntryId;
+  String? _errorEntryName;
+
+  static const Uuid _uuid = Uuid();
+
   /// 审批超时：必须短于客户端自己的 `tools/call` 超时（DSH 默认 60s），
   /// 否则客户端先超时、用户随后点"同意"就成了对没人等待的调用授权。
   static const Duration approvalTimeout = Duration(seconds: 45);
@@ -203,6 +219,7 @@ class AgentActions {
     required bool allowStandingOption,
     String? entryId,
     String? entryName,
+    String? detail,
   }) async {
     final sink = onApprovalRequested;
     // 没有 UI 可问（例如核心以无 UI 方式运行）⇒ 直接拒绝，绝不放行。
@@ -224,6 +241,9 @@ class AgentActions {
       'entryId': entryId,
       'entryName': entryName,
       'allowStanding': allowStandingOption,
+      // 写/删的"详细"：**只列字段名与动作**，绝不含值 —— 弹窗必须说清
+      // "要做什么"，但没理由把待写入的密码送到屏幕上（§10 的落地口径）。
+      'detail': ?detail,
     });
 
     bool allowed;
@@ -292,6 +312,11 @@ class AgentActions {
       throw McpToolException('unauthorized', '配对不存在或已撤销');
     }
     _currentTool = tool;
+    // 每次调用重置审计上下文：一次调用最多一行审计（见 _auditErrorIfNeeded）。
+    _auditedThisCall = false;
+    _errorEntryId = (args['id'] as String?)?.trim();
+    if (_errorEntryId != null && _errorEntryId!.isEmpty) _errorEntryId = null;
+    _errorEntryName = null;
 
     try {
       switch (tool) {
@@ -307,9 +332,25 @@ class AgentActions {
           return await _getEntry(pairing, principal, args);
         case 'copy_to_clipboard':
           return await _copyToClipboard(pairing, principal, args);
+        case 'create_entry':
+          return await _createEntry(pairing, principal, args);
+        case 'update_entry':
+          return await _updateEntry(pairing, principal, args);
+        case 'delete_entry':
+          return await _deleteEntry(pairing, principal, args);
+        case 'list_trash':
+          return await _listTrash(pairing, principal);
+        case 'restore_entry':
+          return await _restoreEntry(pairing, principal, args);
         default:
           throw McpToolException('invalidRequest', '未知工具：$tool');
       }
+    } on McpToolException {
+      _auditErrorIfNeeded(principal, pairing, tool);
+      rethrow;
+    } catch (_) {
+      _auditErrorIfNeeded(principal, pairing, tool);
+      rethrow;
     } finally {
       // 方式 1 借来的钥匙只活这一次调用：无论成功失败都锁回去。
       _releaseBorrowedKeyIfAny();
@@ -323,10 +364,11 @@ class AgentActions {
     McpPrincipal principal,
   ) async {
     final unlocked = _sessions.agent.isUnlocked;
-    var visible = 0;
-    if (unlocked) {
-      visible = (await _visibleItems(pairing)).length;
-    }
+    // **不是**"此刻能读几条"，而是"开放了几条"：
+    // 方式 1 下 status 本身不走审批（否则每个客户端一上来都要用户点一次
+    // "允许查询状态"），所以这里必须用"假设已获同意"的口径来数 ——
+    // 早先用 _visibleItems 数出来恒为 0，对客户端就像"库是空的"。
+    final visible = unlocked ? await _openItemCount(pairing) : 0;
     _auditAdd(
       principal: principal,
       mode: pairing.mode,
@@ -342,6 +384,34 @@ class AgentActions {
       'window': _window?.toJson(_now),
       'serverTime': _now,
     };
+  }
+
+  /// 当前配对"开放且在其 scope 内"的条目数。
+  ///
+  /// 判定口径 = 假设本次已获用户同意（`approvedThisCall: true`）：
+  /// - 方式 1：条目开关 + scope 即可（审批是每次调用的事，不影响"开放了几条"）；
+  /// - 方式 2：仍然要求配对是 `trusted`，未认证的配对看到 0。
+  Future<int> _openItemCount(AgentPairing pairing) async {
+    if (pairing.isRevoked || pairing.isExpiredAt(_now)) return 0;
+    if (!_sessions.agent.isUnlocked) return 0;
+    final items = await _repository.getItems();
+    var count = 0;
+    for (final item in items) {
+      final result = AgentAccessPolicy.evaluate(AgentAccessRequest(
+        op: AgentOp.read,
+        entryOpen: item.agentOpen,
+        revoked: false,
+        expired: false,
+        sessionUnlocked: true,
+        inScope: _inScope(pairing, item),
+        mode: pairing.mode,
+        trusted: pairing.trusted,
+        approvedThisCall: true,
+        standingRead: true,
+      ));
+      if (result.allowed) count++;
+    }
+    return count;
   }
 
   Future<Map<String, Object?>> _beginSession(
@@ -369,7 +439,7 @@ class AgentActions {
       mode: pairing.mode,
       tool: 'begin_session',
       op: 'read',
-      decision: 'allowed',
+      decision: _allowedDecision,
     );
     return {'windowId': _window!.id, 'expiresAt': _window!.expiresAt};
   }
@@ -435,7 +505,7 @@ class AgentActions {
       mode: pairing.mode,
       tool: 'list_entries',
       op: 'read',
-      decision: 'allowed',
+      decision: _allowedDecision,
     );
     return {
       'entries': [
@@ -455,6 +525,7 @@ class AgentActions {
     if (id.isEmpty) throw McpToolException('invalidRequest', 'id 必填');
     final item = await _repository.getItem(id);
     if (item == null) throw McpToolException('notFound', '找不到该条目');
+    _setAuditTarget(item);
     // 审批弹窗要展示"哪个条目"，所以先取条目再闸门。
     await _gate(
       pairing,
@@ -485,10 +556,554 @@ class AgentActions {
       op: 'read',
       entryId: item.id,
       entryName: item.name,
-      decision: 'allowed',
+      decision: _allowedDecision,
     );
     final folders = await _folderNames();
     return entryToAgentJson(item, folderName: folders[item.folderId]);
+  }
+
+  // ─── 写 / 删 / 回收站（3.1.0 阶段 2）────────────────────
+  //
+  // 授权口径与读一致：**策略只有一份**（AgentAccessPolicy）+ **闸门只有一处**
+  // （_gate）。写/删/恢复永远逐次审批（不享受「本会话内允许读取」），
+  // 而且仍然受条目「永久拒绝」硬闸约束 —— 对智能体关闭的条目，它连删都删不掉。
+  //
+  // 最重要的两条安全设计：
+  // 1. 智能体**不能给自己开权限**：它建出来的条目 `agentOpen` 恒为 false；
+  // 2. 智能体**不能彻底删除**：`delete_entry` 只做软删（进回收站），
+  //    "彻底删除 / 清空回收站"只存在于 UI 动作面。
+
+  static const int _maxNameLength = 200;
+  static const int _maxNotesLength = 100000;
+  static const int _maxFieldLength = 5000;
+  static const int _maxCustomFields = 50;
+
+  void _setAuditTarget(VaultItem item) {
+    _errorEntryId = item.id;
+    _errorEntryName = item.name;
+  }
+
+  static String _requiredId(Map<String, Object?> args) {
+    final id = (args['id'] as String? ?? '').trim();
+    if (id.isEmpty) throw McpToolException('invalidRequest', 'id 必填');
+    return id;
+  }
+
+  static String _requiredText(
+    Map<String, Object?> args,
+    String key, {
+    required int maxLength,
+  }) {
+    final value = (args[key] as String? ?? '').trim();
+    if (value.isEmpty) throw McpToolException('invalidRequest', '$key 必填');
+    if (value.length > maxLength) {
+      throw McpToolException('invalidRequest', '$key 太长（上限 $maxLength 字符）');
+    }
+    return value;
+  }
+
+  static String? _optionalText(
+    Map<String, Object?> args,
+    String key, {
+    required int maxLength,
+  }) {
+    final raw = args[key];
+    if (raw == null) return null;
+    if (raw is! String) {
+      throw McpToolException('invalidRequest', '$key 必须是字符串');
+    }
+    if (raw.length > maxLength) {
+      throw McpToolException('invalidRequest', '$key 太长（上限 $maxLength 字符）');
+    }
+    return raw;
+  }
+
+  /// `password` 参数：字符串（明文由智能体提供）或 `{"generate": true, ...}`
+  /// （核心生成并**直接加密入库**，明文不回传）。
+  static String? _passwordArg(Map<String, Object?> args) {
+    final raw = args['password'];
+    if (raw == null) return null;
+    if (raw is String) {
+      if (raw.length > _maxFieldLength) {
+        throw McpToolException('invalidRequest', 'password 太长');
+      }
+      return raw;
+    }
+    if (raw is Map) {
+      if (raw['generate'] != true) {
+        throw McpToolException(
+          'invalidRequest',
+          'password 对象只接受 {"generate": true, "length"?: int, "useSymbols"?: bool}',
+        );
+      }
+      final length = ((raw['length'] as num?)?.toInt() ?? 20).clamp(8, 128);
+      final password = generatePassword(<String, dynamic>{
+        'length': length,
+        'useUpper': raw['useUpper'] ?? true,
+        'useLower': raw['useLower'] ?? true,
+        'useNumbers': raw['useNumbers'] ?? true,
+        'useSymbols': raw['useSymbols'] ?? true,
+      });
+      if (password.isEmpty) {
+        throw McpToolException('invalidRequest', '密码生成参数无效（字符集为空）');
+      }
+      return password;
+    }
+    throw McpToolException('invalidRequest', 'password 类型不对');
+  }
+
+  /// 可写的条目类型：只开放 login / secure_note。
+  ///
+  /// identity / ssh_key 的字段太多（证件号、地址、私钥、口令…），让智能体
+  /// 逐字段拼 JSON 既容易写错、也让审批弹窗难以说清"到底改了什么"。
+  /// 这不是安全限制，是可用性取舍；文档里已写明。
+  static EntryType _writableType(Object? raw) {
+    final value = (raw as String?)?.trim().toLowerCase();
+    switch (value) {
+      case null || '' || 'login':
+        return EntryType.login;
+      case 'secure_note' || 'note' || 'notes':
+        return EntryType.secureNote;
+      case 'identity' || 'ssh_key' || 'ssh':
+        throw McpToolException(
+          'invalidRequest',
+          '暂不支持通过 MCP 写 identity / ssh_key 条目（字段太多），请在 EasyPass 界面里创建或编辑',
+        );
+      default:
+        throw McpToolException('invalidRequest', '未知类型：$value');
+    }
+  }
+
+  /// `folder` 参数（新建用）：缺省/空串 = 不归类；给了就必须是真实 id。
+  Future<String?> _folderArg(Map<String, Object?> args) async {
+    final raw = args['folder'];
+    if (raw == null) return null;
+    if (raw is! String) {
+      throw McpToolException('invalidRequest', 'folder 必须是文件夹 id');
+    }
+    final id = raw.trim();
+    if (id.isEmpty) return null;
+    await _requireFolderExists(id);
+    return id;
+  }
+
+  /// `folder` 参数（更新用）：区分"没传"（不改）与"显式 null/空串"（移出文件夹）。
+  Future<({bool changed, String? value})> _folderUpdate(
+    Map<String, Object?> args,
+  ) async {
+    if (!args.containsKey('folder')) return (changed: false, value: null);
+    final raw = args['folder'];
+    if (raw == null) return (changed: true, value: null);
+    if (raw is! String) {
+      throw McpToolException('invalidRequest', 'folder 必须是文件夹 id 或 null');
+    }
+    final id = raw.trim();
+    if (id.isEmpty) return (changed: true, value: null);
+    await _requireFolderExists(id);
+    return (changed: true, value: id);
+  }
+
+  Future<void> _requireFolderExists(String id) async {
+    final folders = await _repository.getFolders();
+    if (!folders.any((folder) => folder.id == id)) {
+      throw McpToolException('invalidRequest', '文件夹不存在：$id');
+    }
+  }
+
+  static List<CustomField> _customFieldsArg(Map<String, Object?> args) {
+    final raw = args['customFields'];
+    if (raw == null) return const [];
+    if (raw is! List) {
+      throw McpToolException('invalidRequest', 'customFields 必须是数组');
+    }
+    if (raw.length > _maxCustomFields) {
+      throw McpToolException(
+        'invalidRequest',
+        '自定义字段太多（上限 $_maxCustomFields 个）',
+      );
+    }
+    final fields = <CustomField>[];
+    for (final entry in raw) {
+      if (entry is! Map) {
+        throw McpToolException('invalidRequest', 'customFields 的每一项必须是对象');
+      }
+      final label = (entry['label'] as String? ?? '').trim();
+      if (label.isEmpty) {
+        throw McpToolException('invalidRequest', '自定义字段的 label 必填');
+      }
+      final value = (entry['value'] as String? ?? '');
+      if (value.length > _maxFieldLength) {
+        throw McpToolException('invalidRequest', '自定义字段的值太长');
+      }
+      final typeRaw = (entry['type'] as String? ?? 'text').trim();
+      fields.add(CustomField(
+        label: label,
+        value: value,
+        type: CustomFieldType.fromWire(typeRaw),
+      ));
+    }
+    return fields;
+  }
+
+  /// `create_entry`：新建条目（默认对智能体**永久拒绝**，需用户在 UI 打开）。
+  Future<Map<String, Object?>> _createEntry(
+    AgentPairing pairing,
+    McpPrincipal principal,
+    Map<String, Object?> args,
+  ) async {
+    final name = _requiredText(args, 'name', maxLength: _maxNameLength);
+    _errorEntryName = name;
+    final type = _writableType(args['type']);
+    final folderId = await _folderArg(args);
+    final notes = _optionalText(args, 'notes', maxLength: _maxNotesLength) ?? '';
+    final customFields = _customFieldsArg(args);
+
+    final LoginData? login;
+    if (type == EntryType.login) {
+      login = LoginData(
+        url: _optionalText(args, 'url', maxLength: _maxFieldLength) ?? '',
+        username:
+            _optionalText(args, 'username', maxLength: _maxFieldLength) ?? '',
+        password: _passwordArg(args) ?? '',
+      );
+    } else {
+      login = null;
+    }
+
+    await _gate(
+      pairing,
+      principal,
+      tool: 'create_entry',
+      op: AgentOp.write,
+      allowStanding: false,
+      entryName: name,
+      detail: '新建「$name」（${type.wireName}）'
+          '${(login?.password.isNotEmpty ?? false) ? '，含密码' : ''}',
+    );
+
+    final now = _now;
+    final item = VaultItem(
+      id: _uuid.v4(),
+      folderId: folderId,
+      type: type,
+      name: name,
+      notes: notes,
+      // **关键**：智能体不能给自己开权限 —— 新建条目一律"永久拒绝"。
+      agentOpen: false,
+      login: login,
+      customFields: customFields,
+      createdAt: now,
+      updatedAt: now,
+    );
+    await _repository.saveItem(item);
+
+    _auditAdd(
+      principal: principal,
+      mode: pairing.mode,
+      tool: 'create_entry',
+      op: 'write',
+      entryId: item.id,
+      entryName: item.name,
+      decision: 'allowed',
+    );
+    return {
+      'id': item.id,
+      'name': item.name,
+      'type': item.type.wireName,
+      'note': '已创建。该条目默认对智能体「永久拒绝」，需要用户在 EasyPass 里打开'
+          '「允许智能体访问」后才能被读到。',
+    };
+  }
+
+  /// `update_entry`：按字段局部更新（未传的字段不动）。
+  Future<Map<String, Object?>> _updateEntry(
+    AgentPairing pairing,
+    McpPrincipal principal,
+    Map<String, Object?> args,
+  ) async {
+    final id = _requiredId(args);
+    final item = await _repository.getItem(id, includeDeleted: true);
+    if (item == null) throw McpToolException('notFound', '找不到该条目');
+    _setAuditTarget(item);
+    if (item.deletedAt != null) {
+      throw McpToolException(
+        'invalidRequest',
+        '该条目在回收站里：请先调用 restore_entry 恢复，再修改',
+      );
+    }
+
+    // 先算出"要改成什么"（只做校验，不落库），审批弹窗才能列出字段名。
+    final plan = await _planUpdate(item, args);
+
+    await _gate(
+      pairing,
+      principal,
+      tool: 'update_entry',
+      op: AgentOp.write,
+      allowStanding: false,
+      entryId: item.id,
+      entryName: item.name,
+      detail: '修改字段：${plan.fields.join('、')}',
+    );
+
+    final result = AgentAccessPolicy.evaluate(
+      _requestFor(pairing, item, op: AgentOp.write),
+    );
+    if (!result.allowed) {
+      _auditAdd(
+        principal: principal,
+        mode: pairing.mode,
+        tool: 'update_entry',
+        op: 'write',
+        entryId: item.id,
+        entryName: item.name,
+        decision: 'denied',
+      );
+      throw McpToolException('denied', '条目未开放给智能体（${result.reason!.name}）');
+    }
+
+    await _repository.saveItem(plan.item);
+    _auditAdd(
+      principal: principal,
+      mode: pairing.mode,
+      tool: 'update_entry',
+      op: 'write',
+      entryId: item.id,
+      entryName: item.name,
+      decision: 'allowed',
+    );
+    return {'ok': true, 'id': item.id, 'updatedFields': plan.fields};
+  }
+
+  /// 计算更新后的条目（纯校验 + 组装，不落库）。
+  Future<({VaultItem item, List<String> fields})> _planUpdate(
+    VaultItem item,
+    Map<String, Object?> args,
+  ) async {
+    final fields = <String>[];
+
+    final name = args.containsKey('name')
+        ? _requiredText(args, 'name', maxLength: _maxNameLength)
+        : item.name;
+    if (args.containsKey('name')) fields.add('name');
+
+    final notes = args.containsKey('notes')
+        ? (_optionalText(args, 'notes', maxLength: _maxNotesLength) ?? '')
+        : item.notes;
+    if (args.containsKey('notes')) fields.add('notes');
+
+    final folderChange = await _folderUpdate(args);
+    if (folderChange.changed) fields.add('folder');
+
+    var login = item.login;
+    final touchesLogin = args.containsKey('url') ||
+        args.containsKey('username') ||
+        args.containsKey('password');
+    if (touchesLogin) {
+      if (item.type != EntryType.login) {
+        throw McpToolException(
+          'invalidRequest',
+          '只有 login 条目才有 url / username / password 字段',
+        );
+      }
+      final base = login ?? LoginData.empty;
+      if (args.containsKey('url')) {
+        fields.add('url');
+        login = base.copyWith(
+          url: _optionalText(args, 'url', maxLength: _maxFieldLength) ?? '',
+        );
+      }
+      if (args.containsKey('username')) {
+        fields.add('username');
+        login = (login ?? base).copyWith(
+          username:
+              _optionalText(args, 'username', maxLength: _maxFieldLength) ?? '',
+        );
+      }
+      if (args.containsKey('password')) {
+        final password = _passwordArg(args) ?? '';
+        if (password.isEmpty) {
+          throw McpToolException(
+            'invalidRequest',
+            'password 不能为空字符串（要生成请传 {"generate": true}）',
+          );
+        }
+        fields.add('password');
+        login = (login ?? base).copyWith(password: password);
+      }
+    }
+
+    final customFields = args.containsKey('customFields')
+        ? _customFieldsArg(args)
+        : item.customFields;
+    if (args.containsKey('customFields')) fields.add('customFields');
+
+    final isFavorite = args.containsKey('isFavorite')
+        ? args['isFavorite'] == true
+        : item.isFavorite;
+    if (args.containsKey('isFavorite')) fields.add('isFavorite');
+
+    if (fields.isEmpty) {
+      throw McpToolException('invalidRequest', '没有可修改的字段');
+    }
+
+    return (
+      item: item.copyWith(
+        name: name,
+        notes: notes,
+        folderId: folderChange.changed ? folderChange.value : item.folderId,
+        login: login,
+        customFields: customFields,
+        isFavorite: isFavorite,
+      ),
+      fields: fields,
+    );
+  }
+
+  /// `delete_entry`：**只做软删**（移到回收站）。彻底删除只存在于 UI。
+  Future<Map<String, Object?>> _deleteEntry(
+    AgentPairing pairing,
+    McpPrincipal principal,
+    Map<String, Object?> args,
+  ) async {
+    final id = _requiredId(args);
+    final item = await _repository.getItem(id, includeDeleted: true);
+    if (item == null) throw McpToolException('notFound', '找不到该条目');
+    _setAuditTarget(item);
+    if (item.deletedAt != null) {
+      throw McpToolException('invalidRequest', '该条目已经在回收站里');
+    }
+
+    await _gate(
+      pairing,
+      principal,
+      tool: 'delete_entry',
+      op: AgentOp.delete,
+      allowStanding: false,
+      entryId: item.id,
+      entryName: item.name,
+      detail: '移到回收站（可恢复，不会彻底删除）',
+    );
+
+    final result = AgentAccessPolicy.evaluate(
+      _requestFor(pairing, item, op: AgentOp.delete),
+    );
+    if (!result.allowed) {
+      _auditAdd(
+        principal: principal,
+        mode: pairing.mode,
+        tool: 'delete_entry',
+        op: 'delete',
+        entryId: item.id,
+        entryName: item.name,
+        decision: 'denied',
+      );
+      throw McpToolException('denied', '条目未开放给智能体（${result.reason!.name}）');
+    }
+
+    final trashed = await _repository.deleteItem(item.id);
+    _auditAdd(
+      principal: principal,
+      mode: pairing.mode,
+      tool: 'delete_entry',
+      op: 'delete',
+      entryId: item.id,
+      entryName: item.name,
+      decision: trashed ? 'allowed' : 'error',
+    );
+    if (!trashed) throw McpToolException('internal', '删除失败');
+    return {
+      'ok': true,
+      'trashed': true,
+      'note': '已移到回收站，可由用户恢复。',
+    };
+  }
+
+  /// `list_trash`：列出回收站里**对智能体开放**的条目元数据。
+  Future<Map<String, Object?>> _listTrash(
+    AgentPairing pairing,
+    McpPrincipal principal,
+  ) async {
+    await _gate(pairing, principal, tool: 'list_trash');
+    final items = await _repository.getTrashedItems();
+    final folders = await _folderNames();
+    final visible = [
+      for (final item in items)
+        if (AgentAccessPolicy.evaluate(_requestFor(pairing, item)).allowed) item,
+    ];
+    _auditAdd(
+      principal: principal,
+      mode: pairing.mode,
+      tool: 'list_trash',
+      op: 'read',
+      decision: _allowedDecision,
+    );
+    return {
+      'entries': [
+        for (final item in visible)
+          entryToAgentJson(
+            item,
+            folderName: folders[item.folderId],
+            deletedAt: item.deletedAt,
+          ),
+      ],
+      'total': visible.length,
+    };
+  }
+
+  /// `restore_entry`：从回收站恢复（写操作，逐次审批）。
+  Future<Map<String, Object?>> _restoreEntry(
+    AgentPairing pairing,
+    McpPrincipal principal,
+    Map<String, Object?> args,
+  ) async {
+    final id = _requiredId(args);
+    final item = await _repository.getItem(id, includeDeleted: true);
+    if (item == null) throw McpToolException('notFound', '找不到该条目');
+    _setAuditTarget(item);
+    if (item.deletedAt == null) {
+      throw McpToolException('invalidRequest', '该条目不在回收站里');
+    }
+
+    await _gate(
+      pairing,
+      principal,
+      tool: 'restore_entry',
+      op: AgentOp.write,
+      allowStanding: false,
+      entryId: item.id,
+      entryName: item.name,
+      detail: '从回收站恢复「${item.name}」',
+    );
+
+    final result = AgentAccessPolicy.evaluate(
+      _requestFor(pairing, item, op: AgentOp.write),
+    );
+    if (!result.allowed) {
+      _auditAdd(
+        principal: principal,
+        mode: pairing.mode,
+        tool: 'restore_entry',
+        op: 'write',
+        entryId: item.id,
+        entryName: item.name,
+        decision: 'denied',
+      );
+      throw McpToolException('denied', '条目未开放给智能体（${result.reason!.name}）');
+    }
+
+    final restored = await _repository.restoreItem(item.id);
+    _auditAdd(
+      principal: principal,
+      mode: pairing.mode,
+      tool: 'restore_entry',
+      op: 'write',
+      entryId: item.id,
+      entryName: item.name,
+      decision: restored ? 'allowed' : 'error',
+    );
+    if (!restored) throw McpToolException('internal', '恢复失败');
+    return {'ok': true, 'restored': true};
   }
 
   // ─── 内部 ──────────────────────────────────────────────
@@ -511,6 +1126,7 @@ class AgentActions {
 
     final item = await _repository.getItem(id);
     if (item == null) throw McpToolException('notFound', '找不到该条目');
+    _setAuditTarget(item);
     // 敏感读：**不享受**本会话免询问，每次都要用户同意。
     await _gate(
       pairing,
@@ -703,6 +1319,7 @@ class AgentActions {
     bool allowStanding = true,
     String? entryId,
     String? entryName,
+    String? detail,
   }) async {
     _callApproved = false;
     _callStanding = false;
@@ -714,7 +1331,7 @@ class AgentActions {
           '智能体会话未解锁：请确认“智能体访问”开关是开启的',
         );
       }
-      _assertRequestAllowed(pairing, approvedThisCall: false);
+      _assertRequestAllowed(pairing, approvedThisCall: false, op: op);
       return;
     }
 
@@ -724,7 +1341,7 @@ class AgentActions {
         _standingRead.contains(pairing.id)) {
       _callStanding = true;
       _borrowKeyFromUiForThisCall();
-      _assertRequestAllowed(pairing, approvedThisCall: false);
+      _assertRequestAllowed(pairing, approvedThisCall: false, op: op);
       return;
     }
 
@@ -735,6 +1352,7 @@ class AgentActions {
       allowStandingOption: allowStanding && op == AgentOp.read,
       entryId: entryId,
       entryName: entryName,
+      detail: detail,
     );
     if (!approved) {
       _auditAdd(
@@ -751,17 +1369,18 @@ class AgentActions {
     _callApproved = true;
     // 用户当面同意之后才借钥匙；未解锁 ui 则借不到（fail closed）。
     _borrowKeyFromUiForThisCall();
-    _assertRequestAllowed(pairing, approvedThisCall: true);
+    _assertRequestAllowed(pairing, approvedThisCall: true, op: op);
   }
 
   void _assertRequestAllowed(
     AgentPairing pairing, {
     required bool approvedThisCall,
+    AgentOp op = AgentOp.read,
   }) {
     _requireAllowed(
       pairing,
       AgentAccessRequest(
-        op: AgentOp.read,
+        op: op,
         entryOpen: true,
         revoked: pairing.isRevoked,
         expired: pairing.isExpiredAt(_now),
@@ -783,6 +1402,8 @@ class AgentActions {
     String? entryId,
     String? entryName,
   }) {
+    // 一次调用只允许一行审计：后续的失败兜底看到这个标志就闭嘴。
+    _auditedThisCall = true;
     _audit.addLast(AgentAuditEntry(
       at: _now,
       pairingId: principal.pairingId,
@@ -806,4 +1427,42 @@ class AgentActions {
       unawaited(Future<void>.sync(() => sink(entry)).catchError((Object _) {}));
     }
   }
+
+  /// 本次调用放行时该记的 decision。
+  ///
+  /// 靠「本会话内允许读取」放行的读，必须记成 `allowed_standing`：
+  /// 否则审计里"用户这次点了同意"和"被免询问绕过"完全不可区分 —— 那正是
+  /// 事后追查最需要看到的差别（3.1.0 补的 decision）。
+  String get _allowedDecision => _callStanding ? 'allowed_standing' : 'allowed';
+
+  /// 失败兜底：只有这次调用**还没有**写过审计行时才补一条 `error`。
+  ///
+  /// 兜底覆盖 `notFound` / 参数不对 / 意外异常；拒绝与超时已经各自记过
+  /// `denied` / `timeout`，这里不重复。
+  void _auditErrorIfNeeded(
+    McpPrincipal principal,
+    AgentPairing pairing,
+    String tool,
+  ) {
+    if (_auditedThisCall) return;
+    _auditAdd(
+      principal: principal,
+      mode: pairing.mode,
+      tool: tool,
+      op: _opLabelForTool(tool),
+      decision: 'error',
+      entryId: _errorEntryId,
+      entryName: _errorEntryName,
+    );
+  }
+
+  /// 工具 → 操作类型（失败审计与状态展示用；具体工具会自己传准确 op）。
+  static AgentOp _opForTool(String tool) => switch (tool) {
+        'create_entry' || 'update_entry' || 'restore_entry' => AgentOp.write,
+        'delete_entry' => AgentOp.delete,
+        'copy_to_clipboard' => AgentOp.sensitiveRead,
+        _ => AgentOp.read,
+      };
+
+  static String _opLabelForTool(String tool) => _opLabel(_opForTool(tool));
 }

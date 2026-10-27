@@ -152,6 +152,14 @@ class CoreActions {
         return _saveItem(params['item']);
       case Actions.deleteItem:
         return _deleteItem(params['id'] as String? ?? '');
+      case Actions.listTrash:
+        return _listTrash();
+      case Actions.restoreItem:
+        return _restoreItem(params['id'] as String? ?? '');
+      case Actions.permanentlyDeleteItem:
+        return _permanentlyDeleteItem(params['id'] as String? ?? '');
+      case Actions.emptyTrash:
+        return _emptyTrash();
       case Actions.addFolder:
         return _addFolder(params);
       case Actions.updateFolder:
@@ -822,11 +830,59 @@ class CoreActions {
     return {'id': item.id};
   }
 
+  /// 删除条目 = **移到回收站**（schema 5 起是软删）。
+  ///
+  /// 语义变更是有意的：本地密码管理器里"删了就没了"是用户最不该踩的坑，
+  /// 而智能体也能调删除工具（`delete_entry`）—— 所以删除必须是可撤销的。
+  /// 彻底删除只留给用户在回收站里显式操作。
   Future<Map<String, dynamic>> _deleteItem(String id) async {
     _requireUnlocked();
-    await _repository.deleteItem(id);
+    if (id.isEmpty) {
+      throw CoreActionException(ErrorCodes.invalidRequest, '缺少 id');
+    }
+    if (!await _repository.deleteItem(id)) {
+      throw CoreActionException(ErrorCodes.notFound, '条目不存在或已在回收站');
+    }
+    onDataChanged({Topics.items, Topics.item, Topics.folders, Topics.search});
+    return {'ok': true, 'trashed': true};
+  }
+
+  Future<Map<String, dynamic>> _listTrash() async {
+    _requireUnlocked();
+    final items = await _repository.getTrashedItems();
+    return {'items': [for (final item in items) itemToJson(item)]};
+  }
+
+  Future<Map<String, dynamic>> _restoreItem(String id) async {
+    _requireUnlocked();
+    if (id.isEmpty) {
+      throw CoreActionException(ErrorCodes.invalidRequest, '缺少 id');
+    }
+    if (!await _repository.restoreItem(id)) {
+      throw CoreActionException(ErrorCodes.notFound, '回收站里没有这个条目');
+    }
     onDataChanged({Topics.items, Topics.item, Topics.folders, Topics.search});
     return {'ok': true};
+  }
+
+  /// 彻底删除**回收站里的**条目（正常条目必须先删进回收站）。
+  Future<Map<String, dynamic>> _permanentlyDeleteItem(String id) async {
+    _requireUnlocked();
+    if (id.isEmpty) {
+      throw CoreActionException(ErrorCodes.invalidRequest, '缺少 id');
+    }
+    if (!await _repository.permanentlyDeleteItem(id)) {
+      throw CoreActionException(ErrorCodes.notFound, '回收站里没有这个条目');
+    }
+    onDataChanged({Topics.items, Topics.item, Topics.folders, Topics.search});
+    return {'ok': true};
+  }
+
+  Future<Map<String, dynamic>> _emptyTrash() async {
+    _requireUnlocked();
+    final deleted = await _repository.emptyTrash();
+    onDataChanged({Topics.items, Topics.item, Topics.folders, Topics.search});
+    return {'ok': true, 'deleted': deleted};
   }
 
   Future<Map<String, dynamic>> _addFolder(Map<String, dynamic> params) async {

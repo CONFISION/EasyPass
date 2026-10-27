@@ -109,6 +109,19 @@ final foldersProvider = StreamProvider.autoDispose<List<WireFolder>>((ref) {
   );
 });
 
+/// 回收站列表（已删除条目；`items` 主题一变就重取）。
+///
+/// 删除 / 恢复 / 彻底删除都会广播 `items`，所以这条流与主列表天然同步 ——
+/// 不需要任何手动 invalidate。
+final trashItemsProvider = StreamProvider.autoDispose<List<VaultItem>>((ref) {
+  return coreSnapshotStream(
+    ref,
+    topic: Topics.items,
+    lockedValue: const [],
+    fetch: fetchTrash,
+  );
+});
+
 final selectedFolderIdProvider = StateProvider<String?>((ref) => null);
 
 /// 列表的类型筛选；null = 全部类型（默认）。

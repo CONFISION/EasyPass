@@ -87,6 +87,7 @@ class VaultItemMapper {
       customFields: payload.customFields,
       // 智能体开关跟着加密载荷走（明文列会让"这条对智能体开放"泄露进库里）。
       agentOpen: payload.agentOpen,
+      deletedAt: row.deletedAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     );
@@ -109,6 +110,7 @@ class VaultItemMapper {
       totpSecretEncrypted: Value(row.totpSecretEncrypted),
       dataEncrypted: Value(row.dataEncrypted),
       isFavorite: Value(row.isFavorite),
+      deletedAt: Value(row.deletedAt),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     );
@@ -128,6 +130,7 @@ class VaultItemMapper {
       totpSecretEncrypted: Value(row.totpSecretEncrypted),
       dataEncrypted: Value(row.dataEncrypted),
       isFavorite: Value(row.isFavorite),
+      deletedAt: Value(row.deletedAt),
       createdAt: Value(row.createdAt),
       updatedAt: Value(row.updatedAt),
     );
@@ -157,6 +160,7 @@ class VaultItemMapper {
           : '',
       dataEncrypted: blob,
       isFavorite: normalized.isFavorite,
+      deletedAt: normalized.deletedAt,
       createdAt: normalized.createdAt,
       updatedAt: normalized.updatedAt,
     );
@@ -224,6 +228,7 @@ class VaultItemMapper {
           isFavorite: item.isFavorite,
           login: item.login ?? LoginData.empty,
           agentOpen: item.agentOpen,
+          deletedAt: item.deletedAt,
           customFields: fields,
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,
@@ -238,6 +243,7 @@ class VaultItemMapper {
           notes: item.notes,
           isFavorite: item.isFavorite,
           agentOpen: item.agentOpen,
+          deletedAt: item.deletedAt,
           customFields: fields,
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,
@@ -253,6 +259,7 @@ class VaultItemMapper {
           isFavorite: item.isFavorite,
           identity: item.identityOrEmpty,
           agentOpen: item.agentOpen,
+          deletedAt: item.deletedAt,
           customFields: fields,
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,
@@ -268,6 +275,7 @@ class VaultItemMapper {
           isFavorite: item.isFavorite,
           sshKey: _withDerivedSshFields(item.sshKeyOrEmpty),
           agentOpen: item.agentOpen,
+          deletedAt: item.deletedAt,
           customFields: fields,
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,
@@ -306,6 +314,7 @@ class _RowProjection {
   final String totpSecretEncrypted;
   final String dataEncrypted;
   final bool isFavorite;
+  final int? deletedAt;
   final int createdAt;
   final int updatedAt;
 
@@ -321,6 +330,7 @@ class _RowProjection {
     required this.totpSecretEncrypted,
     required this.dataEncrypted,
     required this.isFavorite,
+    required this.deletedAt,
     required this.createdAt,
     required this.updatedAt,
   });

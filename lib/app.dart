@@ -17,6 +17,7 @@ import 'features/settings/screens/settings_screen.dart';
 import 'features/settings/widgets/agent_approval_host.dart';
 import 'features/vault/screens/add_edit_entry_screen.dart';
 import 'features/vault/screens/entry_detail_screen.dart';
+import 'features/vault/screens/trash_screen.dart';
 import 'features/vault/screens/vault_screen.dart';
 import 'l10n/app_localizations.dart';
 
@@ -82,6 +83,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
           final id = state.pathParameters['id']!;
           return EntryDetailScreen(entryId: id);
         },
+      ),
+      GoRoute(
+        path: '/vault/trash',
+        builder: (context, state) => const TrashScreen(),
       ),
       GoRoute(
         path: '/generator',

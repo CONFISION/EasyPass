@@ -197,8 +197,11 @@ class _AgentAuditScreenState extends ConsumerState<AgentAuditScreen> {
   String _decisionLabel(AppLocalizations l10n, String decision) {
     switch (decision) {
       case 'allowed':
-      case 'allowed_standing':
         return l10n.agentAuditDecisionAllowed;
+      case 'allowed_standing':
+        // 靠「本会话内允许读取」放行：必须与"这次点了同意"区分开，
+        // 否则审计看不出用户有没有被免询问绕过（3.1.0 补的 decision）。
+        return l10n.agentAuditDecisionAllowedStanding;
       case 'timeout':
         return l10n.agentAuditDecisionTimeout;
       case 'error':

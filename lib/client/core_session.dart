@@ -341,6 +341,28 @@ class CoreVaultApi implements VaultApi {
   }
 
   @override
+  Future<List<VaultItem>> listTrash() async {
+    final data = await _call(Actions.listTrash);
+    return _items(data);
+  }
+
+  @override
+  Future<void> restoreItem(String id) async {
+    await _call(Actions.restoreItem, {'id': id});
+  }
+
+  @override
+  Future<void> permanentlyDeleteItem(String id) async {
+    await _call(Actions.permanentlyDeleteItem, {'id': id});
+  }
+
+  @override
+  Future<int> emptyTrash() async {
+    final data = await _call(Actions.emptyTrash);
+    return (data['deleted'] as num?)?.toInt() ?? 0;
+  }
+
+  @override
   Future<String> addFolder(String name, {String icon = 'folder'}) async {
     final data = await _call(Actions.addFolder, {'name': name, 'icon': icon});
     return data['id'] as String? ?? '';

@@ -535,9 +535,24 @@ class VaultScreen extends ConsumerWidget {
               ),
             ),
             // The generator and settings entries live in the right-column
-            // toolbar; they are intentionally not duplicated down here, and with
-            // nothing left below the folder list the separator above them is gone
-            // too.
+            // toolbar; they are intentionally not duplicated down here. The
+            // trash is the exception: it is a *view* of the vault (like
+            // favourites/folders), so it gets a fixed entry at the bottom
+            // instead of hiding behind a menu (desktop users need a visible
+            // affordance — see the folder-actions pitfall in HANDOFF.md).
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(
+                Icons.delete_outline,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              title: Text(
+                l10n.trashTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              onTap: () => context.push('/vault/trash'),
+            ),
           ],
         ),
       ),

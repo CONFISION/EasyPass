@@ -91,7 +91,7 @@ void main() {
     final body = await utf8.decoder.bind(res).join();
     expect(res.statusCode, 200);
     final tools = (jsonDecode(body)['result'] as Map)['tools'] as List;
-    expect(tools.length, 6);
+    expect(tools.length, 11);
   });
 
   test('stop 后端口不再接受连接', () async {

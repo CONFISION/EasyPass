@@ -112,6 +112,17 @@ class Actions {
   /// 读取智能体访问审计（最近 N 条）。
   static const String listAgentAudit = 'listAgentAudit';
 
+  // ─── 回收站（3.1.0 / schema 5；**只给 ui**）─────────────
+  //
+  // 删除 = 移到回收站（只写 deleted_at）。这三个动作是"回收站的管理面"：
+  // 智能体只能把条目删进回收站（`delete_entry`），**永远不能彻底删除** ——
+  // "彻底删除"是用户的决定，不进智能体工具面。
+
+  static const String listTrash = 'listTrash';
+  static const String restoreItem = 'restoreItem';
+  static const String permanentlyDeleteItem = 'permanentlyDeleteItem';
+  static const String emptyTrash = 'emptyTrash';
+
   // ─── 扩展既有动作（bridge 专用，形状冻结）───────────────
 
   static const String getCredentials = 'getCredentials';
@@ -174,6 +185,11 @@ class Actions {
     resetAgentKey,
     respondAgentApproval,
     listAgentAudit,
+    // 回收站：列 / 恢复 / 彻底删除 / 清空（删除本身走 `deleteItem`）。
+    listTrash,
+    restoreItem,
+    permanentlyDeleteItem,
+    emptyTrash,
   };
 
   /// **智能体域（`role: agent`）** 的动作白名单。

@@ -180,6 +180,16 @@ Future<CoreSnapshot<List<WireFolder>>> fetchFolders(VaultApi api) async {
   }
 }
 
+/// `listTrash` 的流式快照读取；未解锁 → 空列表 + `locked`。
+Future<CoreSnapshot<List<VaultItem>>> fetchTrash(VaultApi api) async {
+  try {
+    return (value: await api.listTrash(), locked: false);
+  } on VaultApiException catch (error) {
+    if (error.isLocked) return (value: const <VaultItem>[], locked: true);
+    rethrow;
+  }
+}
+
 /// `healthReport` 的流式快照读取；未解锁 → null + `locked`。
 ///
 /// **为什么走这条而不是 `listItems`**：报告由核心算完（同一套

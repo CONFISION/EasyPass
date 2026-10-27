@@ -234,22 +234,43 @@ void main() {
   });
 
   group('工具面', () {
-    test('tools/list 返回 6 个工具，且都带 annotations', () async {
+    test('tools/list 返回 11 个工具，且都带 annotations', () async {
       final r = await post({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'});
       final tools = (jsonDecode(r.body)['result'] as Map)['tools'] as List;
-      expect(tools.length, 6);
+      expect(tools.length, 11);
       expect(agentToolNames, {
         'status',
         'begin_session',
         'end_session',
         'list_entries',
         'get_entry',
+        'create_entry',
+        'update_entry',
+        'delete_entry',
+        'list_trash',
+        'restore_entry',
         'copy_to_clipboard',
       });
+      final byName = {
+        for (final tool in tools.cast<Map>()) tool['name'] as String: tool,
+      };
       for (final tool in tools.cast<Map>()) {
         expect(tool['annotations'], isNotNull);
         expect(tool['inputSchema'], isNotNull);
       }
+      // annotations 是给客户端审批层看的：写/删必须显式标出来。
+      Map<String, Object?> annotationsOf(String name) =>
+          byName[name]!['annotations'] as Map<String, Object?>;
+      expect(annotationsOf('list_entries')['readOnlyHint'], isTrue);
+      expect(annotationsOf('list_trash')['readOnlyHint'], isTrue);
+      expect(annotationsOf('create_entry')['readOnlyHint'], isFalse);
+      expect(annotationsOf('update_entry')['readOnlyHint'], isFalse);
+      expect(annotationsOf('restore_entry')['readOnlyHint'], isFalse);
+      expect(annotationsOf('delete_entry')['readOnlyHint'], isFalse);
+      expect(annotationsOf('delete_entry')['destructiveHint'], isTrue);
+      // 写/删工具的 schema 必须把"能不能凭空改别人的条目"钉死：id 必填。
+      final deleteSchema = byName['delete_entry']!['inputSchema'] as Map;
+      expect(deleteSchema['required'], ['id']);
     });
 
     test('tools/call 正常：结果是 text 内容 + isError=false', () async {

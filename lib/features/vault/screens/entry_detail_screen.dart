@@ -82,6 +82,8 @@ class EntryDetailScreen extends ConsumerWidget {
     final messenger = ScaffoldMessenger.of(context);
     // 先把 api 取出来：弹窗回调里 await 之后不再碰 ref。
     final api = ref.read(vaultApiProvider);
+    final entryName =
+        ref.read(entryItemProvider(entryId)).valueOrNull?.name ?? '';
 
     showDialog<void>(
       context: context,
@@ -106,10 +108,33 @@ class EntryDetailScreen extends ConsumerWidget {
               if (!ctx.mounted) return;
               Navigator.pop(ctx);
               if (context.mounted) Navigator.pop(context);
+              // 删除是可撤销的（回收站语义）：给一次"手滑反悔"的机会。
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text(l10n.trashMoved),
+                  action: SnackBarAction(
+                    label: l10n.undo,
+                    onPressed: () async {
+                      try {
+                        await api.restoreItem(entryId);
+                        if (entryName.isNotEmpty) {
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text(l10n.trashRestored(entryName)),
+                            ),
+                          );
+                        }
+                      } catch (_) {
+                        // 恢复失败（例如用户已经在回收站里彻底删除）：不打扰。
+                      }
+                    },
+                  ),
+                ),
+              );
             },
             style: FilledButton.styleFrom(
                 backgroundColor: Theme.of(context).colorScheme.error),
-            child: Text(l10n.delete),
+            child: Text(l10n.trashMoveAction),
           ),
         ],
       ),

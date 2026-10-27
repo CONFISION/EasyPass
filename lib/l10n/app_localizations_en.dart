@@ -270,14 +270,83 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get deleteEntryTitle => 'Delete Entry';
+  String get deleteEntryTitle => 'Move to Trash?';
 
   @override
-  String get deleteEntryMessage => 'Are you sure? This cannot be undone.';
+  String get trashMoveAction => 'Move to Trash';
+
+  @override
+  String get deleteEntryMessage =>
+      'Move this entry to the trash? You can restore it later.';
 
   @override
   String get deleteEntryDetailMessage =>
-      'Are you sure you want to delete this entry? This action cannot be undone.';
+      'Move this entry to the trash? You can restore it, or delete it permanently, later.';
+
+  @override
+  String get trashTitle => 'Trash';
+
+  @override
+  String get trashSubtitle =>
+      'Deleted entries land here first: restore them or delete them for good.';
+
+  @override
+  String get trashEmptyTitle => 'Trash is empty';
+
+  @override
+  String get trashEmptyMessage =>
+      'Deleted entries show up here first, and can always be restored.';
+
+  @override
+  String trashDeletedAt(String time) {
+    return 'Deleted $time';
+  }
+
+  @override
+  String get trashRestore => 'Restore';
+
+  @override
+  String trashRestored(String name) {
+    return 'Restored \"$name\"';
+  }
+
+  @override
+  String get trashDeletePermanently => 'Delete permanently';
+
+  @override
+  String get trashDeletePermanentlyTitle => 'Delete entry permanently';
+
+  @override
+  String trashDeletePermanentlyMessage(String name) {
+    return '\"$name\" will be permanently deleted. This cannot be undone.';
+  }
+
+  @override
+  String trashDeletedPermanently(String name) {
+    return 'Permanently deleted \"$name\"';
+  }
+
+  @override
+  String get trashEmptyAction => 'Empty trash';
+
+  @override
+  String get trashEmptyConfirmTitle => 'Empty the trash?';
+
+  @override
+  String trashEmptyConfirmMessage(String count) {
+    return '$count entries will be permanently deleted. This cannot be undone.';
+  }
+
+  @override
+  String trashEmptied(String count) {
+    return 'Trash emptied ($count entries)';
+  }
+
+  @override
+  String get trashMoved => 'Moved to Trash';
+
+  @override
+  String get undo => 'Undo';
 
   @override
   String get entryDetailsTitle => 'Entry Details';
@@ -1206,6 +1275,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get agentAuditDecisionError => 'Failed';
+
+  @override
+  String get agentAuditDecisionAllowedStanding => 'Allowed (session exemption)';
+
+  @override
+  String get agentApprovalDetail => 'Details';
 
   @override
   String get agentModeSwitchTitle => 'Access mode';

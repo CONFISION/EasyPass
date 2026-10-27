@@ -27,6 +27,10 @@ CREATE TABLE password_entries (
   totp_secret_encrypted TEXT DEFAULT '',
   data_encrypted TEXT NOT NULL DEFAULT '',
   is_favorite BOOLEAN NOT NULL DEFAULT FALSE,
+  -- 回收站（schema 5，3.1.0）：NULL = 正常；非 NULL = 删除时间（毫秒）。
+  -- 「删除」只打这个标记，行与密文一个字节都不动；「恢复」就是置回 NULL。
+  -- 主密码轮换会照样遍历回收站行（getAllEntries），否则那些密文会留在旧钥匙上。
+  deleted_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL
@@ -37,6 +41,9 @@ CREATE INDEX idx_password_entries_folder ON password_entries(folder_id);
 CREATE INDEX idx_password_entries_name ON password_entries(name);
 CREATE INDEX idx_password_entries_favorite ON password_entries(is_favorite);
 CREATE INDEX idx_password_entries_type ON password_entries(type);
+
+-- 索引：回收站（schema 5）用。
+CREATE INDEX idx_password_entries_deleted ON password_entries(deleted_at);
 
 -- 键值元数据表（schema 3 新增）。
 --

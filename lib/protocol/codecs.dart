@@ -53,7 +53,13 @@ Map<String, dynamic> itemToJson(VaultItem item) => item.toJson();
 /// 也一律不给）。
 ///
 /// [folderName] 由调用方传文件夹名做展示；缺省回退到 `folderId`。
-Map<String, dynamic> entryToAgentJson(VaultItem item, {String? folderName}) {
+/// [deletedAt] 只在"回收站视图"（`list_trash`）里传：等于告诉智能体
+/// "这条现在在回收站"，普通 `list_entries` / `get_entry` 永远拿不到回收站条目。
+Map<String, dynamic> entryToAgentJson(
+  VaultItem item, {
+  String? folderName,
+  int? deletedAt,
+}) {
   final login = item.loginOrEmpty;
   return {
     'id': item.id,
@@ -69,6 +75,7 @@ Map<String, dynamic> entryToAgentJson(VaultItem item, {String? folderName}) {
     'hasTotp': item.isLogin && login.hasTotp,
     'isFavorite': item.isFavorite,
     'updatedAt': item.updatedAt,
+    'deletedAt': ?deletedAt,
   };
 }
 

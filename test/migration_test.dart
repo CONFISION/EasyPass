@@ -112,6 +112,28 @@ void main() {
     db.execute('PRAGMA user_version = 3;');
   }
 
+  /// v4（3.1.0 早期）的建表语句：v3 + `agent_audit`，但**没有**回收站的
+  /// `deleted_at` 列，`user_version` 停在 4。用来验证回收站迁移。
+  void createV4Schema(dynamic db) {
+    createV3Schema(db);
+    db.execute('''
+      CREATE TABLE agent_audit (
+        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        at INTEGER NOT NULL,
+        pairing_id TEXT NOT NULL,
+        nickname TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        tool TEXT NOT NULL,
+        op TEXT NOT NULL,
+        entry_id TEXT,
+        entry_name TEXT,
+        decision TEXT NOT NULL
+      );
+    ''');
+    db.execute('CREATE INDEX idx_agent_audit_at ON agent_audit(at);');
+    db.execute('PRAGMA user_version = 4;');
+  }
+
   test('v1 → v2：旧数据保留、新列可用、类型默认登录', () async {
     final crypto = CryptoService(secureStorage: FakeSecureStorage());
     final key = crypto.deriveKey('master', crypto.generateSalt());
@@ -242,7 +264,49 @@ void main() {
     expect(mapper.fromRow(rows.single, key).loginOrEmpty.password, 'v3-pw');
   });
 
-  test('v1 → v3：一路升到最新 schema，旧数据与轮换日志都可用', () async {
+  test('v4 → v5：新增 deleted_at 列（回收站），旧行自动 NULL = 不在回收站', () async {
+    final crypto = CryptoService(secureStorage: FakeSecureStorage());
+    final key = crypto.deriveKey('master', crypto.generateSalt());
+    final legacyPassword = crypto.encryptData('v4-pw', key);
+
+    final executor = NativeDatabase.memory(setup: (raw) {
+      createV4Schema(raw);
+      raw.execute(
+        'INSERT INTO password_entries '
+        '(id, folder_id, type, name, url, username, password_encrypted, '
+        ' notes_encrypted, totp_secret_encrypted, data_encrypted, '
+        ' is_favorite, created_at, updated_at) '
+        "VALUES ('e1', NULL, 'login', 'GitHub', 'https://github.com', 'alice', "
+        "'$legacyPassword', '', '', '', 0, 100, 200);",
+      );
+    });
+
+    final db = AppDatabase.forTesting(executor);
+    addTearDown(db.close);
+
+    // 触发打开 + 迁移（4 → 5）。旧行必须落在 `deleted_at IS NULL`。
+    final rows = await db.getAllEntries();
+    expect(rows.length, 1, reason: '迁移不该动旧数据');
+    expect(rows.single.deletedAt, isNull, reason: '存量条目默认不在回收站');
+    expect(await db.getEntryCount(), 1);
+    expect(await db.countTrashedEntries(), 0);
+    expect(await db.getEntriesFiltered(), hasLength(1));
+
+    // 迁移后回收站功能真的可用：软删 → 列表排除 / 回收站可见 → 恢复。
+    expect(await db.trashEntry('e1', 999), 1);
+    expect(await db.getEntriesFiltered(), isEmpty);
+    expect(await db.getEntryCount(), 0);
+    expect(await db.countTrashedEntries(), 1);
+    expect((await db.getTrashedEntries()).single.deletedAt, 999);
+    expect(await db.restoreEntry('e1'), 1);
+    expect(await db.getEntriesFiltered(), hasLength(1));
+
+    // 旧密文仍能用旧钥匙解开（迁移没碰加密）。
+    final mapper = VaultItemMapper(crypto);
+    expect(mapper.fromRow(rows.single, key).loginOrEmpty.password, 'v4-pw');
+  });
+
+  test('v1 → 最新：一路升到 5，旧数据、轮换日志与回收站列都可用', () async {
     final crypto = CryptoService(secureStorage: FakeSecureStorage());
     final key = crypto.deriveKey('master', crypto.generateSalt());
     final legacyPassword = crypto.encryptData('ancient-pw', key);
