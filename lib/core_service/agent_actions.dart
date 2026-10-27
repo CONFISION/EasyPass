@@ -4,6 +4,7 @@
 
 import 'dart:async';
 import 'dart:collection';
+import 'dart:typed_data';
 
 import 'package:easypass/core/crypto/totp_service.dart';
 import 'package:easypass/core/platform/system_clipboard.dart';
@@ -292,20 +293,26 @@ class AgentActions {
     }
     _currentTool = tool;
 
-    switch (tool) {
-      case 'status':
-        return _status(pairing, principal);      case 'begin_session':
-        return _beginSession(pairing, principal, args);
-      case 'end_session':
-        return _endSession(pairing, principal);
-      case 'list_entries':
-        return _listEntries(pairing, principal, args);
-      case 'get_entry':
-        return _getEntry(pairing, principal, args);
-      case 'copy_to_clipboard':
-        return _copyToClipboard(pairing, principal, args);
-      default:
-        throw McpToolException('invalidRequest', '未知工具：$tool');
+    try {
+      switch (tool) {
+        case 'status':
+          return await _status(pairing, principal);
+        case 'begin_session':
+          return await _beginSession(pairing, principal, args);
+        case 'end_session':
+          return await _endSession(pairing, principal);
+        case 'list_entries':
+          return await _listEntries(pairing, principal, args);
+        case 'get_entry':
+          return await _getEntry(pairing, principal, args);
+        case 'copy_to_clipboard':
+          return await _copyToClipboard(pairing, principal, args);
+        default:
+          throw McpToolException('invalidRequest', '未知工具：$tool');
+      }
+    } finally {
+      // 方式 1 借来的钥匙只活这一次调用：无论成功失败都锁回去。
+      _releaseBorrowedKeyIfAny();
     }
   }
 
@@ -342,7 +349,6 @@ class AgentActions {
     McpPrincipal principal,
     Map<String, Object?> args,
   ) async {
-    _requireUnlocked();
     final purpose = (args['purpose'] as String? ?? '').trim();
     if (purpose.isEmpty) {
       throw McpToolException('invalidRequest', 'purpose 必填');
@@ -400,7 +406,6 @@ class AgentActions {
     McpPrincipal principal,
     Map<String, Object?> args,
   ) async {
-    _requireUnlocked();
     await _gate(pairing, principal, tool: 'list_entries');
     final query = (args['query'] as String? ?? '').trim();
     final folders = await _folderNames();
@@ -446,7 +451,6 @@ class AgentActions {
     McpPrincipal principal,
     Map<String, Object?> args,
   ) async {
-    _requireUnlocked();
     final id = (args['id'] as String? ?? '').trim();
     if (id.isEmpty) throw McpToolException('invalidRequest', 'id 必填');
     final item = await _repository.getItem(id);
@@ -502,7 +506,6 @@ class AgentActions {
     McpPrincipal principal,
     Map<String, Object?> args,
   ) async {
-    _requireUnlocked();
     final id = (args['id'] as String? ?? '').trim();
     if (id.isEmpty) throw McpToolException('invalidRequest', 'id 必填');
 
@@ -644,12 +647,6 @@ class AgentActions {
     return {for (final folder in folders) folder.id: folder.name};
   }
 
-  void _requireUnlocked() {
-    if (!_sessions.agent.isUnlocked) {
-      throw McpToolException('locked', '保险库已锁定：请先在 EasyPass 里解锁');
-    }
-  }
-
   /// 总开关是否打开（`end_session` 与状态判断用）。
   Future<bool> _isAccessEnabled() => _agentAccess.isEnabled();
 
@@ -664,6 +661,34 @@ class AgentActions {
   /// 由 [_gate] 在读取条目之前设置，[_requestFor] 读取它做逐条判定。
   bool _callApproved = false;
   bool _callStanding = false;
+
+  /// 本次调用是否为了"方式 1 的一次性访问"临时解锁了 agent 域。
+  /// 调用结束必须锁回去 —— 逐次审批的语义就是"借一次钥匙"。
+  bool _unlockedForCall = false;
+
+  /// 方式 1 的一次性钥匙：从 **ui 域**复制一份给 agent 域。
+  ///
+  /// 为什么必须复制：`VaultSession._wipe()` 是原地清零，共享同一个 `Uint8List`
+  /// 会让"锁 agent 域"顺手把 ui 的密钥清零（反之亦然）。
+  /// 为什么从 ui 取：审批是用户当面点的，说明 ui 域此刻是可信且已解锁的。
+  void _borrowKeyFromUiForThisCall() {
+    if (_sessions.agent.isUnlocked) return;
+    final uiKey = _sessions.ui.key;
+    if (uiKey == null) {
+      throw McpToolException(
+        'locked',
+        '保险库已锁定：请在 EasyPass 里解锁后再批准智能体访问',
+      );
+    }
+    _sessions.agent.unlock(Uint8List.fromList(uiKey));
+    _unlockedForCall = true;
+  }
+
+  void _releaseBorrowedKeyIfAny() {
+    if (!_unlockedForCall) return;
+    _unlockedForCall = false;
+    _sessions.agent.lock();
+  }
 
   /// 请求级闸门：**在读任何条目之前**决定这次调用有没有资格继续。
   ///
@@ -683,6 +708,12 @@ class AgentActions {
     _callStanding = false;
 
     if (pairing.mode == AgentMode.trusted) {
+      if (!_sessions.agent.isUnlocked) {
+        throw McpToolException(
+          'locked',
+          '智能体会话未解锁：请确认“智能体访问”开关是开启的',
+        );
+      }
       _assertRequestAllowed(pairing, approvedThisCall: false);
       return;
     }
@@ -692,6 +723,7 @@ class AgentActions {
         op == AgentOp.read &&
         _standingRead.contains(pairing.id)) {
       _callStanding = true;
+      _borrowKeyFromUiForThisCall();
       _assertRequestAllowed(pairing, approvedThisCall: false);
       return;
     }
@@ -717,6 +749,8 @@ class AgentActions {
       throw McpToolException('denied', '用户未同意本次操作');
     }
     _callApproved = true;
+    // 用户当面同意之后才借钥匙；未解锁 ui 则借不到（fail closed）。
+    _borrowKeyFromUiForThisCall();
     _assertRequestAllowed(pairing, approvedThisCall: true);
   }
 

@@ -383,6 +383,28 @@ void main() {
       expect(requests.last['entryId'], 'e-open');
       expect(requests.last['entryName'], 'GitHub');
     });
+
+    test('agent 域锁定时：同意后借用 ui 的钥匙，调用结束立刻锁回', () async {
+      // ui 域用同一把钥匙解锁（能解开本测试的条目密文）。
+      final key = Uint8List.fromList(List<int>.filled(32, 9));
+      sessions.ui.unlock(Uint8List.fromList(key));
+      sessions.agent.lock();
+      expect(sessions.agent.isUnlocked, isFalse);
+
+      final payload = await callToolPayload(approvalKey, 'list_entries');
+
+      expect((payload['entries'] as List).length, 2, reason: '当面同意后应当能读');
+      expect(sessions.agent.isUnlocked, isFalse,
+          reason: '逐次审批借来的钥匙必须立刻锁回去');
+    });
+
+    test('ui 也锁着 ⇒ 同意也拿不到钥匙（fail closed）', () async {
+      sessions.ui.lock();
+      sessions.agent.lock();
+
+      final payload = await callToolPayload(approvalKey, 'list_entries');
+      expect(payload['errorCode'], 'locked');
+    });
   });
 
   /// 回归（真机实测）：`end_session` 曾经无条件锁 agent 域 —— 那等于智能体

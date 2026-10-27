@@ -115,8 +115,8 @@ class AppDatabase extends _$AppDatabase {
     return row.read(agentAudit.id.count()) ?? 0;
   }
 
-  /// 只保留最近 [keep] 条（防止审计表无限增长）。
-  Future<void> pruneAgentAudit({int keep = 5000}) async {
+  /// 只保留最近 [keep] 条（默认 1000；防止审计表无限增长）。
+  Future<void> pruneAgentAudit({int keep = 1000}) async {
     await customStatement(
       'DELETE FROM agent_audit WHERE id NOT IN '
       '(SELECT id FROM agent_audit ORDER BY id DESC LIMIT ?)',
