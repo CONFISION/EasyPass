@@ -13,6 +13,7 @@ import 'features/generator/screens/generator_screen.dart';
 import 'features/health/screens/health_screen.dart';
 import 'features/settings/providers/font_settings_provider.dart';
 import 'features/settings/providers/theme_provider.dart';
+import 'features/settings/screens/agent_audit_screen.dart';
 import 'features/settings/screens/settings_screen.dart';
 import 'features/settings/widgets/agent_approval_host.dart';
 import 'features/vault/screens/add_edit_entry_screen.dart';
@@ -89,6 +90,10 @@ final _routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const TrashScreen(),
       ),
       GoRoute(
+        path: '/vault/agent-audit',
+        builder: (context, state) => const AgentAuditScreen(),
+      ),
+      GoRoute(
         path: '/generator',
         builder: (context, state) => const GeneratorScreen(),
       ),
@@ -148,6 +153,24 @@ class _ActivityTouchHostState extends ConsumerState<_ActivityTouchHost> {
 class EasyPassApp extends ConsumerWidget {
   const EasyPassApp({super.key});
 
+  /// 全局提示气泡样式。
+  ///
+  /// 为什么改：默认的底部横条会**盖住侧边栏底部的回收站入口**；这台 Flutter
+  /// 里带 action 的 `SnackBar` 还默认 `persist: true`（撤销条永不消失）。
+  /// 这里统一做成"浮起的圆角泡泡"：只有 380 宽、水平居中、贴底 20，
+  /// 在最小窗口（900）下也碰不到 248px 的侧边栏；配合各调用点的 duration，
+  /// 消息会自己收回去，不再挡操作。
+  static const SnackBarThemeData _snackBarTheme = SnackBarThemeData(
+    behavior: SnackBarBehavior.floating,
+    width: 380,
+    insetPadding: EdgeInsets.fromLTRB(0, 0, 0, 20),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.all(Radius.circular(14)),
+    ),
+    elevation: 6,
+    dismissDirection: DismissDirection.horizontal,
+  );
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(_routerProvider);
@@ -166,6 +189,7 @@ class EasyPassApp extends ConsumerWidget {
         ),
         useMaterial3: true,
         fontFamily: fontFamily,
+        snackBarTheme: _snackBarTheme,
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -174,6 +198,7 @@ class EasyPassApp extends ConsumerWidget {
         ),
         useMaterial3: true,
         fontFamily: fontFamily,
+        snackBarTheme: _snackBarTheme,
       ),
       themeMode: themeMode,
       locale: locale,

@@ -460,6 +460,14 @@ void main() {
 
     expect(await harness.api.getItem('seed-login'), isNull);
     expect(find.text('vault-home'), findsOneWidget);
+
+    // 回归（用户真机）：带 action 的 SnackBar 在这台 Flutter 上默认
+    // persist=true，撤销条会永远卡在底部挡住入口；必须能自己收回。
+    expect(find.text(enL10n.trashMoved), findsOneWidget);
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
+    expect(find.text(enL10n.trashMoved), findsNothing,
+        reason: '撤销提示必须自动消失，不能一直挡视野');
   });
 
   testWidgets('删除确认框可以取消', (tester) async {

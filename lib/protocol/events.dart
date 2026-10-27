@@ -26,7 +26,7 @@ class Events {
   static const String agentApprovalRequested = 'agentApprovalRequested';
 }
 
-/// 订阅主题：与 UI 现在依赖的 4 条 drift 流一一对应。
+/// 订阅主题：UI 的读 provider 与核心的"变更通知"一一对应。
 class Topics {
   Topics._();
 
@@ -42,5 +42,18 @@ class Topics {
   /// 搜索结果的底层数据变化（带 `query`）。
   static const String search = 'search';
 
-  static const Set<String> all = {items, item, folders, search};
+  /// 智能体访问总开关变化（3.1.0）：侧边栏"智能体活动"入口据此显隐。
+  static const String agentAccess = 'agentAccess';
+
+  /// 新增了一条智能体审计记录（3.1.0）：审计页据此实时刷新。
+  static const String agentAudit = 'agentAudit';
+
+  static const Set<String> all = {
+    items,
+    item,
+    folders,
+    search,
+    agentAccess,
+    agentAudit,
+  };
 }

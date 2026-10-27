@@ -197,6 +197,22 @@ void main() {
     expect(find.byIcon(Icons.delete_outline), findsOneWidget);
   });
 
+  testWidgets('智能体活动入口：默认隐藏', (tester) async {
+    final l10n = await pumpVaultScreen(tester);
+    expect(find.text(l10n.agentAuditTitle), findsNothing,
+        reason: '没启用智能体访问时不该出现这个入口');
+  });
+
+  testWidgets('开启智能体访问后：智能体活动出现在回收站上方', (tester) async {
+    api.agentEnabled = true;
+    final l10n = await pumpVaultScreen(tester);
+
+    expect(find.text(l10n.agentAuditTitle), findsOneWidget);
+    final activityY = tester.getTopLeft(find.text(l10n.agentAuditTitle)).dy;
+    final trashY = tester.getTopLeft(find.text(l10n.trashTitle)).dy;
+    expect(activityY, lessThan(trashY), reason: '活动页面在回收站上方');
+  });
+
   testWidgets('最小窗口尺寸下无溢出；侧边栏固定 248 且没有生成器入口', (tester) async {
     final l10n = await pumpVaultScreen(tester);
 

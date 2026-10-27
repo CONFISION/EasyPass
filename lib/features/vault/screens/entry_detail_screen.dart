@@ -109,9 +109,13 @@ class EntryDetailScreen extends ConsumerWidget {
               Navigator.pop(ctx);
               if (context.mounted) Navigator.pop(context);
               // 删除是可撤销的（回收站语义）：给一次"手滑反悔"的机会。
+              // `persist: false` 必须显式写：这台 Flutter 的 SnackBar 在
+              // 带 action 时默认 persist=true（否则这条提示永远不消失）。
               messenger.showSnackBar(
                 SnackBar(
                   content: Text(l10n.trashMoved),
+                  persist: false,
+                  duration: const Duration(seconds: 5),
                   action: SnackBarAction(
                     label: l10n.undo,
                     onPressed: () async {

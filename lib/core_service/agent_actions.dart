@@ -19,6 +19,7 @@ import 'package:easypass/data/models/vault_item.dart';
 import 'package:easypass/data/repositories/vault_repository.dart';
 import 'package:easypass/mcp/mcp_handler.dart';
 import 'package:easypass/protocol/codecs.dart';
+import 'package:easypass/protocol/events.dart';
 import 'package:uuid/uuid.dart';
 
 /// 一次显式操作窗口（批量操作"提前沟通"的载体）。
@@ -177,6 +178,22 @@ class AgentActions {
 
   /// 向 UI 广播审批请求的钩子（核心把它接到 `_broadcast`）。
   void Function(Map<String, Object?> request)? onApprovalRequested;
+
+  /// 写操作成功后的**变更广播**钩子（核心接到 `_broadcastChanged`）。
+  ///
+  /// 没有它会有真机可见的 bug：智能体新建/修改/删除/恢复条目后，UI 的
+  /// `coreSnapshotStream` 收不到主题、列表不重取 —— 用户看到的还是旧列表。
+  void Function(Set<String> topics)? onDataChanged;
+
+  /// 每写入一条审计后触发（设置/侧边栏的"智能体活动"页据此实时刷新）。
+  void Function()? onAuditRecorded;
+
+  void _notifyDataChanged() => onDataChanged?.call({
+        Topics.items,
+        Topics.item,
+        Topics.folders,
+        Topics.search,
+      });
 
   /// UI 的回应入口（`CoreActions.respondAgentApproval` 调它）。
   ///
@@ -788,14 +805,17 @@ class AgentActions {
       type: type,
       name: name,
       notes: notes,
-      // **关键**：智能体不能给自己开权限 —— 新建条目一律"永久拒绝"。
-      agentOpen: false,
+      // **产品决定（用户 2026-10-28 明确要求）**：智能体自己新建的条目默认
+      // 对智能体**开放** —— 否则它建完就读不到/改不了/删不掉，等于建了个自己
+      // 够不着的东西。用户仍可在条目里随时改成「永久拒绝」收回。
+      agentOpen: true,
       login: login,
       customFields: customFields,
       createdAt: now,
       updatedAt: now,
     );
     await _repository.saveItem(item);
+    _notifyDataChanged();
 
     _auditAdd(
       principal: principal,
@@ -810,8 +830,8 @@ class AgentActions {
       'id': item.id,
       'name': item.name,
       'type': item.type.wireName,
-      'note': '已创建。该条目默认对智能体「永久拒绝」，需要用户在 EasyPass 里打开'
-          '「允许智能体访问」后才能被读到。',
+      'note': '已创建。该条目默认对智能体开放（可在 EasyPass 的条目里改成'
+          '「永久拒绝」收回）。',
     };
   }
 
@@ -863,6 +883,7 @@ class AgentActions {
     }
 
     await _repository.saveItem(plan.item);
+    _notifyDataChanged();
     _auditAdd(
       principal: principal,
       mode: pairing.mode,
@@ -1012,6 +1033,7 @@ class AgentActions {
       decision: trashed ? 'allowed' : 'error',
     );
     if (!trashed) throw McpToolException('internal', '删除失败');
+    _notifyDataChanged();
     return {
       'ok': true,
       'trashed': true,
@@ -1103,6 +1125,7 @@ class AgentActions {
       decision: restored ? 'allowed' : 'error',
     );
     if (!restored) throw McpToolException('internal', '恢复失败');
+    _notifyDataChanged();
     return {'ok': true, 'restored': true};
   }
 
@@ -1426,6 +1449,8 @@ class AgentActions {
       final entry = _audit.last;
       unawaited(Future<void>.sync(() => sink(entry)).catchError((Object _) {}));
     }
+    // UI 的"智能体活动"页据此实时刷新（读操作没有数据变更主题，只能靠它）。
+    onAuditRecorded?.call();
   }
 
   /// 本次调用放行时该记的 decision。

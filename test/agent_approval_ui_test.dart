@@ -6,6 +6,7 @@ import 'package:easypass/client/api_providers.dart';
 import 'package:easypass/features/settings/screens/agent_audit_screen.dart';
 import 'package:easypass/features/settings/widgets/agent_approval_host.dart';
 import 'package:easypass/l10n/app_localizations.dart';
+import 'package:easypass/protocol/protocol.dart' show Topics;
 
 import 'fake_vault_api.dart';
 
@@ -228,6 +229,29 @@ void main() {
     testWidgets('空表显示占位', (tester) async {
       await pumpAudit(tester);
       expect(find.text(l10n.agentAuditEmpty), findsOneWidget);
+    });
+
+    testWidgets('新审计记录通过主题推送实时出现在页面上（不用手动刷新）', (tester) async {
+      await pumpAudit(tester);
+      expect(find.text(l10n.agentAuditEmpty), findsOneWidget);
+
+      api.agentAudit.add({
+        'at': DateTime(2026, 10, 28, 2, 1, 2).millisecondsSinceEpoch,
+        'nickname': 'DSH',
+        'mode': 'approval',
+        'tool': 'create_entry',
+        'op': 'write',
+        'entryId': 'e9',
+        'entryName': '新建的条目',
+        'decision': 'allowed',
+      });
+      // 核心每写一条审计都会广播这个主题；UI 订阅后自动重取。
+      api.emitChange(Topics.agentAudit);
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('DSH'), findsOneWidget);
+      expect(find.textContaining('create_entry'), findsOneWidget);
+      expect(find.text(l10n.agentAuditEmpty), findsNothing);
     });
 
     testWidgets('显示昵称 / 工具 / 条目 / 结果', (tester) async {

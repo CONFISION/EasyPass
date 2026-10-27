@@ -25,7 +25,9 @@ approval vs. trusted pass-through — a per-entry **开放 / 永久拒绝** swit
 stored inside the encrypted payload), secret delivery **only** through the system clipboard
 (`copy_to_clipboard`, never into the model context), zero-interaction unlock via a
 DPAPI-wrapped agent key, an audit table (`agent_audit`, schema **4**), and **entry
-write/delete** through the agent (create/update/delete/restore/trash-list). Deletion is a
+write/delete** through the agent (create/update/delete/restore/trash-list). An entry
+created by an agent is **open to that agent by default** (the user can flip it to
+permanent deny at any time; the switch itself is never agent-writable). Deletion is a
 **soft delete into the trash** (`password_entries.deleted_at`, schema **5**) — agents can
 never delete permanently. Design doc:
 local-only `docs/agent-mcp-spec.md`; user-facing summary: `docs/technical-spec.md` §12.
@@ -206,7 +208,9 @@ lib/adapters/flutter_secret_store.dart  唯一允许 import flutter_secure_stora
     ├── health/   health_service.dart（纯函数 + HealthReport.fromJson；核心也在用同一套 analyze）
     │             health_provider.dart（走核心的 healthReport 动作，密码不过 IPC）
     ├── settings/ settings_screen.dart（导出/导入/清库全走 VaultApi）, providers/{font_settings,theme}_provider.dart
+    │             providers/agent_access_provider.dart（总开关状态 + 审计流的推送 provider）
     │             screens/{agent_access_screen,agent_audit_screen}.dart, widgets/agent_approval_host.dart
+    │             （agent_audit_screen 的入口在**侧边栏**「智能体活动」，不在设置页）
     ├── desktop_integration/  desktop_integration.dart（桌面项 / 图标 / --desktop-status）
     │                         + other_desktop_integration.dart（非 Windows 的 no-op）
     ├── desktop_tray/    desktop_tray.dart (facade) + windows_desktop_tray.dart
@@ -291,8 +295,8 @@ replaces the TOTP secret, and `getCredentials` returns **login entries only**.
 
 **Routing / auth gating** is centralized in `lib/app.dart` (`_routerProvider`
 redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
-`/vault/edit/:id`, `/vault/entry/:id`, `/vault/trash`, `/generator`, `/health`,
-`/settings`.
+`/vault/edit/:id`, `/vault/entry/:id`, `/vault/trash`, `/vault/agent-audit`,
+`/generator`, `/health`, `/settings`.
 
 ## Key Files & Directories
 
@@ -612,7 +616,21 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
 - **The trash lives at `/vault/trash`** (`lib/features/vault/screens/trash_screen.dart`),
   reachable from a fixed sidebar entry (visible affordance, not a gesture), and the delete
   dialogs offer an "Undo" SnackBar that calls `restoreItem`. `VaultItem.deletedAt` is
-  exposed in the UI JSON shape only when non-null.
+  exposed in the UI JSON shape only when non-null. The sidebar also hosts
+  **智能体活动** (`/vault/agent-audit`) *above* the trash entry, and that entry is
+  **hidden unless agent access is enabled** (driven by the `agentAccess` topic).
+- **Every write path must broadcast, or the UI silently goes stale.** `CoreActions`
+  already calls `onDataChanged`; `AgentActions` does its own writes (create/update/delete/
+  restore) and therefore must call `_notifyDataChanged()` — otherwise the vault list does
+  not refresh after an agent call (real-device bug in 3.1.0). Audit rows additionally
+  broadcast `Topics.agentAudit` (`onAuditRecorded`), which keeps the activity page live.
+  UI side: `core_stream.dart` fetchers + `lib/features/settings/providers/agent_access_provider.dart`.
+- **`SnackBar` with an `action` persists forever unless told otherwise.** In this Flutter
+  version `persist = persist ?? action != null` (see `snack_bar.dart`), so an undo bar with
+  a `SnackBarAction` never auto-dismisses and blocks the bottom of the window — the user's
+  long-standing complaint. Always pass `persist: false` (+ an explicit duration) on action
+  bars; the global `SnackBarThemeData` in `app.dart` makes every notice a small floating
+  bubble (380 wide, centered) so it never covers the 248px sidebar.
 - **Two agents running `flutter test` in the same checkout collide** on
   `build\native_assets\windows\sqlite3.dll` ("Flutter failed to delete file … cannot access
   the file"). It is not a code failure — serialize test runs, or retry after the other run

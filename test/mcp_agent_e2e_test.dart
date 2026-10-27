@@ -493,10 +493,16 @@ void main() {
   group('写 / 删 / 回收站', () {
     late List<Map<String, Object?>> requests;
     late bool approve;
+    late Set<String> broadcastTopics;
+    late int auditTicks;
 
     setUp(() {
       requests = <Map<String, Object?>>[];
       approve = true;
+      broadcastTopics = <String>{};
+      auditTicks = 0;
+      actions.onDataChanged = broadcastTopics.addAll;
+      actions.onAuditRecorded = () => auditTicks++;
       actions.onApprovalRequested = (req) {
         requests.add(req);
         scheduleMicrotask(() {
@@ -505,9 +511,13 @@ void main() {
       };
     });
 
-    tearDown(() => actions.onApprovalRequested = null);
+    tearDown(() {
+      actions.onApprovalRequested = null;
+      actions.onDataChanged = null;
+      actions.onAuditRecorded = null;
+    });
 
-    test('create_entry：落库成功，但新条目默认对智能体「永久拒绝」', () async {
+    test('create_entry：落库成功，且新条目默认对智能体开放（用户可收回）', () async {
       final created = await callToolPayload(trustedKey, 'create_entry', {
         'type': 'login',
         'name': '新建的条目',
@@ -522,15 +532,23 @@ void main() {
       final stored = await repository.getItem(id);
       expect(stored, isNotNull);
       expect(stored!.name, '新建的条目');
-      expect(stored.agentOpen, isFalse, reason: '智能体不能给自己开访问权限');
+      // 产品决定（2026-10-28）：智能体自己建的条目默认对智能体开放，
+      // 否则它建完就读不到/改不了/删不掉；用户仍可改成永久拒绝收回。
+      expect(stored.agentOpen, isTrue, reason: '新建条目默认对智能体开放');
       expect(stored.loginOrEmpty.password, 'pw-from-agent');
       expect(stored.loginOrEmpty.url, 'https://example.com');
 
-      // 对智能体自己不可见：默认永久拒绝是硬闸。
+      // 对智能体自己可见：列表里有它，也能直接读。
       final list = await callToolPayload(trustedKey, 'list_entries');
-      expect((list['entries'] as List).any((e) => e['id'] == id), isFalse);
+      expect((list['entries'] as List).any((e) => e['id'] == id), isTrue);
       final read = await callToolPayload(trustedKey, 'get_entry', {'id': id});
-      expect(read['errorCode'], 'denied');
+      expect(read['name'], '新建的条目');
+      expect(read.containsKey('password'), isFalse);
+
+      // UI 实时刷新的前提：写库后必须广播数据变更主题。
+      expect(broadcastTopics,
+          containsAll(['items', 'item', 'folders', 'search']));
+      expect(auditTicks, greaterThan(0), reason: '审计页靠这个实时刷新');
     });
 
     test('create_entry 的 generate 模式：核心生成并加密入库，明文不回传', () async {
@@ -630,6 +648,10 @@ void main() {
       expect(deleted['ok'], isTrue);
       expect(deleted['trashed'], isTrue);
 
+      // UI 实时刷新：删除成功后必须广播数据变更主题。
+      expect(broadcastTopics,
+          containsAll(['items', 'item', 'folders', 'search']));
+
       final list = await callToolPayload(trustedKey, 'list_entries');
       expect((list['entries'] as List).any((e) => e['id'] == 'e-open'), isFalse);
 
@@ -706,14 +728,13 @@ void main() {
       expect(requests.last['allowStanding'], isFalse);
       expect(requests.last['detail'], contains('新建'));
 
-      // 打开它才能继续做写/删（默认永久拒绝）。
-      final item = await repository.getItem(created['id'] as String);
-      await repository.saveItem(item!.copyWith(agentOpen: true));
+      // 新建的条目默认就对智能体开放，可以直接继续写/删。
+      final itemId = created['id'] as String;
 
       final updated = await callToolPayload(
         approvalKey,
         'update_entry',
-        {'id': item.id, 'name': '审批改名'},
+        {'id': itemId, 'name': '审批改名'},
       );
       expect(updated['updatedFields'], ['name']);
       expect(requests.last['op'], 'write');
@@ -722,7 +743,7 @@ void main() {
       final deleted = await callToolPayload(
         approvalKey,
         'delete_entry',
-        {'id': item.id},
+        {'id': itemId},
       );
       expect(deleted['trashed'], isTrue);
       expect(requests.last['op'], 'delete');
@@ -731,7 +752,7 @@ void main() {
       final restored = await callToolPayload(
         approvalKey,
         'restore_entry',
-        {'id': item.id},
+        {'id': itemId},
       );
       expect(restored['restored'], isTrue);
       expect(requests.last['op'], 'write');

@@ -9,6 +9,7 @@ import '../../../data/models/vault_item.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../protocol/codecs.dart' show WireFolder;
 import '../../auth/providers/auth_provider.dart';
+import '../../settings/providers/agent_access_provider.dart';
 import '../providers/vault_provider.dart';
 import '../widgets/entry_card.dart';
 import '../widgets/entry_type_bits.dart';
@@ -403,6 +404,9 @@ class VaultScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
     final foldersAsync = ref.watch(foldersProvider);
+    // 「智能体活动」入口**只在智能体访问总开关打开时出现**（默认隐藏）。
+    final agentEnabled =
+        ref.watch(agentAccessEnabledProvider).valueOrNull ?? false;
 
     return Material(
       color: theme.colorScheme.surfaceContainerLow,
@@ -536,11 +540,22 @@ class VaultScreen extends ConsumerWidget {
             ),
             // The generator and settings entries live in the right-column
             // toolbar; they are intentionally not duplicated down here. The
-            // trash is the exception: it is a *view* of the vault (like
-            // favourites/folders), so it gets a fixed entry at the bottom
-            // instead of hiding behind a menu (desktop users need a visible
-            // affordance — see the folder-actions pitfall in HANDOFF.md).
+            // bottom strip is reserved for *views of the vault*: 智能体活动
+            // （仅在总开关打开时）与回收站 —— 桌面端必须有看得见的入口。
             const Divider(height: 1),
+            if (agentEnabled)
+              ListTile(
+                leading: Icon(
+                  Icons.history,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                title: Text(
+                  l10n.agentAuditTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () => context.push('/vault/agent-audit'),
+              ),
             ListTile(
               leading: Icon(
                 Icons.delete_outline,

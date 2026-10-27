@@ -1,62 +1,30 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../client/api_providers.dart';
 import '../../../l10n/app_localizations.dart';
+import '../providers/agent_access_provider.dart';
 
-/// 智能体访问审计查看页。
+/// 智能体访问审计查看页（侧边栏「智能体活动」，回收站上方）。
 ///
 /// 为什么要有它：方式 2（可信直通）对用户的承诺是"每次访问都留日志"。
 /// 日志只落在库里、没有界面的话，这个承诺对用户等于不存在。
 ///
+/// 数据是**实时**的：核心每写一条审计都会广播 `Topics.agentAudit`，
+/// 这里订阅后自动重取 —— 智能体在后台操作时不用手动刷新。
+///
 /// 展示纪律：**只显示库里存的东西**（昵称/工具/操作/条目/结果），
 /// 不显示密钥、不显示明文 —— 表里本来就没有这些，界面也不该"顺便"拼出来。
-class AgentAuditScreen extends ConsumerStatefulWidget {
+class AgentAuditScreen extends ConsumerWidget {
   const AgentAuditScreen({super.key});
 
   @override
-  ConsumerState<AgentAuditScreen> createState() => _AgentAuditScreenState();
-}
-
-class _AgentAuditScreenState extends ConsumerState<AgentAuditScreen> {
-  bool _loading = true;
-  String? _error;
-  List<Map<String, dynamic>> _entries = const [];
-  int _total = 0;
-
-  AppLocalizations get _l10n => AppLocalizations.of(context);
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-  }
-
-  Future<void> _load() async {
-    try {
-      final api = ref.read(vaultApiProvider);
-      final entries = await api.listAgentAudit(limit: 200);
-      if (!mounted) return;
-      setState(() {
-        _entries = entries;
-        _total = entries.length;
-        _loading = false;
-        _error = null;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _error = '$error';
-        _loading = false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = _l10n;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final auditAsync = ref.watch(agentAuditEntriesProvider);
+    final entries =
+        auditAsync.valueOrNull ?? const <Map<String, dynamic>>[];
 
     return Scaffold(
       appBar: AppBar(
@@ -64,49 +32,50 @@ class _AgentAuditScreenState extends ConsumerState<AgentAuditScreen> {
         actions: [
           IconButton(
             tooltip: l10n.agentAuditRefresh,
-            onPressed: _loading ? null : _load,
+            onPressed: () => ref.invalidate(agentAuditEntriesProvider),
             icon: const Icon(Icons.refresh),
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      l10n.agentActionFailed(_error!),
-                      style: TextStyle(color: scheme.error),
-                    ),
-                  ),
-                )
-              : _entries.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.history,
-                              size: 40, color: scheme.outline),
-                          const SizedBox(height: 12),
-                          Text(l10n.agentAuditEmpty,
-                              style: theme.textTheme.bodyMedium),
-                        ],
-                      ),
-                    )
-                  : ListView.separated(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _entries.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 8),
-                      itemBuilder: (context, index) =>
-                          _buildCard(_entries[index], l10n, theme),
-                    ),
-      bottomNavigationBar: _entries.isEmpty
+      body: auditAsync.when(
+        // 刷新期间继续显示上一份数据，不闪加载圈。
+        skipLoadingOnReload: true,
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              l10n.agentActionFailed('$error'),
+              style: TextStyle(color: scheme.error),
+            ),
+          ),
+        ),
+        data: (entries) => entries.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.history, size: 40, color: scheme.outline),
+                    const SizedBox(height: 12),
+                    Text(l10n.agentAuditEmpty,
+                        style: theme.textTheme.bodyMedium),
+                  ],
+                ),
+              )
+            : ListView.separated(
+                padding: const EdgeInsets.all(16),
+                itemCount: entries.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (context, index) =>
+                    _buildCard(entries[index], l10n, theme),
+              ),
+      ),
+      bottomNavigationBar: entries.isEmpty
           ? null
           : Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: Text(
-                l10n.agentAuditCount('$_total'),
+                l10n.agentAuditCount('${entries.length}'),
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: scheme.onSurfaceVariant),
                 textAlign: TextAlign.center,

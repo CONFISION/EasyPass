@@ -136,6 +136,16 @@ void main() {
       expect((await core.call(Actions.getAgentAccessState))['agentUnlocked'],
           isFalse);
     });
+
+    test('打开/关闭总开关会广播 agentAccess 主题（侧边栏入口显隐靠它）', () async {
+      await core.call(Actions.enableAgentAccess);
+      expect(core.changedTopics, contains(Topics.agentAccess),
+          reason: 'UI 的「智能体活动」入口只在开启时出现，切开关必须推送');
+
+      core.changedTopics.clear();
+      await core.call(Actions.disableAgentAccess);
+      expect(core.changedTopics, contains(Topics.agentAccess));
+    });
   });
 
   group('方式切换', () {

@@ -528,9 +528,12 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
               if (ctx.mounted) Navigator.pop(ctx);
               if (context.mounted) context.pop();
               // 与详情页一致：删除进回收站，给一次撤销机会。
+              // 带 action 的 SnackBar 默认 persist=true（永不自动消失），显式关掉。
               messenger.showSnackBar(
                 SnackBar(
                   content: Text(l10n.trashMoved),
+                  persist: false,
+                  duration: const Duration(seconds: 5),
                   action: SnackBarAction(
                     label: l10n.undo,
                     onPressed: () async {

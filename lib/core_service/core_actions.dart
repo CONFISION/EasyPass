@@ -413,6 +413,8 @@ class CoreActions {
     await _agentAccess.setEnabled(true);
     _sessions.agent.unlock(Uint8List.fromList(vaultKey));
     onAgentAccessChanged?.call(true);
+    // 侧边栏"智能体活动"入口显隐依赖总开关状态。
+    onDataChanged({Topics.agentAccess});
     return {'ok': true, 'enabled': true, 'agentUnlocked': true};
   }
 
@@ -421,6 +423,7 @@ class CoreActions {
     await _agentAccess.wipe();
     _sessions.agent.lock();
     onAgentAccessChanged?.call(false);
+    onDataChanged({Topics.agentAccess});
     return {'ok': true, 'enabled': false, 'agentUnlocked': false};
   }
 
@@ -438,6 +441,7 @@ class CoreActions {
     await _agentAccess.storeAgentKey(agentKey);
     await _agentAccess.writeWrap(wrapped);
     _sessions.agent.unlock(Uint8List.fromList(vaultKey));
+    onDataChanged({Topics.agentAccess});
     return {'ok': true, 'enabled': true, 'agentUnlocked': true};
   }
 
@@ -638,7 +642,13 @@ class CoreActions {
       _sessions.agent.lock();
       onAgentAccessChanged?.call(false);
     }
-    onDataChanged({Topics.items, Topics.item, Topics.folders, Topics.search});
+    onDataChanged({
+      Topics.items,
+      Topics.item,
+      Topics.folders,
+      Topics.search,
+      Topics.agentAccess,
+    });
     return {
       'success': true,
       'reencrypted': reencrypted,

@@ -205,6 +205,12 @@ class CoreService {
               'event': Events.agentApprovalRequested,
               ...request,
             });
+    // 智能体写库后必须广播变更主题，否则 UI 列表不会重取（真机反馈：
+    // 智能体建/删条目后界面不刷新）。
+    agentActions.onDataChanged = (topics) => service._broadcastChanged(topics);
+    // 每写一条审计就广播一次：审计页据此实时刷新。
+    agentActions.onAuditRecorded = () =>
+        service._broadcastChanged({Topics.agentAudit});
     actions.onAgentApprovalResponse = (approvalId, allow, allowStanding) =>
         agentActions.respondApproval(
           approvalId,

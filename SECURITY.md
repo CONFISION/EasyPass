@@ -183,11 +183,12 @@ Consequences you should be aware of:
   decision). The key, the real client identity, plaintext arguments and field values are
   never written there.
 - **Write access is deliberately narrow.** `create_entry` / `update_entry` only cover
-  `login` and `secure_note` fields; a newly created entry is **permanently denied to agents
-  by default** (the agent cannot grant itself access), and an update is rejected unless the
-  entry itself is open to agents. In the ask-every-time mode every write, delete and restore
-  is confirmed by you — the "allow reads this session" exemption covers reads only. The
-  approval dialog lists **field names and the action**, never values.
+  `login` and `secure_note` fields; an entry created by an agent is **open to that agent**
+  by default (otherwise the agent could not manage what it just created), but the switch
+  itself is user-only — you can set it to permanent deny at any moment and updates are then
+  rejected. In the ask-every-time mode every write, delete and restore is confirmed by you —
+  the "allow reads this session" exemption covers reads only. The approval dialog lists
+  **field names and the action**, never values.
 - **Agent deletion is recoverable.** `delete_entry` only moves the entry to the **trash**
   (a `deleted_at` timestamp; the ciphertext is not touched). There is no
   "delete permanently" tool: emptying the trash or deleting an entry for good is a UI-only

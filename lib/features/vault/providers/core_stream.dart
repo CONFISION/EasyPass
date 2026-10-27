@@ -190,6 +190,33 @@ Future<CoreSnapshot<List<VaultItem>>> fetchTrash(VaultApi api) async {
   }
 }
 
+/// `agentAccessState` 的流式快照读取（只关心总开关是否开启）。
+///
+/// 侧边栏的「智能体活动」入口据此显隐：总开关关着时这个入口必须消失。
+Future<CoreSnapshot<bool>> fetchAgentAccessEnabled(VaultApi api) async {
+  try {
+    final state = await api.agentAccessState();
+    return (value: state['enabled'] == true, locked: false);
+  } on VaultApiException catch (error) {
+    if (error.isLocked) return (value: false, locked: true);
+    rethrow;
+  }
+}
+
+/// `listAgentAudit` 的流式快照读取；未解锁 → 空列表 + `locked`。
+Future<CoreSnapshot<List<Map<String, dynamic>>>> fetchAgentAudit(
+  VaultApi api,
+) async {
+  try {
+    return (value: await api.listAgentAudit(limit: 200), locked: false);
+  } on VaultApiException catch (error) {
+    if (error.isLocked) {
+      return (value: const <Map<String, dynamic>>[], locked: true);
+    }
+    rethrow;
+  }
+}
+
 /// `healthReport` 的流式快照读取；未解锁 → null + `locked`。
 ///
 /// **为什么走这条而不是 `listItems`**：报告由核心算完（同一套

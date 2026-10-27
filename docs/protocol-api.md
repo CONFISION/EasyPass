@@ -355,6 +355,12 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 | `item` | 单个条目变化（带 `id`） | 重取 `getItem(id)` |
 | `folders` | 文件夹增删改 | 重取 `listFolders` |
 | `search` | 任何可能影响搜索结果的写入 | 用当前查询词重取 `searchItems` |
+| `agentAccess` | 智能体访问总开关打开 / 关闭 / 重置 / 改密重包裹 | 重取 `getAgentAccessState`（侧边栏「智能体活动」入口显隐） |
+| `agentAudit` | 核心每写入一条智能体审计 | 重取 `listAgentAudit`（活动页实时刷新） |
+
+> **写路径必须广播**：任何新增的"往库里写条目"的入口（智能体工具、导入、后台任务）
+> 都要推 `items` / `item`（必要时 `folders` / `search`），否则 UI 不会刷新。
+> 智能体侧由 `AgentActions.onDataChanged` 负责，核心在 `CoreService` 里接线。
 
 - `revision` 是**进程内**单调递增计数，不跨重启持久化；重连后客户端应全量重取。
 - `sessionLocked` / `sessionUnlocked` 带 `domain`：**UI 只跟随 `ui` 域**，`bridge` / `agent`
