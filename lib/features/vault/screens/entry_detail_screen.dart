@@ -166,6 +166,29 @@ class _EntryDetailBody extends ConsumerWidget {
                 value: entry.isFavorite,
                 onChanged: (value) => _toggleFavorite(context, ref, value),
               ),
+              // 智能体可访问性：详情页要能直接看到（编辑页之外的第二处）。
+              // 只读展示 —— 改它需要进编辑页，避免误触把条目对智能体开放。
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  entry.agentOpen ? Icons.smart_toy : Icons.smart_toy_outlined,
+                  color: entry.agentOpen
+                      ? Theme.of(context).colorScheme.tertiary
+                      : Theme.of(context).colorScheme.outline,
+                ),
+                title: Text(l10n.agentAccessEntryTitle),
+                subtitle: Text(
+                  entry.agentOpen
+                      ? l10n.agentAccessEntryOpen
+                      : l10n.agentAccessEntryDenied,
+                ),
+                trailing: Icon(
+                  entry.agentOpen ? Icons.check_circle : Icons.block,
+                  color: entry.agentOpen
+                      ? Theme.of(context).colorScheme.tertiary
+                      : Theme.of(context).colorScheme.outline,
+                ),
+              ),
             ],
           ),
         ),

@@ -84,14 +84,14 @@ void main() {
     expect(res.statusCode, 401);
   });
 
-  test('tools/list 走完整链路能拿到 5 个工具', () async {
+  test('tools/list 走完整链路能拿到 6 个工具', () async {
     final res = await send(
       body: '{"jsonrpc":"2.0","id":2,"method":"tools/list"}',
     );
     final body = await utf8.decoder.bind(res).join();
     expect(res.statusCode, 200);
     final tools = (jsonDecode(body)['result'] as Map)['tools'] as List;
-    expect(tools.length, 5);
+    expect(tools.length, 6);
   });
 
   test('stop 后端口不再接受连接', () async {

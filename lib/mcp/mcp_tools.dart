@@ -99,6 +99,38 @@ const List<McpTool> agentTools = <McpTool>[
       'additionalProperties': false,
     },
   ),
+  McpTool(
+    name: 'copy_to_clipboard',
+    description:
+        '把某个字段的值写进系统剪贴板，**只返回是否成功、不返回明文**。'
+        '智能体据此去目标窗口粘贴即可 —— 密码永远不会进入模型上下文。',
+    inputSchema: {
+      'type': 'object',
+      'properties': {
+        'id': {'type': 'string'},
+        'field': {
+          'type': 'string',
+          'enum': [
+            'password',
+            'totp',
+            'notes',
+            'private_key',
+            'passphrase',
+            'custom',
+          ],
+          'description': '要复制的字段，默认 password',
+        },
+        'customLabel': {
+          'type': 'string',
+          'description': '自定义字段的标签（field=custom 时必填）',
+        },
+      },
+      'required': ['id'],
+      'additionalProperties': false,
+    },
+    // 不是只读：它改变了本机剪贴板（其它程序可能读到）。
+    readOnly: false,
+  ),
 ];
 
 /// 工具名集合（`tools/call` 的白名单判定用）。

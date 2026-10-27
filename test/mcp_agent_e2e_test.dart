@@ -6,6 +6,7 @@ import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:easypass/core/crypto/crypto_service.dart';
 import 'package:easypass/core/storage/secret_store.dart';
+import 'package:easypass/core/crypto/totp_service.dart';
 import 'package:easypass/core_service/agent_access_store.dart';
 import 'package:easypass/core_service/agent_access_policy.dart';
 import 'package:easypass/core_service/agent_actions.dart';
@@ -42,6 +43,7 @@ void main() {
   late HttpClient client;
   late int port;
   late File tempBlob;
+  late List<String> clipboardWrites;
 
   setUp(() async {
     db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -107,11 +109,18 @@ void main() {
       createdAt: 1,
     ));
 
+    clipboardWrites = <String>[];
     actions = AgentActions(
       repository: repository,
       sessions: sessions,
       pairingStore: pairingStore,
       agentAccess: AgentAccessStore(db, blobFile: tempBlob),
+      totpService: TotpService(),
+      // 注入假剪贴板：并行跑测试时不要真的去抢系统剪贴板。
+      clipboardWriter: (text) async {
+        clipboardWrites.add(text);
+        return true;
+      },
     );
     final handler = McpHandler(
       authenticate: actions.authenticate,
@@ -166,7 +175,7 @@ void main() {
     expect((init['result'] as Map)['protocolVersion'], '2025-06-18');
 
     final listed = await rpc(trustedKey, 'tools/list');
-    expect(((listed['result'] as Map)['tools'] as List).length, 5);
+    expect(((listed['result'] as Map)['tools'] as List).length, 6);
   });
 
   test('未配对 / 已撤销的密钥在 HTTP 层就被 401 挡住', () async {
@@ -216,6 +225,47 @@ void main() {
 
     final closed = await callToolPayload(trustedKey, 'get_entry', {'id': 'e-closed'});
     expect(closed['errorCode'], 'denied');
+  });
+
+  test('copy_to_clipboard：只回 ok 与长度，绝不回传明文', () async {
+    final payload = await callToolPayload(
+      trustedKey,
+      'copy_to_clipboard',
+      {'id': 'e-open', 'field': 'password'},
+    );
+
+    expect(payload['ok'], isTrue);
+    expect(payload['field'], 'password');
+    expect(payload['length'], password.length);
+    // 整个响应里不能出现密码本身。
+    expect(jsonEncode(payload).contains(password), isFalse);
+    // 值确实走到了剪贴板写入器（但不在响应里）。
+    expect(clipboardWrites, [password]);
+  });
+
+  test('copy_to_clipboard：未开放条目被拒（开关是硬闸）', () async {
+    final payload = await callToolPayload(
+      trustedKey,
+      'copy_to_clipboard',
+      {'id': 'e-closed', 'field': 'password'},
+    );
+    expect(payload['errorCode'], 'denied');
+  });
+
+  test('copy_to_clipboard：未知字段 / 空值字段给出明确错误', () async {
+    final unknown = await callToolPayload(
+      trustedKey,
+      'copy_to_clipboard',
+      {'id': 'e-open', 'field': 'nope'},
+    );
+    expect(unknown['errorCode'], 'invalidRequest');
+
+    final emptyTotp = await callToolPayload(
+      trustedKey,
+      'copy_to_clipboard',
+      {'id': 'e-open', 'field': 'totp'},
+    );
+    expect(emptyTotp['errorCode'], 'notFound');
   });
 
   test('方式 1（逐次审批）在阶段 1 fail closed：读也被拒', () async {

@@ -4,6 +4,8 @@
 
 import 'dart:collection';
 
+import 'package:easypass/core/crypto/totp_service.dart';
+import 'package:easypass/core/platform/system_clipboard.dart';
 import 'package:easypass/core_service/agent_access_policy.dart';
 import 'package:easypass/core_service/agent_access_store.dart';
 import 'package:easypass/core_service/agent_pairing_store.dart';
@@ -87,12 +89,16 @@ class AgentActions {
     required SessionDomains sessions,
     required AgentPairingStore pairingStore,
     required AgentAccessStore agentAccess,
+    required TotpService totpService,
+    Future<bool> Function(String text)? clipboardWriter,
     DateTime Function()? clock,
     int auditCapacity = 200,
   })  : _repository = repository,
         _sessions = sessions,
         _pairingStore = pairingStore,
         _agentAccess = agentAccess,
+        _totpService = totpService,
+        _clipboardWriter = clipboardWriter ?? SystemClipboard.writeText,
         _clock = clock ?? DateTime.now,
         _auditCapacity = auditCapacity;
 
@@ -100,6 +106,10 @@ class AgentActions {
   final SessionDomains _sessions;
   final AgentPairingStore _pairingStore;
   final AgentAccessStore _agentAccess;
+  final TotpService _totpService;
+
+  /// 剪贴板写入（可注入：单测不要真的动系统剪贴板，否则并行用例会互相抢）。
+  final Future<bool> Function(String text) _clipboardWriter;
   final DateTime Function() _clock;
   final int _auditCapacity;
 
@@ -156,6 +166,8 @@ class AgentActions {
         return _listEntries(pairing, principal, args);
       case 'get_entry':
         return _getEntry(pairing, principal, args);
+      case 'copy_to_clipboard':
+        return _copyToClipboard(pairing, principal, args);
       default:
         throw McpToolException('invalidRequest', '未知工具：$tool');
     }
@@ -334,6 +346,101 @@ class AgentActions {
 
   // ─── 内部 ──────────────────────────────────────────────
 
+  /// 复制某字段到系统剪贴板：**只回 ok，不回明文**。
+  ///
+  /// 这是"密码不需要让智能体知道"的落点：明文只在本机进程之间传递
+  /// （核心 → 剪贴板），智能体拿到的是"已复制"这个事实，然后自己去目标窗口粘贴。
+  /// 安全纪律：
+  /// - 按**敏感读**判定（不享受"本会话免询问"）；
+  /// - 条目必须是"开放"；
+  /// - 审计只记条目与字段名，绝不记值。
+  Future<Map<String, Object?>> _copyToClipboard(
+    AgentPairing pairing,
+    McpPrincipal principal,
+    Map<String, Object?> args,
+  ) async {
+    _requireUnlocked();
+    _requireRequestAllowed(pairing);
+    final id = (args['id'] as String? ?? '').trim();
+    if (id.isEmpty) throw McpToolException('invalidRequest', 'id 必填');
+
+    final item = await _repository.getItem(id);
+    if (item == null) throw McpToolException('notFound', '找不到该条目');
+
+    final result = AgentAccessPolicy.evaluate(
+      _requestFor(pairing, item, op: AgentOp.sensitiveRead),
+    );
+    if (!result.allowed) {
+      _auditAdd(
+        principal: principal,
+        mode: pairing.mode,
+        tool: 'copy_to_clipboard',
+        op: 'clipboard',
+        entryId: item.id,
+        entryName: item.name,
+        decision: 'denied',
+      );
+      throw McpToolException('denied', '条目未开放给智能体（${result.reason!.name}）');
+    }
+
+    final field = (args['field'] as String? ?? 'password').trim();
+    final value = _fieldValue(item, field, args['customLabel'] as String?);
+    if (value == null) {
+      throw McpToolException('invalidRequest', '未知字段：$field');
+    }
+    if (value.isEmpty) {
+      throw McpToolException('notFound', '该条目的这个字段是空的');
+    }
+
+    final ok = await _clipboardWriter(value);
+    _auditAdd(
+      principal: principal,
+      mode: pairing.mode,
+      tool: 'copy_to_clipboard',
+      op: 'clipboard',
+      entryId: item.id,
+      entryName: item.name,
+      decision: ok ? 'allowed' : 'error',
+    );
+    if (!ok) {
+      throw McpToolException('internal', '剪贴板被占用或不可用，请重试');
+    }
+    // **绝不回传 value**：只回事实。
+    return {
+      'ok': true,
+      'entryId': item.id,
+      'field': field,
+      'length': value.length,
+      'note': '已复制到剪贴板；内容不会返回给模型，请直接在目标窗口粘贴。',
+    };
+  }
+
+  String? _fieldValue(VaultItem item, String field, String? customLabel) {
+    switch (field) {
+      case 'password':
+        return item.loginOrEmpty.password;
+      case 'totp':
+        final secret = item.loginOrEmpty.totpSecret;
+        if (secret.isEmpty) return '';
+        return _totpService.generateTotp(secret);
+      case 'notes':
+        return item.notes;
+      case 'private_key':
+        return item.sshKeyOrEmpty.privateKey;
+      case 'passphrase':
+        return item.sshKeyOrEmpty.passphrase;
+      case 'custom':
+        final label = (customLabel ?? '').trim();
+        if (label.isEmpty) return null;
+        for (final custom in item.customFields) {
+          if (custom.label.trim() == label) return custom.value;
+        }
+        return '';
+      default:
+        return null;
+    }
+  }
+
   Future<List<VaultItem>> _visibleItems(
     AgentPairing pairing, {
     EntryType? type,
@@ -352,9 +459,13 @@ class AgentActions {
     ];
   }
 
-  AgentAccessRequest _requestFor(AgentPairing pairing, VaultItem item) {
+  AgentAccessRequest _requestFor(
+    AgentPairing pairing,
+    VaultItem item, {
+    AgentOp op = AgentOp.read,
+  }) {
     return AgentAccessRequest(
-      op: AgentOp.read,
+      op: op,
       entryOpen: item.agentOpen,
       revoked: pairing.isRevoked,
       expired: pairing.isExpiredAt(_now),

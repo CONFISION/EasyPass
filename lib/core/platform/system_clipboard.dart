@@ -1,0 +1,69 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+/// 系统剪贴板写入（核心是**无 Flutter** 的 AOT 控制台程序，用不了 `Clipboard.setData`）。
+///
+/// 为什么智能体接口需要它：密码**不该进入模型上下文**。核心把值写进剪贴板、
+/// 只回一个 `ok`，智能体负责去目标窗口粘贴——明文从未进入模型的消息。
+///
+/// **为什么不用 `dart:ffi` 直接调 `SetClipboardData`**（我试过，且必须记下来）：
+/// `OpenClipboard` / `EmptyClipboard` / `CloseClipboard` / `GlobalAlloc` 都正常，
+/// 但一旦把真实的 `HGLOBAL` 交给 `SetClipboardData`，进程就以
+/// `0xC0000374`（堆损坏）**直接崩掉**，最小可复现脚本也一样。
+/// 崩溃点在一个**持有保险库密钥的常驻进程**里，代价是整个保险库不可用 ——
+/// 换成一个短命的 `powershell` 子进程来做这件事，风险小得多。
+///
+/// 安全细节：
+/// - 明文**只走子进程的 stdin**，绝不出现在命令行参数里（否则任何进程
+///   都能从进程列表中读到密码）；
+/// - 显式按 UTF-8 解码，避免系统代码页（本机 936）把中文写成乱码；
+/// - 子进程失败一律返回 false，调用方回错误，不再尝试别的路径。
+class SystemClipboard {
+  SystemClipboard._();
+
+  static bool get isSupported => Platform.isWindows;
+
+  /// 子进程超时：PowerShell 冷启动通常 200–500ms，给足余量但不无限等。
+  static const Duration _timeout = Duration(seconds: 10);
+
+  /// 从 stdin 按 UTF-8 读入并写入剪贴板的 PowerShell 脚本。
+  ///
+  /// 不用 `$input`：那会走控制台输入编码（本机 936），中文会变乱码。
+  static const String _script =
+      r'$r=New-Object IO.StreamReader([Console]::OpenStandardInput(),'
+      r'[Text.Encoding]::UTF8); Set-Clipboard -Value $r.ReadToEnd()';
+
+  /// 把 [text] 写进剪贴板。返回 false 表示失败（或平台不支持）。
+  static Future<bool> writeText(String text) async {
+    if (!isSupported) return false;
+    Process? process;
+    try {
+      process = await Process.start(
+        'powershell',
+        ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', _script],
+        runInShell: false,
+      );
+
+      // 先把 stdout/stderr 排空：不消费的话管道填满会让子进程挂住。
+      final outFuture = process.stdout.drain<void>();
+      final errFuture = process.stderr.drain<void>();
+
+      process.stdin.add(utf8.encode(text));
+      await process.stdin.flush();
+      await process.stdin.close();
+
+      final exitCode = await process.exitCode.timeout(_timeout);
+      await outFuture;
+      await errFuture;
+      return exitCode == 0;
+    } catch (_) {
+      try {
+        process?.kill();
+      } catch (_) {
+        // 已经退出。
+      }
+      return false;
+    }
+  }
+}

@@ -153,6 +153,7 @@ class CoreService {
       sessions: sessions,
       pairingStore: pairingStore,
       agentAccess: agentAccess,
+      totpService: TotpService(),
     );
     final mcpServer = McpHttpServer(
       handler: McpHandler(

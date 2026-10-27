@@ -363,10 +363,123 @@ node browser_extension/tools/build_extension_zip.mjs --dry-run   # 扩展包到�
 
 ---
 
-## 12. 变更记录
+## 12. 智能体接口（MCP，3.1.0）
+
+> 给"要接 AI 智能体"的人看：怎么开、怎么配对、能用什么、边界在哪。
+> 设计取舍与威胁模型的完整讨论在本地文档 `docs/agent-mcp-spec.md`（不入库）。
+
+### 12.1 一句话
+
+核心进程内跑一个只监听 `127.0.0.1` 的 MCP 端点（Streamable HTTP）。默认**关闭**；
+打开后，被配对过的智能体可以**零介入**读"开放"条目的**元数据**，并把字段值直接
+送进**系统剪贴板**（明文不进模型上下文）。
+
+### 12.2 打开总开关
+
+1. 解锁保险库（UI 域）。
+2. 设置 → **智能体访问** → 打开开关，输入主密码确认。
+3. 打开时核心会：
+   - 生成一把 256-bit **专属密钥**，用 Windows DPAPI 加密存到
+     `<数据目录>\agent.key.dpapi`；
+   - 用它**包裹**一份保险库密钥，存进库的 `vault_meta.agent.wrap`；
+   - 解锁 **agent 会话域**（与 ui / bridge 三个域互相独立）；
+   - 启动 MCP 端点，端口写进 `daemon.json` 的 `mcpPort`（默认固定 **47821**）。
+4. 关掉开关 = 删 DPAPI blob + 删 wrap + 锁 agent 域 + **停掉监听**（端口释放）。
+
+> ⚠️ 开关打开期间，**保险库可以被 EasyPass 自己解锁**（这正是"零介入"的含义），
+> 任何以你这个 Windows 账户运行的程序都可能受益。关掉开关即可立刻收回。
+
+### 12.3 配对（生成密钥）
+
+设置 → 智能体访问 → **配对智能体**：
+
+1. 填一个昵称（会出现在审计里，**同名只能有一个**）；
+2. 用主密码确认（核心据此把该配对标记为 `trusted`）；
+3. 弹出**只显示一次**的密钥卡片（已自动复制）。核心库里只存它的 SHA-256。
+
+**撤销** = 立刻删除该配对记录，那把密钥立即失效（其它配对不受影响）。
+
+### 12.4 客户端配置
+
+端点：`http://127.0.0.1:47821/mcp`，认证方式都是 `Authorization: Bearer <密钥>`。
+四条硬性要求：只支持 `POST`、**不能带 `Origin` 头**、`Host` 必须是回环地址、
+密钥只能放 header（不能放 query）。
+
+**DeepSeek Harness**（`~/.dsh/profiles/desktop/cordis.patch.yml`）：
+
+```yaml
+- insert:
+    - id: mcp-easypass
+      name: "@deepseek-ai/dsh-mcp-client"
+      config:
+        serverName: easypass
+        transport: streamable-http
+        url: http://127.0.0.1:47821/mcp
+        headers:
+          Authorization: "Bearer <密钥>"
+        failOnStartupError: false
+```
+
+**Claude Code**：
+
+```bash
+claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
+  --header "Authorization: Bearer <密钥>"
+```
+
+**MiniMax Code**（`~/.minimax/mcp.json`）：`{"type":"streamable-http","url":…,"headers":{…}}`
+**Command Code**（`~/.commandcode/mcp.json`）：`{"transport":"http","url":…,"headers":{…}}`
+
+> Claude Desktop **连不上**：它的远程连接器由 Anthropic 云端发起，到不了 `127.0.0.1`；
+> 本地配置又只支持 stdio。这是客户端限制，不是 EasyPass 的问题。
+
+### 12.5 工具清单（6 个，静态）
+
+| 工具 | 作用 |
+| --- | --- |
+| `status` | 配对状态、是否解锁、可见条目数、活动窗口 |
+| `begin_session` | 开一个批量窗口（`purpose` 必填，TTL 30–1800 秒），窗口内不因空闲被打断 |
+| `end_session` | 关闭窗口（**不锁** agent 域，零介入语义） |
+| `list_entries` | 条目**元数据**（名称/类型/文件夹/URL/用户名/有无密码/有无 TOTP） |
+| `get_entry` | 单条元数据 |
+| `copy_to_clipboard` | 把字段值写进**系统剪贴板**，只回 `ok` + 长度，**不返回明文** |
+
+字段侧：`password` / `totp` / `notes` / `private_key` / `passphrase` / `custom`（配 `customLabel`）。
+
+### 12.6 条目级开关
+
+每个条目有「允许智能体访问：**开放 / 永久拒绝**」，默认**永久拒绝**（存量条目无需迁移）。
+开关落在**加密载荷** `EntryPayload.agentAccess` 里，不出现在明文列。
+可见位置：条目编辑页（可改）、条目详情页（只读展示）、条目列表（机器人图标标识）。
+
+- 「永久拒绝」是**硬闸**：任何方式、任何 scope 都读不到、也复制不了；
+- `copy_to_clipboard` 同样受它约束。
+
+### 12.7 安全边界（不要过度承诺）
+
+- 专属密钥由 DPAPI 保护：**别的 Windows 用户、拷贝到别的机器都解不开**；
+- 配对密钥只是 MCP 的**身份凭据**，不参与任何解包 —— 泄露它不能解密数据库；
+- 但**同用户的恶意进程**既读得到 DPAPI blob 也读得到库文件，这是本项目的既有边界；
+- 明文只在"核心 → 系统剪贴板"之间移动，**永远不进模型上下文**；
+- 审计目前只在核心内存里（重启即丢），落库是下一步（`agent_audit` 表）。
+
+### 12.8 常见排障
+
+| 现象 | 原因 |
+| --- | --- |
+| `denied (notTrusted)` | 配对不是 trusted：撤销后重新配对（配对时会要主密码） |
+| `locked` | agent 域没解锁：确认总开关是开的，或重启核心让它自动解封 |
+| 连不上 / 401 | `daemon.json` 里没有 `mcpPort`（没开开关），或密钥被撤销 |
+| 工具里只有部分条目 | 其余条目是「永久拒绝」 |
+| 端口不是 47821 | 固定端口被占用，退化为临时端口；以 `daemon.json` 为准 |
+
+---
+
+## 13. 变更记录
 
 | 日期 | 变更 |
 | --- | --- |
+| 3.1.0 | 智能体接口（MCP）：总开关 + 配对 + DPAPI 包裹密钥 + 6 个工具 + 条目级开放开关 |
 | 3.0.0 | 核心服务化：独立核心进程、UI 变纯客户端、协议 5（通道加密）、密钥材料入库、关窗即锁、UI 单实例 |
 | 2.4.0 | 原子主密码轮换、Bitwarden 导入导出、CI/发布工程化 |
 | 2.3.x | 四种条目类型、自定义字段、文件夹管理、搜索前缀 |

@@ -68,6 +68,15 @@ class EntryCard extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (item.agentOpen)
+              Tooltip(
+                message: l10n.agentAccessEntryTitle,
+                child: Icon(
+                  Icons.smart_toy_outlined,
+                  color: theme.colorScheme.tertiary,
+                  size: 20,
+                ),
+              ),
             if (item.isFavorite)
               const Icon(
                 Icons.star,

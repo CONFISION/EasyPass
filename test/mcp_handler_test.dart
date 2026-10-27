@@ -234,16 +234,17 @@ void main() {
   });
 
   group('工具面', () {
-    test('tools/list 返回 5 个工具，且都带 annotations', () async {
+    test('tools/list 返回 6 个工具，且都带 annotations', () async {
       final r = await post({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'});
       final tools = (jsonDecode(r.body)['result'] as Map)['tools'] as List;
-      expect(tools.length, 5);
+      expect(tools.length, 6);
       expect(agentToolNames, {
         'status',
         'begin_session',
         'end_session',
         'list_entries',
         'get_entry',
+        'copy_to_clipboard',
       });
       for (final tool in tools.cast<Map>()) {
         expect(tool['annotations'], isNotNull);
