@@ -67,6 +67,12 @@ class AppConstants {
   static const String daemonInfoProtocolVersionKey = 'protocolVersion';
   static const String daemonInfoPidKey = 'pid';
 
+  /// 智能体接口（MCP）的 HTTP 端口。
+  ///
+  /// 纯新增字段：旧客户端不认识就忽略；缺这个字段说明该核心没启用 MCP。
+  /// 端口取**临时端口**（不固定），避免与机器上的其他服务抢端口。
+  static const String daemonInfoMcpPortKey = 'mcpPort';
+
   // ─── 核心服务（v3.0 架构改造）────────────────────────────
 
   /// 核心服务版本。

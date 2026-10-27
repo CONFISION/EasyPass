@@ -22,6 +22,7 @@ class CoreInfo {
     this.protocolVersion = coreProtocolVersion,
     this.coreVersion = AppConstants.coreVersion,
     this.exe = '',
+    this.mcpPort,
   });
 
   final int port;
@@ -31,6 +32,9 @@ class CoreInfo {
   final String coreVersion;
   final String exe;
 
+  /// 智能体接口（MCP）的 HTTP 端口；null = 本核心没启用（或启动失败）。
+  final int? mcpPort;
+
   Map<String, dynamic> toJson() => {
         AppConstants.daemonInfoPortKey: port,
         AppConstants.daemonInfoTokenKey: token,
@@ -38,6 +42,7 @@ class CoreInfo {
         AppConstants.daemonInfoPidKey: pid,
         'coreVersion': coreVersion,
         'exe': exe,
+        if (mcpPort != null) AppConstants.daemonInfoMcpPortKey: mcpPort,
       };
 
   /// 宽容解析：缺 `port` / `token` / `pid` 一律返回 null（视为陈旧文件）。
@@ -59,6 +64,7 @@ class CoreInfo {
                 0,
         coreVersion: (map['coreVersion'] as String?) ?? '',
         exe: (map['exe'] as String?) ?? '',
+        mcpPort: (map[AppConstants.daemonInfoMcpPortKey] as num?)?.toInt(),
       );
     } catch (_) {
       return null;

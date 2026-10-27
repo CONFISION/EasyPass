@@ -15,8 +15,12 @@ import 'package:easypass/data/repositories/vault_repository.dart';
 import 'package:easypass/data/services/export_import_service.dart';
 import 'package:easypass/data/services/master_password_rotation.dart';
 import 'package:easypass/core_service/native_messaging_service.dart';
+import 'package:easypass/mcp/mcp_handler.dart';
+import 'package:easypass/mcp/mcp_http_server.dart';
 import 'package:easypass/protocol/protocol.dart';
 
+import 'agent_actions.dart';
+import 'agent_pairing_store.dart';
 import 'core_actions.dart';
 import 'core_info.dart';
 import 'core_singleton.dart';
@@ -43,17 +47,20 @@ class CoreService {
     required SessionDomains sessions,
     required CoreActions actions,
     required NativeMessagingService bridgeService,
+    required McpHttpServer mcpServer,
     required ServerSocket socket,
   })  : _db = db,
         _sessions = sessions,
         _actions = actions,
         _bridgeService = bridgeService,
+        _mcpServer = mcpServer,
         _socket = socket;
 
   final AppDatabase _db;
   final SessionDomains _sessions;
   final CoreActions _actions;
   final NativeMessagingService _bridgeService;
+  final McpHttpServer _mcpServer;
   final ServerSocket _socket;
 
   final List<_CoreConnection> _connections = [];
@@ -126,6 +133,26 @@ class CoreService {
       repository: bridgeRepository,
     );
 
+    // 智能体域：**第三个仓储实例**，只读 `sessions.agent.key`
+    // （绝不借用 ui/bridge 的会话；三域各自一份密钥副本）。
+    final agentRepository = VaultRepository(
+      db: db,
+      cryptoService: cryptoService,
+      keyReader: () => sessions.agent.key,
+    );
+    final pairingStore = AgentPairingStore(db);
+    final agentActions = AgentActions(
+      repository: agentRepository,
+      sessions: sessions,
+      pairingStore: pairingStore,
+    );
+    final mcpServer = McpHttpServer(
+      handler: McpHandler(
+        authenticate: agentActions.authenticate,
+        callTool: agentActions.callTool,
+      ),
+    );
+
     late final CoreService service;
     final actions = CoreActions(
       db: db,
@@ -143,6 +170,7 @@ class CoreService {
       sessions: sessions,
       actions: actions,
       bridgeService: bridgeService,
+      mcpServer: mcpServer,
       socket: singleton.socket,
     );
 
@@ -152,6 +180,15 @@ class CoreService {
   }
 
   Future<void> _listen() async {
+    // 智能体接口（MCP）：临时端口，**启动失败不阻塞核心**——核心的主业是保险库，
+    // 不该因为多一个可选端点起不来。失败时 daemon.json 里就没有 mcpPort，
+    // 客户端据此知道"这个核心不支持 MCP"。
+    int? mcpPort;
+    try {
+      mcpPort = await _mcpServer.start();
+    } catch (error) {
+      stderr.writeln('easypass_core: MCP 端点启动失败（已跳过）：$error');
+    }
     _info = CoreInfo(
       port: _socket.port,
       token: _generateToken(),
@@ -159,6 +196,7 @@ class CoreService {
       protocolVersion: coreProtocolVersion,
       coreVersion: AppConstants.coreVersion,
       exe: Platform.resolvedExecutable,
+      mcpPort: mcpPort,
     );
     await CoreDiscovery.write(_info!);
 
@@ -488,6 +526,8 @@ class CoreService {
     _shuttingDown = true;
     _broadcast({'event': Events.coreShuttingDown});
     _sessions.stop();
+    // 先关智能体端点：它的 handler 会用到仓储与会话，必须在关库之前停。
+    await _mcpServer.stop();
     for (final connection in List<_CoreConnection>.from(_connections)) {
       try {
         connection.socket.destroy();
