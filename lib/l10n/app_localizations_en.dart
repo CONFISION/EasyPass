@@ -182,6 +182,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get folderActions => 'Folder actions';
 
   @override
+  String get entryActions => 'Entry actions';
+
+  @override
+  String get entryActionEdit => 'Edit';
+
+  @override
   String deleteFolderNotEmptyMessage(String name, int count) {
     return 'Delete \"$name\"? It still contains $count entries. They will NOT be deleted — they move to \"No Folder\". This cannot be undone.';
   }

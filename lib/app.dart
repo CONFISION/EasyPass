@@ -163,7 +163,8 @@ class EasyPassApp extends ConsumerWidget {
   static const SnackBarThemeData _snackBarTheme = SnackBarThemeData(
     behavior: SnackBarBehavior.floating,
     width: 380,
-    insetPadding: EdgeInsets.fromLTRB(0, 0, 0, 20),
+    // 只留一点点贴底间距：用户嫌 20 太"飘"，气泡要压在底边上方一点点。
+    insetPadding: EdgeInsets.fromLTRB(0, 0, 0, 8),
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.all(Radius.circular(14)),
     ),

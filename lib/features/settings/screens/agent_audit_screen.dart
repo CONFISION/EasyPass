@@ -28,7 +28,21 @@ class AgentAuditScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(l10n.agentAuditTitle),
+        // 标题旁给一个活动图标（用户要求"智能体活动旁边要有图标"）。
+        // 与侧边栏/设置里的智能体图标统一用 smart_toy。
+        title: Row(
+          children: [
+            const Icon(Icons.smart_toy_outlined, size: 20),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                l10n.agentAuditTitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             tooltip: l10n.agentAuditRefresh,

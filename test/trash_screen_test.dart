@@ -85,16 +85,19 @@ void main() {
     expect(find.textContaining('2026-'), findsOneWidget);
     expect(find.text('不该显示的备注'), findsNothing,
         reason: '回收站列表是元数据视图，不是详情页');
-    // 两个动作入口都得看得见（桌面端不做隐藏手势）。
-    expect(find.text(l10n.trashRestore), findsOneWidget);
+    // 两个动作入口都得看得见（桌面端不做隐藏手势），而且**统一用图标**。
+    expect(find.byTooltip(l10n.trashRestore), findsOneWidget);
+    expect(find.byIcon(Icons.restore), findsOneWidget);
     expect(find.byTooltip(l10n.trashDeletePermanently), findsOneWidget);
+    // delete_forever 有两个：AppBar 的"清空回收站" + 每行的"彻底删除"。
+    expect(find.byIcon(Icons.delete_forever), findsNWidgets(2));
   });
 
   testWidgets('恢复：调用核心 restoreItem，条目从回收站消失并提示', (tester) async {
     api.trash['t1'] = trashed();
     await pumpTrash(tester);
 
-    await tester.tap(find.text(l10n.trashRestore));
+    await tester.tap(find.byTooltip(l10n.trashRestore));
     await tester.pumpAndSettle();
 
     expect(api.calls, contains('restoreItem'));

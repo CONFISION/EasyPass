@@ -229,6 +229,8 @@ void main() {
     testWidgets('空表显示占位', (tester) async {
       await pumpAudit(tester);
       expect(find.text(l10n.agentAuditEmpty), findsOneWidget);
+      // 标题旁的活动图标（用户要求补上）。
+      expect(find.byIcon(Icons.smart_toy_outlined), findsOneWidget);
     });
 
     testWidgets('新审计记录通过主题推送实时出现在页面上（不用手动刷新）', (tester) async {

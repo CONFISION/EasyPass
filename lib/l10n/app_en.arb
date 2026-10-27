@@ -74,6 +74,8 @@
     }
   },
   "folderActions": "Folder actions",
+  "entryActions": "Entry actions",
+  "entryActionEdit": "Edit",
   "deleteFolderNotEmptyMessage": "Delete \"{name}\"? It still contains {count} entries. They will NOT be deleted — they move to \"No Folder\". This cannot be undone.",
   "@deleteFolderNotEmptyMessage": {
     "placeholders": {

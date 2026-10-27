@@ -176,6 +176,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get folderActions => '文件夹操作';
 
   @override
+  String get entryActions => '条目操作';
+
+  @override
+  String get entryActionEdit => '编辑';
+
+  @override
   String deleteFolderNotEmptyMessage(String name, int count) {
     return '删除“$name”？里面还有 $count 个条目。**这些条目不会被删除**，它们会被移到“无文件夹”。此操作无法撤销。';
   }

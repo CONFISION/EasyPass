@@ -416,6 +416,18 @@ abstract class AppLocalizations {
   /// **'Folder actions'**
   String get folderActions;
 
+  /// No description provided for @entryActions.
+  ///
+  /// In en, this message translates to:
+  /// **'Entry actions'**
+  String get entryActions;
+
+  /// No description provided for @entryActionEdit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get entryActionEdit;
+
   /// No description provided for @deleteFolderNotEmptyMessage.
   ///
   /// In en, this message translates to:

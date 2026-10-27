@@ -203,7 +203,7 @@ void main() {
         reason: '没启用智能体访问时不该出现这个入口');
   });
 
-  testWidgets('开启智能体访问后：智能体活动出现在回收站上方', (tester) async {
+  testWidgets('开启智能体访问后：智能体活动出现在回收站上方，且有图标', (tester) async {
     api.agentEnabled = true;
     final l10n = await pumpVaultScreen(tester);
 
@@ -211,6 +211,49 @@ void main() {
     final activityY = tester.getTopLeft(find.text(l10n.agentAuditTitle)).dy;
     final trashY = tester.getTopLeft(find.text(l10n.trashTitle)).dy;
     expect(activityY, lessThan(trashY), reason: '活动页面在回收站上方');
+    // 入口必须有图标（用户反馈这里之前是光秃秃的文字）。
+    expect(
+      find.descendant(
+        of: find.ancestor(
+          of: find.text(l10n.agentAuditTitle),
+          matching: find.byType(ListTile),
+        ),
+        matching: find.byIcon(Icons.smart_toy_outlined),
+      ),
+      findsOneWidget,
+      reason: '「智能体活动」入口旁边要有图标',
+    );
+  });
+
+  testWidgets('条目右键：弹出编辑 / 删除菜单（不用先进详情页）', (tester) async {
+    await seedFourTypes();
+    final l10n = await pumpVaultScreen(tester);
+
+    await tester.tap(find.text('GitHub 登录'), buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text(l10n.entryActionEdit), findsOneWidget);
+    expect(find.text(l10n.delete), findsOneWidget);
+  });
+
+  testWidgets('条目 ⋮ → 删除：进回收站，并给一次撤销机会', (tester) async {
+    await seedFourTypes();
+    final l10n = await pumpVaultScreen(tester);
+
+    await tester.tap(find.byTooltip(l10n.entryActions).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(l10n.delete));
+    await tester.pumpAndSettle();
+
+    expect(find.text(l10n.deleteEntryTitle), findsOneWidget);
+    await tester.tap(find.text(l10n.trashMoveAction));
+    await tester.pumpAndSettle();
+
+    expect(api.calls, contains('deleteItem'));
+    expect(api.trash.containsKey('login-1'), isTrue,
+        reason: '删除 = 软删进回收站');
+    expect(find.text(l10n.trashMoved), findsOneWidget);
+    expect(find.text(l10n.undo), findsOneWidget);
   });
 
   testWidgets('最小窗口尺寸下无溢出；侧边栏固定 248 且没有生成器入口', (tester) async {

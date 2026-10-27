@@ -15,11 +15,22 @@ class EntryCard extends StatelessWidget {
   /// 复制密码；只有登录条目会真正渲染出按钮（见 [VaultItem.isAutofillable]）。
   final VoidCallback? onCopyPassword;
 
+  /// 右键菜单（编辑 / 删除）；null 时不接管右键。
+  final VoidCallback? onSecondaryTap;
+
+  /// 可见的"更多操作"按钮（右键菜单的鼠标等价入口）。
+  ///
+  /// 桌面端纪律：右键要能用；但纯右键功能不好发现，所以 `onMore != null` 时
+  /// 把 chevron 换成 ⋮，点它和右键弹同一个菜单。
+  final VoidCallback? onMore;
+
   const EntryCard({
     super.key,
     required this.item,
     required this.onTap,
     this.onCopyPassword,
+    this.onSecondaryTap,
+    this.onMore,
   });
 
   @override
@@ -33,7 +44,7 @@ class EntryCard extends StatelessWidget {
     // 复制按钮只在登录条目出现：其余类型没有"密码"可复制。
     final showCopyButton = item.isAutofillable && onCopyPassword != null;
 
-    return Card(
+    final card = Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: ListTile(
         // 每类一个图标 + 一份强调色：登录=地球、笔记=便签、身份=证件、SSH=终端。
@@ -93,14 +104,33 @@ class EntryCard extends StatelessWidget {
                 onPressed: onCopyPassword,
                 tooltip: l10n.copyPasswordTooltip,
               ),
-            Icon(
-              Icons.chevron_right,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            if (onMore != null)
+              IconButton(
+                icon: Icon(
+                  Icons.more_vert,
+                  size: 20,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                onPressed: onMore,
+                tooltip: l10n.entryActions,
+              )
+            else
+              Icon(
+                Icons.chevron_right,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
           ],
         ),
         onTap: onTap,
       ),
+    );
+
+    final secondaryTap = onSecondaryTap;
+    if (secondaryTap == null) return card;
+    // 右键 = 同一个"编辑 / 删除"菜单（桌面用户的习惯路径）。
+    return GestureDetector(
+      onSecondaryTapDown: (_) => secondaryTap(),
+      child: card,
     );
   }
 }

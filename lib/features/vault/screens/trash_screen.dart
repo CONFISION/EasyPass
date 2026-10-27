@@ -133,10 +133,12 @@ class TrashScreen extends ConsumerWidget {
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              TextButton.icon(
+              // 恢复与彻底删除都用图标按钮：之前一个是文字、一个是图标，
+              // 视觉上不齐（用户指出）。
+              IconButton(
+                tooltip: l10n.trashRestore,
+                icon: Icon(Icons.restore, color: scheme.primary),
                 onPressed: () => _restore(context, ref, item),
-                icon: const Icon(Icons.restore, size: 18),
-                label: Text(l10n.trashRestore),
               ),
               IconButton(
                 tooltip: l10n.trashDeletePermanently,

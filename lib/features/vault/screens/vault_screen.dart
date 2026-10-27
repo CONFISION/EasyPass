@@ -322,6 +322,10 @@ class VaultScreen extends ConsumerWidget {
                 return EntryCard(
                   item: item,
                   onTap: () => context.push('/vault/entry/${item.id}'),
+                  // 右键 / ⋮ = 编辑 / 删除，不用先进详情页。
+                  onSecondaryTap: () =>
+                      _showEntryActions(context, ref, item),
+                  onMore: () => _showEntryActions(context, ref, item),
                   // 只有登录条目给"复制密码"。
                   onCopyPassword: item.isAutofillable
                       ? () => _copyPassword(context, item)
@@ -545,8 +549,10 @@ class VaultScreen extends ConsumerWidget {
             const Divider(height: 1),
             if (agentEnabled)
               ListTile(
+                // 用 smart_toy 而不是 Icons.history：与本应用其它"智能体"
+                // 图标一致；history 字形在这个构建里没渲染出来（用户实测）。
                 leading: Icon(
-                  Icons.history,
+                  Icons.smart_toy_outlined,
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
                 title: Text(
@@ -703,6 +709,138 @@ class VaultScreen extends ConsumerWidget {
       onPressed: onSelected,
       tooltip: iconName,
     );
+  }
+
+  /// 条目的右键 / ⋮ 菜单：编辑 / 删除。
+  ///
+  /// 与文件夹菜单同一套 bottom-sheet 风格（窄窗不溢出、条目定宽），
+  /// 这样桌面端"右键文件夹"和"右键条目"看到的是同一种东西。
+  void _showEntryActions(BuildContext context, WidgetRef ref, VaultItem item) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final accent = EntryTypeBits.color(item.type);
+
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: accent.withValues(alpha: 0.14),
+                    child: Icon(
+                      EntryTypeBits.icon(item.type),
+                      size: 18,
+                      color: accent,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      item.name,
+                      style: theme.textTheme.titleMedium,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: Text(l10n.entryActionEdit),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                context.push('/vault/edit/${item.id}');
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.delete_outline,
+                  color: theme.colorScheme.error),
+              title: Text(
+                l10n.delete,
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _confirmDeleteEntry(context, ref, item);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 列表内删除：移入回收站，并给一次「撤销」机会（与详情页/编辑页语义一致）。
+  Future<void> _confirmDeleteEntry(
+    BuildContext context,
+    WidgetRef ref,
+    VaultItem item,
+  ) async {
+    final l10n = AppLocalizations.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final api = ref.read(vaultApiProvider);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final scheme = Theme.of(ctx).colorScheme;
+        return AlertDialog(
+          title: Text(l10n.deleteEntryTitle),
+          content: Text(l10n.deleteEntryMessage),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(l10n.cancel),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: FilledButton.styleFrom(backgroundColor: scheme.error),
+              child: Text(l10n.trashMoveAction),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) return;
+
+    try {
+      // 软删（进回收站）；失败会抛异常，统一走下面的 catch。
+      await api.deleteItem(item.id);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(l10n.trashMoved),
+          // 带 action 的 SnackBar 默认 persist=true（永不消失），显式关掉。
+          persist: false,
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: l10n.undo,
+            onPressed: () async {
+              try {
+                await api.restoreItem(item.id);
+                messenger.showSnackBar(
+                  SnackBar(content: Text(l10n.trashRestored(item.name))),
+                );
+              } catch (_) {
+                // 恢复失败（例如已在回收站里被彻底删除）不打扰。
+              }
+            },
+          ),
+        ),
+      );
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(l10n.failedWithError('$error'))),
+      );
+    }
   }
 
   /// 文件夹的长按菜单：重命名 / 删除。
