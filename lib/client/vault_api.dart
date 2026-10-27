@@ -116,6 +116,34 @@ abstract class VaultApi {
 
   Future<Map<String, dynamic>> importVault(String format, String path);
 
+  // ─── 智能体访问（3.1.0）─────────────────────────────────
+
+  /// 智能体域是否已解锁。
+  Future<bool> agentDomainUnlocked();
+
+  /// 配对列表（**不含密钥哈希**）。
+  Future<List<Map<String, dynamic>>> listAgentPairings();
+
+  /// 创建配对：返回的 `key` **只出现这一次**，之后库里只有哈希。
+  Future<Map<String, dynamic>> createAgentPairing({
+    required String nickname,
+    required String mode,
+  });
+
+  Future<void> revokeAgentPairing(String id);
+
+  /// 切换访问方式；`mode == 'trusted'` 时必须给 [password]（核心二次校验）。
+  Future<void> setAgentAccessMode({
+    required String id,
+    required String mode,
+    String? password,
+  });
+
+  /// 用主密码解锁智能体域（显式用户动作）。
+  Future<void> unlockAgentDomain(String password);
+
+  Future<void> lockAgentDomain();
+
   // ─── 变更通知 ──────────────────────────────────────────
 
   /// 主题流（`items` / `item` / `folders` / `search`）。

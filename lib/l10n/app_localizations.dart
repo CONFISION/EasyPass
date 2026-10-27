@@ -1934,6 +1934,156 @@ abstract class AppLocalizations {
   /// **'EasyPass does not start automatically. Toggle to launch it at login.'**
   String get autostartSubtitleDisabled;
 
+  /// No description provided for @agentAccessSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent access'**
+  String get agentAccessSection;
+
+  /// No description provided for @agentAccessTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent access (MCP)'**
+  String get agentAccessTitle;
+
+  /// No description provided for @agentAccessSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair AI agents, choose how they may act, and decide per entry what they can read.'**
+  String get agentAccessSubtitle;
+
+  /// No description provided for @agentDomainLocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent session is locked'**
+  String get agentDomainLocked;
+
+  /// No description provided for @agentDomainUnlocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent session is unlocked'**
+  String get agentDomainUnlocked;
+
+  /// No description provided for @agentUnlock.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlock for agents'**
+  String get agentUnlock;
+
+  /// No description provided for @agentLock.
+  ///
+  /// In en, this message translates to:
+  /// **'Lock agent session'**
+  String get agentLock;
+
+  /// No description provided for @agentPairings.
+  ///
+  /// In en, this message translates to:
+  /// **'Paired agents'**
+  String get agentPairings;
+
+  /// No description provided for @agentNoPairings.
+  ///
+  /// In en, this message translates to:
+  /// **'No agent is paired yet.'**
+  String get agentNoPairings;
+
+  /// No description provided for @agentCreatePairing.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair an agent'**
+  String get agentCreatePairing;
+
+  /// No description provided for @agentPairingNickname.
+  ///
+  /// In en, this message translates to:
+  /// **'Nickname (shown in the audit log)'**
+  String get agentPairingNickname;
+
+  /// No description provided for @agentModeApproval.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask every time'**
+  String get agentModeApproval;
+
+  /// No description provided for @agentModeTrusted.
+  ///
+  /// In en, this message translates to:
+  /// **'Trusted (no prompts, fully audited)'**
+  String get agentModeTrusted;
+
+  /// No description provided for @agentModeSwitch.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch mode'**
+  String get agentModeSwitch;
+
+  /// No description provided for @agentRevoke.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoke'**
+  String get agentRevoke;
+
+  /// No description provided for @agentRevokeConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoke this pairing? The agent loses access immediately.'**
+  String get agentRevokeConfirm;
+
+  /// No description provided for @agentKeyOnceTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Paste this key into your MCP client'**
+  String get agentKeyOnceTitle;
+
+  /// No description provided for @agentKeyOnceMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'It is shown only once. EasyPass stores just a hash.'**
+  String get agentKeyOnceMessage;
+
+  /// No description provided for @agentCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Key copied to clipboard'**
+  String get agentCopied;
+
+  /// No description provided for @agentMasterPasswordPrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm with your master password'**
+  String get agentMasterPasswordPrompt;
+
+  /// No description provided for @agentConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Confirm'**
+  String get agentConfirm;
+
+  /// Shown when an agent-access action (pair, revoke, switch mode, unlock) fails. {detail} is the diagnostic message.
+  ///
+  /// In en, this message translates to:
+  /// **'Operation failed: {detail}'**
+  String agentActionFailed(String detail);
+
+  /// No description provided for @agentAccessEntryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Accessible to agents'**
+  String get agentAccessEntryTitle;
+
+  /// No description provided for @agentAccessEntryOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Open — agents may read this entry (metadata only).'**
+  String get agentAccessEntryOpen;
+
+  /// No description provided for @agentAccessEntryDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Permanently denied — agents can never read it.'**
+  String get agentAccessEntryDenied;
+
   /// No description provided for @autostartUnsupported.
   ///
   /// In en, this message translates to:

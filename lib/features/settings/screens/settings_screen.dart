@@ -11,6 +11,7 @@ import '../../../data/services/font_discovery_service.dart';
 import '../../desktop_autostart/desktop_autostart.dart';
 import '../providers/font_settings_provider.dart';
 import '../providers/theme_provider.dart';
+import 'agent_access_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -111,6 +112,19 @@ class SettingsScreen extends ConsumerWidget {
                   onTap: () => _pickLanguage(context, ref),
                 ),
                 const Divider(),
+                _buildSectionHeader(context, l10n.agentAccessSection),
+                ListTile(
+                  leading: const Icon(Icons.smart_toy_outlined),
+                  title: Text(l10n.agentAccessTitle),
+                  subtitle: Text(l10n.agentAccessSubtitle),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const AgentAccessScreen(),
+                    ),
+                  ),
+                ),
+                const Divider(),
                 _buildSectionHeader(
                   context,
                   l10n.dangerZoneSection,
@@ -133,7 +147,7 @@ class SettingsScreen extends ConsumerWidget {
                 ListTile(
                   leading: const Icon(Icons.info),
                   title: Text(l10n.version),
-                  subtitle: Text('3.0.0'),
+                  subtitle: Text('3.1.0'),
                 ),
                 ListTile(
                   leading: const Icon(Icons.code),

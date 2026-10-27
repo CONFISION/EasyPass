@@ -20,7 +20,7 @@
 ; fails with "Source file ... does not exist" when it was never built.
 
 #define MyAppName "EasyPass"
-#define MyAppVersion "3.0.0"
+#define MyAppVersion "3.1.0"
 #define MyAppPublisher "easypass.com"
 #define MyAppExeName "easypass.exe"
 #define MyAppId "{{8F1E5B2A-6C4D-4E9F-9A1B-2C3D4E5F6071}"
@@ -68,8 +68,8 @@ AppCopyright=Copyright (C) 2026 easypass.com
 ; Version resource of the generated Setup.exe. BOTH fields must track
 ; MyAppVersion -- check_extension.mjs asserts them. It used to check only
 ; VersionInfoVersion, which is how ProductVersion stayed behind at 2.4.0.0.
-VersionInfoVersion=3.0.0.0
-VersionInfoProductVersion=3.0.0.0
+VersionInfoVersion=3.1.0.0
+VersionInfoProductVersion=3.1.0.0
 VersionInfoProductName=EasyPass
 VersionInfoDescription=EasyPass Password Manager Installer
 DefaultDirName={localappdata}\Programs\EasyPass

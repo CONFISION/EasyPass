@@ -539,6 +539,85 @@ class FakeVaultApi implements VaultApi {
     calls.add('touchActivity');
     // 真核心只续期 ui 域（bridge 域独立），这里只记录调用。
   }
+
+  // ─── 智能体访问（内存版：只记录调用，够 UI 测试用）────────
+
+  /// 假实现里的配对列表（`createAgentPairing` 会往里加）。
+  final List<Map<String, dynamic>> agentPairings = <Map<String, dynamic>>[];
+
+  bool agentUnlocked = false;
+
+  @override
+  Future<bool> agentDomainUnlocked() async {
+    calls.add('agentDomainUnlocked');
+    return agentUnlocked;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listAgentPairings() async {
+    calls.add('listAgentPairings');
+    return List<Map<String, dynamic>>.from(agentPairings);
+  }
+
+  @override
+  Future<Map<String, dynamic>> createAgentPairing({
+    required String nickname,
+    required String mode,
+  }) async {
+    calls.add('createAgentPairing');
+    final id = 'p_${agentPairings.length + 1}';
+    final key = 'key-$id';
+    agentPairings.add({
+      'id': id,
+      'nickname': nickname,
+      'mode': mode,
+      'trusted': mode == 'trusted',
+      'revoked': false,
+      'createdAt': 0,
+      'lastUsedAt': null,
+      'calls': 0,
+    });
+    return {'id': id, 'key': key, 'nickname': nickname, 'mode': mode};
+  }
+
+  @override
+  Future<void> revokeAgentPairing(String id) async {
+    calls.add('revokeAgentPairing');
+    for (final pairing in agentPairings) {
+      if (pairing['id'] == id) pairing['revoked'] = true;
+    }
+    agentUnlocked = false;
+  }
+
+  @override
+  Future<void> setAgentAccessMode({
+    required String id,
+    required String mode,
+    String? password,
+  }) async {
+    calls.add('setAgentAccessMode');
+    for (final pairing in agentPairings) {
+      if (pairing['id'] != id) continue;
+      pairing['mode'] = mode;
+      pairing['trusted'] = mode == 'trusted' && (password ?? '').isNotEmpty;
+    }
+    agentUnlocked = mode == 'trusted' && (password ?? '').isNotEmpty;
+  }
+
+  @override
+  Future<void> unlockAgentDomain(String password) async {
+    calls.add('unlockAgentDomain');
+    if (password.isEmpty) {
+      throw VaultApiException(ErrorCodes.unauthorized, '主密码不正确');
+    }
+    agentUnlocked = true;
+  }
+
+  @override
+  Future<void> lockAgentDomain() async {
+    calls.add('lockAgentDomain');
+    agentUnlocked = false;
+  }
 }
 
 

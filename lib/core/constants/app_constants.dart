@@ -79,7 +79,7 @@ class AppConstants {
   ///
   /// M7 时与 `pubspec.yaml` / 设置页 / 扩展 manifest / `.iss` 四处同步；
   /// 目前带 `-dev` 后缀，表示尚未进入发布流程。
-  static const String coreVersion = '3.0.0';
+  static const String coreVersion = '3.1.0';
 
   /// 核心服务的**固定回环端口**：既是单实例闸门（第二个核心 bind 会失败），
   /// 也是 `daemon.json` 之外"核心是否在跑"的一条旁证。

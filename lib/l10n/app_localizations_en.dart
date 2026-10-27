@@ -1009,6 +1009,88 @@ class AppLocalizationsEn extends AppLocalizations {
       'EasyPass does not start automatically. Toggle to launch it at login.';
 
   @override
+  String get agentAccessSection => 'Agent access';
+
+  @override
+  String get agentAccessTitle => 'Agent access (MCP)';
+
+  @override
+  String get agentAccessSubtitle =>
+      'Pair AI agents, choose how they may act, and decide per entry what they can read.';
+
+  @override
+  String get agentDomainLocked => 'Agent session is locked';
+
+  @override
+  String get agentDomainUnlocked => 'Agent session is unlocked';
+
+  @override
+  String get agentUnlock => 'Unlock for agents';
+
+  @override
+  String get agentLock => 'Lock agent session';
+
+  @override
+  String get agentPairings => 'Paired agents';
+
+  @override
+  String get agentNoPairings => 'No agent is paired yet.';
+
+  @override
+  String get agentCreatePairing => 'Pair an agent';
+
+  @override
+  String get agentPairingNickname => 'Nickname (shown in the audit log)';
+
+  @override
+  String get agentModeApproval => 'Ask every time';
+
+  @override
+  String get agentModeTrusted => 'Trusted (no prompts, fully audited)';
+
+  @override
+  String get agentModeSwitch => 'Switch mode';
+
+  @override
+  String get agentRevoke => 'Revoke';
+
+  @override
+  String get agentRevokeConfirm =>
+      'Revoke this pairing? The agent loses access immediately.';
+
+  @override
+  String get agentKeyOnceTitle => 'Paste this key into your MCP client';
+
+  @override
+  String get agentKeyOnceMessage =>
+      'It is shown only once. EasyPass stores just a hash.';
+
+  @override
+  String get agentCopied => 'Key copied to clipboard';
+
+  @override
+  String get agentMasterPasswordPrompt => 'Confirm with your master password';
+
+  @override
+  String get agentConfirm => 'Confirm';
+
+  @override
+  String agentActionFailed(String detail) {
+    return 'Operation failed: $detail';
+  }
+
+  @override
+  String get agentAccessEntryTitle => 'Accessible to agents';
+
+  @override
+  String get agentAccessEntryOpen =>
+      'Open — agents may read this entry (metadata only).';
+
+  @override
+  String get agentAccessEntryDenied =>
+      'Permanently denied — agents can never read it.';
+
+  @override
   String get autostartUnsupported =>
       'Managed by the OS installer on this platform.';
 

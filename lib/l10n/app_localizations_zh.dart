@@ -989,6 +989,83 @@ class AppLocalizationsZh extends AppLocalizations {
   String get autostartSubtitleDisabled => '登录后不会自动启动 EasyPass。打开开关即可在登录时启动。';
 
   @override
+  String get agentAccessSection => '智能体访问';
+
+  @override
+  String get agentAccessTitle => '智能体访问（MCP）';
+
+  @override
+  String get agentAccessSubtitle => '配对 AI 智能体、选择它们能怎么动，并按条目决定它们能读到什么。';
+
+  @override
+  String get agentDomainLocked => '智能体会话已锁定';
+
+  @override
+  String get agentDomainUnlocked => '智能体会话已解锁';
+
+  @override
+  String get agentUnlock => '为智能体解锁';
+
+  @override
+  String get agentLock => '锁定智能体会话';
+
+  @override
+  String get agentPairings => '已配对智能体';
+
+  @override
+  String get agentNoPairings => '还没有配对任何智能体。';
+
+  @override
+  String get agentCreatePairing => '配对智能体';
+
+  @override
+  String get agentPairingNickname => '昵称（会出现在审计日志里）';
+
+  @override
+  String get agentModeApproval => '每次询问';
+
+  @override
+  String get agentModeTrusted => '可信（不逐次询问，全程审计）';
+
+  @override
+  String get agentModeSwitch => '切换方式';
+
+  @override
+  String get agentRevoke => '撤销';
+
+  @override
+  String get agentRevokeConfirm => '撤销这个配对？该智能体会立刻失去访问权。';
+
+  @override
+  String get agentKeyOnceTitle => '把下面这把密钥填进 MCP 客户端';
+
+  @override
+  String get agentKeyOnceMessage => '只显示这一次；EasyPass 只保存哈希。';
+
+  @override
+  String get agentCopied => '密钥已复制到剪贴板';
+
+  @override
+  String get agentMasterPasswordPrompt => '用主密码确认';
+
+  @override
+  String get agentConfirm => '确认';
+
+  @override
+  String agentActionFailed(String detail) {
+    return '操作失败：$detail';
+  }
+
+  @override
+  String get agentAccessEntryTitle => '允许智能体访问';
+
+  @override
+  String get agentAccessEntryOpen => '开放 —— 智能体可读取该条目（仅元数据）。';
+
+  @override
+  String get agentAccessEntryDenied => '永久拒绝 —— 智能体永远读不到它。';
+
+  @override
   String get autostartUnsupported => '本平台的自启由操作系统安装器管理。';
 
   @override

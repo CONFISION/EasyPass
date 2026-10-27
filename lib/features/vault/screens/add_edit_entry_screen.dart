@@ -138,6 +138,9 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
   bool _obscurePrivateKey = true;
   bool _obscurePassphrase = true;
   bool _isFavorite = false;
+
+  /// 智能体可访问性（默认 false = 永久拒绝）。落在加密载荷里，不是明文列。
+  bool _agentOpen = false;
   bool _isSaving = false;
   bool _isLoading = false;
   bool _notFound = false;
@@ -242,6 +245,7 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
       _type = item.type;
       _selectedFolderId = item.folderId;
       _isFavorite = item.isFavorite;
+      _agentOpen = item.agentOpen;
       _nameController.text = item.name;
       _notesController.text = item.notes;
       _customFields = item.customFields;
@@ -394,6 +398,7 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
       name: _nameController.text.trim(),
       notes: _notesController.text,
       isFavorite: _isFavorite,
+      agentOpen: _agentOpen,
       // 只给当前类型挂字段块：其它类型一律 null，
       // mapper 归一化后不会往库里写出任何"外来"数据。
       login: _type == EntryType.login
@@ -1094,6 +1099,20 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
                           value: _isFavorite,
                           onChanged: (value) =>
                               setState(() => _isFavorite = value),
+                        ),
+                        const SizedBox(height: 8),
+                        // 智能体可访问性：默认关闭 = 永久拒绝。
+                        // 只有打开的条目才会出现在智能体的 `list_entries` 里。
+                        SwitchListTile(
+                          title: Text(l10n.agentAccessEntryTitle),
+                          subtitle: Text(
+                            _agentOpen
+                                ? l10n.agentAccessEntryOpen
+                                : l10n.agentAccessEntryDenied,
+                          ),
+                          value: _agentOpen,
+                          onChanged: (value) =>
+                              setState(() => _agentOpen = value),
                         ),
                         const SizedBox(height: 8),
                         KeyedSubtree(

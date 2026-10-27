@@ -358,6 +358,64 @@ class CoreVaultApi implements VaultApi {
   Future<Map<String, dynamic>> importVault(String format, String path) =>
       _call(Actions.importVault, {'format': format, 'path': path});
 
+  // ─── 智能体访问 ────────────────────────────────────────
+
+  @override
+  Future<bool> agentDomainUnlocked() async {
+    final data = await _call(Actions.getAgentAccessState);
+    return data['agentUnlocked'] == true;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listAgentPairings() async {
+    final data = await _call(Actions.listAgentPairings);
+    final raw = data['pairings'];
+    if (raw is! List) return const [];
+    return [
+      for (final item in raw)
+        if (item is Map) Map<String, dynamic>.from(item),
+    ];
+  }
+
+  @override
+  Future<Map<String, dynamic>> createAgentPairing({
+    required String nickname,
+    required String mode,
+  }) {
+    return _call(Actions.createAgentPairing, {
+      'nickname': nickname,
+      'mode': mode,
+    });
+  }
+
+  @override
+  Future<void> revokeAgentPairing(String id) async {
+    await _call(Actions.revokeAgentPairing, {'id': id});
+  }
+
+  @override
+  Future<void> setAgentAccessMode({
+    required String id,
+    required String mode,
+    String? password,
+  }) async {
+    await _call(Actions.setAgentAccessMode, {
+      'id': id,
+      'mode': mode,
+      'password': ?password,
+    });
+  }
+
+  @override
+  Future<void> unlockAgentDomain(String password) async {
+    await _call(Actions.unlockAgentDomain, {'password': password});
+  }
+
+  @override
+  Future<void> lockAgentDomain() async {
+    await _call(Actions.lockAgentDomain);
+  }
+
   List<VaultItem> _items(Map<String, dynamic> data) {
     final raw = data['items'];
     if (raw is! List) return const [];
