@@ -27,6 +27,14 @@ browser. Long-term goal: a self-hostable Bitwarden alternative.
 - **Desktop integration** — tray, close-to-tray that **locks the vault**, two exit
   levels (UI only / UI and core), start at logon, auto-lock (1 / 3 / 5 / 15 / 30 / 60
   minutes).
+- **Trash** — deleting moves an entry to the trash (soft delete): restore, delete for
+  good, or empty the trash; a delete also offers a one-click Undo.
+- **Agent access (MCP, opt-in)** — the core can expose a loopback-only MCP endpoint so a
+  paired AI agent can read metadata of entries marked *open*, create/update entries, and
+  move entries to the trash (never delete permanently), and push field values to the
+  **system clipboard** (plaintext never enters the model context; there is no reveal
+  tool). Off by default; ask-every-time approval or trusted pass-through; every call is
+  audited.
 - **Local by design** — no account, no server, no telemetry; the master password is
   never stored (PBKDF2-HMAC-SHA256 + AES-256-CBC, see [SECURITY.md](SECURITY.md)).
 

@@ -161,7 +161,7 @@ s2cEnc  = okm[64..96)    s2cMac = okm[96..128)
 
 | 角色 | 白名单 | 说明 |
 | --- | --- | --- |
-| `ui` | **39 个动作**（见 §5） | 完整客户端面；连接一定是加密的 |
+| `ui` | **43 个动作**（见 §5） | 完整客户端面；连接一定是加密的 |
 | `bridge` | **10 个动作**（见 §6） | 形状冻结；可能是明文（x86 桥） |
 | `agent` | **0 个动作**（空集合） | 独立会话域；智能体走核心自己的 HTTP MCP 端点（`127.0.0.1:47821`，见 §5.7 与 `technical-spec.md` §12），**不从本协议发帧动作** |
 
@@ -169,7 +169,7 @@ s2cEnc  = okm[64..96)    s2cMac = okm[96..128)
 
 ---
 
-## 5. UI 域动作（39 个）
+## 5. UI 域动作（43 个）
 
 ### 5.1 会话 / 认证
 
@@ -204,7 +204,7 @@ s2cEnc  = okm[64..96)    s2cMac = okm[96..128)
 | 动作 | 参数 | 返回 |
 | --- | --- | --- |
 | `saveItem` | `item`（`VaultItemJson`） | `{id}` |
-| `deleteItem` | `id` | `{ok: true}` |
+| `deleteItem` | `id` | `{ok: true, trashed: true}` —— **语义=移到回收站**（schema 5 起是软删，可恢复；见 §5.8） |
 | `addFolder` | `name`、`icon?`（默认 `folder`） | `{id}` |
 | `updateFolder` | `id`、`name?`、`icon?` | `{ok: true}` |
 | `removeFolder` | `id` | `{ok: true, unassigned}`（条目**保留**并解绑） |
@@ -274,7 +274,22 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 | `listAgentAudit` | `limit?`（1–500，默认 100） | `{entries: [{at, nickname, mode, tool, op, entryId, entryName, decision}], total}` |
 
 > 配对密钥（`key`）库里只存 SHA-256；UI 只在创建那一次展示/复制它。
-> 审计的 `decision` 目前取 `allowed` / `denied` / `timeout`（见 `data-model.md` §2.2 的待补项）。
+> 审计的 `decision` 取 `allowed` / `allowed_standing`（「本会话内允许读取」放行）/
+> `denied` / `timeout` / `error`（执行失败兜底；一次调用只写一行）。
+
+### 5.8 回收站（4 个，3.1.0 / schema 5）
+
+删除 = 移到回收站（软删）；彻底删除只存在于这组 UI 动作，**不在智能体工具面里**。
+
+| 动作 | 参数 | 返回 |
+| --- | --- | --- |
+| `listTrash` | — | `{items: [VaultItemJson…]}`（**完整明文**，与 `listItems` 同形状；回收站界面要显示条目信息） |
+| `restoreItem` | `id` | `{ok: true}`；不在回收站 / 不存在 ⇒ `notFound` |
+| `permanentlyDeleteItem` | `id` | `{ok: true}`；**只接受回收站里的条目**，正常条目 ⇒ `notFound` |
+| `emptyTrash` | — | `{ok: true, deleted: n}` |
+
+语义细节见 `data-model.md` §2.0：列表 / 搜索 / 健康 / 计数 / 导出默认排除回收站；
+主密码轮换仍会重新加密回收站里的行。
 
 ---
 
@@ -384,8 +399,8 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 | 改变某动作的语义或响应形状 | ✅ 需要 |
 | 改变握手/加密方式 | ✅ 需要 |
 
-**3.1.0 的 12 个智能体动作**（§5.7）与 `agentApprovalRequested` 事件属于"新增动作 / 新增事件"，
-**协议版本仍是 5**，旧客户端不认就忽略；不用改 `EXPECTED_PROTOCOL_VERSION`。
+**3.1.0 的智能体动作**（§5.7）**、回收站动作**（§5.8）与 `agentApprovalRequested` 事件属于
+"新增动作 / 新增事件"，**协议版本仍是 5**，旧客户端不认就忽略；不用改 `EXPECTED_PROTOCOL_VERSION`。
 
 **协议 5 的破坏点**（相对 4）：握手改为 nonce + 双向 HMAC 证明（令牌不再上线）、
 握手末帧起全帧加密、`role: ui|agent` 禁止明文连接。v5 核心对旧客户端回 `unsupported`。

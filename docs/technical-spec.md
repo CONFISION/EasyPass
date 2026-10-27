@@ -371,8 +371,9 @@ node browser_extension/tools/build_extension_zip.mjs --dry-run   # 扩展包到�
 ### 12.1 一句话
 
 核心进程内跑一个只监听 `127.0.0.1` 的 MCP 端点（Streamable HTTP）。默认**关闭**；
-打开后，被配对过的智能体可以**零介入**读"开放"条目的**元数据**，并把字段值直接
-送进**系统剪贴板**（明文不进模型上下文）。
+打开后，被配对过的智能体可以**零介入**读"开放"条目的**元数据**、把字段值直接
+送进**系统剪贴板**（明文不进模型上下文），也可以**新建 / 修改 / 删除条目** ——
+其中"删除"只是移入**回收站**，且敏感操作在方式 1 下都要用户逐次同意。
 
 ### 12.2 打开总开关
 
@@ -408,6 +409,8 @@ node browser_extension/tools/build_extension_zip.mjs --dry-run   # 扩展包到�
 
 - 方式 1 的「本会话内允许读取」**只对普通读生效**；敏感读（复制到剪贴板）、写、删
   永远每次都要同意 —— 否则它就是绕过审批的后门；
+- 写 / 删的弹窗多一行**「详细」**（例如"修改字段：url、password"、"移到回收站（可恢复）"），
+  **只列字段名与动作，绝不显示值**（密码不会出现在屏幕上）；
 - 审批弹窗挂在应用外壳上，跳到任何页面都会弹出；**关掉弹窗 = 拒绝**；
 - 审批超时 45 秒（短于客户端的 `tools/call` 超时）按拒绝处理；
 - 核心在没有 UI 可问时直接拒绝（fail closed）。
@@ -446,19 +449,35 @@ claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
 > Claude Desktop **连不上**：它的远程连接器由 Anthropic 云端发起，到不了 `127.0.0.1`；
 > 本地配置又只支持 stdio。这是客户端限制，不是 EasyPass 的问题。
 
-### 12.5 工具清单（6 个，静态）
+### 12.5 工具清单（11 个，静态）
 
 | 工具 | 作用 |
 | --- | --- |
-| `status` | 配对状态、是否解锁、可见条目数、活动窗口 |
+| `status` | 配对状态、是否解锁、**开放条目数**、活动窗口 |
 | `begin_session` | 开一个批量窗口（`purpose` 必填，TTL 30–1800 秒），窗口内不因空闲被打断 |
 | `end_session` | 关闭窗口（**不锁** agent 域，零介入语义） |
 | `list_entries` | 条目**元数据**（名称/类型/文件夹/URL/用户名/有无密码/有无 TOTP） |
 | `get_entry` | 单条元数据 |
+| `create_entry` | 新建 login / secure_note；`password: {"generate": true}` 让核心生成并加密入库，**明文不回传** |
+| `update_entry` | 局部更新（没传的字段不动）；只改 login / secure_note 的字段 |
+| `delete_entry` | **移入回收站**（软删，可恢复）；智能体**永远不能彻底删除** |
+| `list_trash` | 回收站里**对智能体开放**的元数据（带删除时间） |
+| `restore_entry` | 从回收站恢复 |
 | `copy_to_clipboard` | 把字段值写进**系统剪贴板**，只回 `ok` + 长度，**不返回明文** |
 
+几条硬口径：
+
+- **写 / 删 / 恢复永远逐次审批**（方式 1 下），「本会话内允许读取」只覆盖普通读；
+- 智能体新建的条目**默认「永久拒绝」**——它不能给自己开访问权限，需用户在 UI 里打开；
+- 审批弹窗对写 / 删会多一行「详细」（**只列字段名与动作**，不含任何值）；
+- 智能体没有"彻底删除 / 清空回收站"的能力：`delete_entry` 只做软删，
+  彻底删除只由用户在 回收站 界面操作；
+- 业务上限：名称 ≤200 字符、备注 ≤100000 字符、单字段 ≤5000 字符、自定义字段 ≤50 个
+  （防止一次调用把库撑爆）。
+
 设置 → **智能体活动**：按时间倒序列出每次访问（昵称 / 工具 / 操作 / 条目 / 结果）。
-数据来自 `agent_audit` 表；**界面同样不显示密钥与明文**（表里也没有）。
+数据来自 `agent_audit` 表；结果分 `allowed` / `allowed_standing`（本会话免询问放行）×
+`denied` / `timeout` / `error`；**界面同样不显示密钥与明文**（表里也没有）。
 
 字段侧：`password` / `totp` / `notes` / `private_key` / `passphrase` / `custom`（配 `customLabel`）。
 
@@ -468,18 +487,32 @@ claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
 开关落在**加密载荷** `EntryPayload.agentAccess` 里，不出现在明文列。
 可见位置：条目编辑页（可改）、条目详情页（只读展示）、条目列表（机器人图标标识）。
 
-- 「永久拒绝」是**硬闸**：任何方式、任何 scope 都读不到、也复制不了；
-- `copy_to_clipboard` 同样受它约束。
+- 「永久拒绝」是**硬闸**：任何方式、任何 scope 都读不到、复制不了、**也改不了、删不掉**；
+- `copy_to_clipboard`、`update_entry`、`delete_entry`、`restore_entry` 同样受它约束。
 
-### 12.7 安全边界（不要过度承诺）
+### 12.7 回收站（schema 5）
+
+**删除 = 移到回收站**（只写 `password_entries.deleted_at`，密文一个字节都不动）：
+
+- 主界面 → 侧边栏底部**回收站**入口：列表（最近删除在前）、**恢复**、**彻底删除**、**清空回收站**；
+- 列表 / 搜索 / 健康报告 / 计数 / 导出**默认全部排除**回收站条目；
+- 回收站里的条目**仍会被主密码轮换重新加密**（否则恢复后永久解不开）；
+- 彻底删除与清空只存在于 UI 动作面（智能体做不到）；
+- 删除时会给一个 SnackBar「已移到回收站 / 撤销」——"删了就没了"是本地密码管理器
+  最不该让用户踩的坑。
+
+### 12.8 安全边界（不要过度承诺）
 
 - 专属密钥由 DPAPI 保护：**别的 Windows 用户、拷贝到别的机器都解不开**；
 - 配对密钥只是 MCP 的**身份凭据**，不参与任何解包 —— 泄露它不能解密数据库；
 - 但**同用户的恶意进程**既读得到 DPAPI blob 也读得到库文件，这是本项目的既有边界；
 - 明文只在"核心 → 系统剪贴板"之间移动，**永远不进模型上下文**；
-- 审计落库在 `agent_audit` 表（schema 4）：只记昵称/工具/条目/结果，**不记密钥、不记明文参数**；表保留最近 **1000** 条（核心启动时裁剪）。
+- 写/删只是改了 `deleted_at` 或密文内容，**恢复语义不扩大攻击面**：能写的前提仍是
+  "条目开放 + 本次用户同意（或可信配对）"；
+- 审计落库在 `agent_audit` 表（schema 4）：只记昵称/工具/条目/结果，**不记密钥、不记明文参数**；
+  表保留最近 **1000** 条（核心启动时裁剪）。
 
-### 12.8 常见排障
+### 12.9 常见排障
 
 | 现象 | 原因 |
 | --- | --- |
@@ -487,6 +520,8 @@ claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
 | `locked` | agent 域没解锁：确认总开关是开的，或重启核心让它自动解封 |
 | 连不上 / 401 | `daemon.json` 里没有 `mcpPort`（没开开关），或密钥被撤销 |
 | 工具里只有部分条目 | 其余条目是「永久拒绝」 |
+| `denied (entryClosed)`（写/删时） | 该条目没有对智能体开放；先去条目编辑页打开开关 |
+| `invalidRequest: 在回收站里` | 改 / 删回收站条目；先 `restore_entry` 或者让用户恢复 |
 | 端口不是 47821 | 固定端口被占用，退化为临时端口；以 `daemon.json` 为准 |
 
 ---
@@ -495,7 +530,7 @@ claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
 
 | 日期 | 变更 |
 | --- | --- |
-| 3.1.0 | 智能体接口（MCP）：总开关 + 配对 + DPAPI 包裹密钥 + 6 个工具 + 条目级开放开关 |
+| 3.1.0 | 智能体接口（MCP）：总开关 + 配对 + DPAPI 包裹密钥 + 11 个工具（读 / 写 / 软删 / 回收站 / 剪贴板）+ 条目级开放开关 + 审计（schema 4）；**回收站**（schema 5：`deleted_at`，删除=软删、可恢复、轮换覆盖） |
 | 3.0.0 | 核心服务化：独立核心进程、UI 变纯客户端、协议 5（通道加密）、密钥材料入库、关窗即锁、UI 单实例 |
 | 2.4.0 | 原子主密码轮换、Bitwarden 导入导出、CI/发布工程化 |
 | 2.3.x | 四种条目类型、自定义字段、文件夹管理、搜索前缀 |
@@ -515,11 +550,15 @@ claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
 ```powershell
 # 常量
 Select-String lib\core\constants\app_constants.dart -Pattern 'pbkdf2|aesIv|bridgeProtocolVersion|coreVersion|coreFixedPort'
-# 动作规模（应为 ui=39 / bridge=10 / agent=0）
+# schema（应为 5）
+Select-String lib\data\database\database.dart -Pattern 'schemaVersion => \d'
+# 动作规模（应为 ui=43 / bridge=10 / agent=0）
 $t = Get-Content -Raw lib\protocol\actions.dart
 [regex]::Matches($t,'(?s)bridgeAllowed = \{(.*?)\};')[0].Groups[1].Value.Split(',').Where({$_.Trim()}).Count
 [regex]::Matches($t,'(?s)uiAllowed = \{(.*?)\};')[0].Groups[1].Value.Split(',').Where({$_.Trim()}).Count
 [regex]::Matches($t,'(?s)agentAllowed = <String>\{(.*?)\};')[0].Groups[1].Value.Split(',').Where({$_.Trim()}).Count
+# MCP 工具面（应为 11；工具面版本 2）
+Select-String lib\mcp\mcp_tools.dart -Pattern "name: '|agentToolSurfaceVersion ="
 # 事件与主题
 Select-String lib\protocol\events.dart -Pattern "static const String \w+ = '"
 ```

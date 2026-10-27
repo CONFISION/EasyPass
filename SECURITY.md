@@ -138,7 +138,8 @@ Being precise here is more useful than a reassuring sentence, so:
 ## Agent access (MCP) — opt-in, and what it changes
 
 EasyPass can expose a local MCP endpoint (`POST http://127.0.0.1:47821/mcp`) so that AI
-agents can read entry *metadata*. It is **off by default** and the whole design assumes
+agents can read entry *metadata* and — when you allow it — create, update and delete entries.
+It is **off by default** and the whole design assumes
 agents are compromised-by-default: the tool surface never returns passwords, notes, TOTP
 seeds, SSH keys or custom-field values, and every entry is **permanently denied** to
 agents unless you switch "Accessible to agents" on for that entry.
@@ -181,6 +182,17 @@ Consequences you should be aware of:
 - **Every agent call is recorded** in the `agent_audit` table (nickname, tool, entry,
   decision). The key, the real client identity, plaintext arguments and field values are
   never written there.
+- **Write access is deliberately narrow.** `create_entry` / `update_entry` only cover
+  `login` and `secure_note` fields; a newly created entry is **permanently denied to agents
+  by default** (the agent cannot grant itself access), and an update is rejected unless the
+  entry itself is open to agents. In the ask-every-time mode every write, delete and restore
+  is confirmed by you — the "allow reads this session" exemption covers reads only. The
+  approval dialog lists **field names and the action**, never values.
+- **Agent deletion is recoverable.** `delete_entry` only moves the entry to the **trash**
+  (a `deleted_at` timestamp; the ciphertext is not touched). There is no
+  "delete permanently" tool: emptying the trash or deleting an entry for good is a UI-only
+  action, so a user can always undo an agent's deletion. Trashed entries still get
+  re-encrypted when the master password rotates.
 
 ## Known limitations (please don't report these as vulnerabilities)
 

@@ -7,8 +7,9 @@
 > 过时的部分（桥接协议 v3、四处版本号同步、l10n 约定、验证门槛、踩坑清单）分别由
 > `protocol-api.md`、`AGENTS.md`、`CONTRIBUTING.md` 承担。
 >
-> 事实基准：提交 `7886490`。数据层自 2.3.0 起**未变**，只有 3.0.0 新增了 `vault_meta` 的内容
-> （校验材料）与"谁才有权打开库"的变化。
+> 事实基准：**3.1.0**（智能体 MCP 阶段 2 + 回收站，schema **5**）。数据层自 2.3.0 起的
+> 加密口径未变；3.0.0 新增了 `vault_meta`（校验材料），3.1.0 新增了 `agent_audit` 表
+> 与 `password_entries.deleted_at`（回收站）。
 
 ---
 
@@ -39,10 +40,12 @@ import drift / 数据库 / 仓储。所以：
 - **`SshKeyData`**：`publicKey/privateKey/passphrase/fingerprint/keyType/bits(int?)/comment`。
 - **`EntryPayload`**：进 `data_encrypted` 的载荷 = `customFields + identity? + sshKey?`（带 `v:1`）。
 - **`VaultItem`**：**内存态明文模型**，四种类型共用：
-  `id / folderId? / type / name / notes / isFavorite / login? / identity? / sshKey? /
-  customFields / createdAt / updatedAt`。
+  `id / folderId? / type / name / notes / isFavorite / deletedAt? / login? / identity? /
+  sshKey? / customFields / createdAt / updatedAt`。
   便捷访问器 `loginOrEmpty` / `identityOrEmpty` / `sshKeyOrEmpty`；
   `subtitle`（列表副标题）、`searchableText`（**不含**密码 / TOTP / 私钥 / 口令 / 隐藏字段值）。
+  `deletedAt` 非空 = 在回收站（schema 5）：它**不是**加密载荷的一部分（"在回收站"不是秘密，
+  列表查询要按它过滤），也**不是**条目内容 —— 恢复只把它置回 null。
 
 **这里改签名要三处同步**：`VaultItemMapper`、协议编解码（`lib/protocol/codecs.dart`，UI 与 bridge
 两套形状）、导出/导入。bridge 侧的字段名**自协议 3 起冻结**（`protocol-api.md` §6）。
@@ -69,6 +72,28 @@ import drift / 数据库 / 仓储。所以：
   并在 SSH 公钥可解析时自动补 `fingerprint/keyType/bits/comment`（不覆盖用户填过的值）。
 - **绝不**在加密失败时退化成写明文。宁可抛错。
 - 切换条目类型时用 `item.withoutTypeData()` 丢掉原类型字段（UI 负责二次确认）。
+
+### 2.0 回收站：`deleted_at`（schemaVersion 5 新增）
+
+`password_entries` 增加一个**可空**列：
+
+| 列 | 语义 |
+|----|------|
+| `deleted_at INTEGER` | `NULL` = 正常条目；非 NULL = 删除时间（毫秒），即"在回收站" |
+
+- **删除 = 软删**：只写这一列，行、密文、`updated_at` 都不动 ⇒ 恢复是零成本的
+  （`restoreEntry` 只是把它置回 NULL）。彻底删除（`permanentlyDeleteItem`）才真删行。
+- **默认查询全部排除回收站**：`getEntriesFiltered` / `watchEntriesFiltered` /
+  `getEntryCount` / `countEntriesFiltered` / `searchEntries` / `watchFavoriteEntries`
+  都以 `deleted_at IS NULL` 为默认；只有回收站界面与"必须遍历全库"的路径
+  （`getAllEntries`：轮换 / 钥匙探测 / 清库）会看到它们。
+- **主密码轮换必须覆盖回收站行**：`reencryptAll` 走 `getAllEntries()`，
+  `VaultItemMapper` 又保留 `deletedAt` —— 漏掉这一步的话，回收站里的密文会留在旧钥匙上，
+  恢复后永久解不开。`test/trash_core_test.dart` 专门钉了这条（先删 → 改密 → 重启 → 恢复读密码）。
+- **导出不包含回收站**：备份语义是"当前条目"（`exportPlainJson` 走 `getItems()`）。
+- 清库（`deleteAllData`）连回收站一起清；删文件夹时回收站条目的 `folder_id` 也会被清空
+  （恢复后落在"无文件夹"）。
+- 智能体**只能把条目删进回收站**（`delete_entry`），"彻底删除 / 清空"只存在于 UI 动作面。
 
 ### 2.1 `vault_meta`（schemaVersion 3 新增）
 
@@ -97,16 +122,17 @@ import drift / 数据库 / 仓储。所以：
 | `mode` | `trusted` / `approval` |
 | `tool` / `op` | 工具名 + 读 / 写 / 删 / 剪贴板 |
 | `entry_id` / `entry_name` | 被操作的条目（可空，例如 `status`） |
-| `decision` | 当前实现写入：`allowed` / `denied` / `timeout`。设计里还预留了 `error` 与 `allowed_standing`（免询问放行），**代码尚未写入**，见 §2.2 末的待补项 |
+| `decision` | 实际写入：`allowed` / `allowed_standing`（靠「本会话内允许读取」放行）/ `denied` / `timeout` / `error`（执行失败兜底；一次调用只写一行） |
 
 **绝不写入**：配对密钥、真实客户端标识、明文参数、条目字段值。
 写入是**旁路**（`AgentActions.auditSink`）：落库失败不影响工具调用，只在内存环形缓冲里保底。
 表按 `id` 保留最近 **1000** 条（`pruneAgentAudit({int keep = 1000})`，
 启动时执行一次；早期草案写的是 5000，已收紧）。
 
-**待补（文档别当现状读）**：`allowed_standing` 与 `error` 两个 `decision` 取值目前**没有写入点** ——
-方式 1 里靠「本会话内允许读取」放行的那次访问，审计仍记成 `allowed`，与"本次点了同意"不可区分。
-补的时候连带 UI 文案（`agentAuditDecision*`）和策略单测一起加。
+3.1.0 阶段 2 补上了 `allowed_standing` 与 `error` 两个取值：
+`_gate` 记住这次是否靠免询问放行（审计要能区分"用户点了同意"与"被免询问绕过"）；
+`callTool` 的异常兜底在"本次还没写过审计"时补一行 `error`（`notFound` / 参数错误 / 意外异常）。
+UI（设置 → 智能体活动）分别显示为「已允许（本会话免询问）」与「失败」。
 
 ---
 
@@ -119,14 +145,22 @@ import drift / 数据库 / 仓储。所以：
 ```dart
 // 条目（新代码只用这套）
 Future<List<VaultItem>> getItems({String? folderId, EntryType? type, bool favoritesOnly = false});
-Future<VaultItem?> getItem(String id);          // 未解锁 / 不存在 → null
+Future<VaultItem?> getItem(String id, {bool includeDeleted = false}); // 未解锁 / 不存在 / 在回收站 → null
+Stream<VaultItem?> watchItem(String id, {bool includeDeleted = false});
 Future<void> saveItem(VaultItem item);          // 按 id upsert；createdAt 保留、updatedAt 刷新
-Future<void> deleteItem(String id);
 Future<List<VaultItem>> searchItems(String query);   // 见下
 Future<int> countItems();
 Future<int> countItemsByType(EntryType type);
 Future<int> countItemsInFolder(String folderId);
-Future<int> reencryptAll({required Uint8List oldKey, required Uint8List newKey});
+Future<int> reencryptAll({required Uint8List oldKey, required Uint8List newKey}); // 含回收站行
+
+// 回收站（schema 5）
+Future<bool> deleteItem(String id);             // 软删：移入回收站；false = 没这条/已删
+Future<List<VaultItem>> getTrashedItems();      // 会解密，只给回收站界面
+Future<int> countTrashedItems();
+Future<bool> restoreItem(String id);            // deleted_at 置回 NULL
+Future<bool> permanentlyDeleteItem(String id);  // 只接受回收站里的条目
+Future<int> emptyTrash();                       // 返回删除条数
 
 // 文件夹
 Future<List<Folder>> getFolders();
@@ -136,6 +170,10 @@ Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
 ```
 
 - 未解锁时：读返回空 / null，写抛 `VaultLockedException`。
+- **默认口径排除回收站**：`getItems` / `countItems*` / `searchItems` / 列表流都不含
+  `deleted_at` 非空的行；只有 `getItem(..., includeDeleted: true)` 与回收站 API 能看到它们。
+- `saveItem` 对**回收站里**的行是"就地更新但保持 deleted_at"（不会悄悄复活）；
+  智能体侧干脆禁止更新回收站条目（要求先 `restore_entry`）。
 - **`searchItems` 语义**：大小写不敏感的内存匹配（解密后字段），支持
   `type:login|note|identity|ssh|all`（中文别名：登录/笔记/身份/密钥/全部）、
   `folder:<名>`、`url:<子串>`，自由词之间是 **AND**；空查询返回空列表；
@@ -230,7 +268,8 @@ Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
   先读 `pubspec.yaml` 里那段注释：analyzer 版本必须跟得上 Dart SDK，
   否则 `drift_dev` 会以 `Missing implementation of visitDotShorthandPropertyAccess` 崩，
   而且**什么都不写**（`--delete-conflicting-outputs` 已经把旧文件删了 ⇒ 仓库直接编不过）。
-- `test/migration_test.dart` 手工构造 v1 / v2 / v3 库并断言三条升级路径 —— 新增列 / 表时扩展它。
+- `test/migration_test.dart` 手工构造 v1 / v2 / v3 / v4 库并断言 1→2、2→3、3→4、4→5
+  四条升级路径 —— 新增列 / 表时扩展它。
 - drift **不启用** SQLite 外键，所以 `ON DELETE SET NULL` 永远不会触发：
   `deleteFolderAndUnassign()` 显式清 `folder_id`。
 - **迁移没有退路**：升级必须能在老库上补出新列，且不破坏旧密文。
@@ -241,6 +280,8 @@ Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
 
 1. **加密列必须被 `reencryptAll` 覆盖**。历史上漏列 = 那列只能用旧密钥解。
    现在统一走 `VaultItemMapper`，加列不用改轮换逻辑 —— 但要确认新列确实经过它。
+   **回收站行同样必须被覆盖**：轮换遍历 `getAllEntries()`（含 `deleted_at` 非空的行），
+   漏掉的后果是"恢复一条旧条目后永远解不开它"（`trash_core_test.dart` 钉着）。
 2. **改主密码必须整段事务**：`reencryptAll` 的循环包在 `db.transaction` 内。
    中途抛错若不回滚，已处理条目只能用新钥匙开，而主密码还是旧的 ⇒ 静默数据丢失。
 3. **明文的边界**：未加密存储的是标题、用户名、URL、文件夹名、类型、收藏位、时间戳

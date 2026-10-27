@@ -24,7 +24,10 @@ core (port **47821**), per-agent pairings (`role: agent`), two access modes — 
 approval vs. trusted pass-through — a per-entry **开放 / 永久拒绝** switch (default deny,
 stored inside the encrypted payload), secret delivery **only** through the system clipboard
 (`copy_to_clipboard`, never into the model context), zero-interaction unlock via a
-DPAPI-wrapped agent key, and an audit table (`agent_audit`, schema **4**). Design doc:
+DPAPI-wrapped agent key, an audit table (`agent_audit`, schema **4**), and **entry
+write/delete** through the agent (create/update/delete/restore/trash-list). Deletion is a
+**soft delete into the trash** (`password_entries.deleted_at`, schema **5**) — agents can
+never delete permanently. Design doc:
 local-only `docs/agent-mcp-spec.md`; user-facing summary: `docs/technical-spec.md` §12.
 Phase 3 (cloud sync, sharing,
 emergency access, mobile/macOS) is still planned.
@@ -151,8 +154,9 @@ lib/protocol/                  协议 5 的线格式（核心与客户端共用�
 lib/mcp/                       MCP 传输层（3.1.0，纯 Dart；只能 import core/core_service/protocol）
 │   ├── mcp_http_server.dart   回环 HttpServer，单端点 POST /mcp，R1–R9（Origin/Host/Bearer/body cap）
 │   ├── mcp_handler.dart       JSON-RPC 2.0 + 修订协商 + 错误映射（执行错误进 result.isError）
-│   └── mcp_tools.dart         6 个工具的静态 schema（status/begin_session/end_session/
-│                              list_entries/get_entry/copy_to_clipboard）
+│   └── mcp_tools.dart         11 个工具的静态 schema（status/begin_session/end_session/
+│                              list_entries/get_entry/create_entry/update_entry/
+│                              delete_entry/list_trash/restore_entry/copy_to_clipboard）
 lib/core_service/              核心服务实现（纯 Dart，**不得 import Flutter**，有测试守着）
 │   ├── core_service.dart      组装 + 监听 + 分发 + 事件广播 + shutdown
 │   ├── core_actions.dart      UI 域动作（会话/条目/文件夹/导出导入/迁移/智能体管理）
@@ -181,7 +185,7 @@ lib/core_service/              核心服务实现（纯 Dart，**不得 import F
 lib/adapters/flutter_secret_store.dart  唯一允许 import flutter_secure_storage 的"保险库路径"
 ├── data/
 │   ├── database/
-│   │   ├── tables.drift                Schema: folders, password_entries, vault_meta, agent_audit (schemaVersion 4)
+│   │   ├── tables.drift                Schema: folders, password_entries (+deleted_at), vault_meta, agent_audit (schemaVersion 5)
 │   │   ├── database.dart               AppDatabase: DAO queries + streams + migrations
 │   │   └── database.g.dart             GENERATED — do not edit
 │   ├── models/                         Entry types + payload models (2.3.0)
@@ -196,7 +200,8 @@ lib/adapters/flutter_secret_store.dart  唯一允许 import flutter_secure_stora
 └── features/                           UI only（不得直接碰 DB/仓储/密钥，见 test/architecture_boundary_test.dart）
     ├── auth/     auth_provider.dart (AuthState/AuthNotifier，全部经 VaultApi), lock/set-master-password screens
     ├── vault/    providers/{vault_provider,entry_item_provider,core_stream}.dart（快照 + 主题重取）,
-    │             vault CRUD screens, widgets/{entry_card,entry_type_bits,custom_fields_editor,…}.dart
+    │             vault CRUD screens, trash_screen.dart（回收站：列表/恢复/彻底删/清空）,
+    │             widgets/{entry_card,entry_type_bits,custom_fields_editor,…}.dart
     ├── generator/ generator_provider.dart, generator_screen.dart
     ├── health/   health_service.dart（纯函数 + HealthReport.fromJson；核心也在用同一套 analyze）
     │             health_provider.dart（走核心的 healthReport 动作，密码不过 IPC）
@@ -286,7 +291,8 @@ replaces the TOTP secret, and `getCredentials` returns **login entries only**.
 
 **Routing / auth gating** is centralized in `lib/app.dart` (`_routerProvider`
 redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
-`/vault/edit/:id`, `/vault/entry/:id`, `/generator`, `/settings`.
+`/vault/edit/:id`, `/vault/entry/:id`, `/vault/trash`, `/generator`, `/health`,
+`/settings`.
 
 ## Key Files & Directories
 
@@ -308,7 +314,8 @@ redirect): `/lock`, `/set-master-password`, `/vault`, `/vault/add`,
 - **`lib/core/storage/secret_store.dart`** — 密钥材料存储抽象。核心注册
   `VaultMetaSecretStore`（写库内 `vault_meta`），UI 注册 `FlutterSecretStore`
   （只在迁移期读旧钥匙串）。未注册时任何存储操作都会**明确抛错**，不会静默退化。
-- **`lib/data/database/tables.drift`** — the schema (folders, password_entries).
+- **`lib/data/database/tables.drift`** — the schema (folders, password_entries
+  incl. the trash column `deleted_at`, vault_meta, agent_audit).
   Sensitive columns are `*_encrypted` TEXT; plaintext never touches the DB.
 - **`browser_extension/manifest.json`** — MV3 manifest; `nativeMessaging` permission.
 - **`browser_extension/native_host/com.easypass.app.json`** — host registration
@@ -420,11 +427,12 @@ prose. The version comes from `pubspec.yaml` only. Runbook: `installer/release/R
   and **writes nothing** (while `--delete-conflicting-outputs` has already deleted the old
   file, leaving the repo uncompilable). If that happens, bump `drift`/`drift_dev`/
   `build_runner` together (see `pubspec.yaml`) before touching the schema.
-- **Schema changes need a migration, not just a column.** `schemaVersion` is **4** and
-  `AppDatabase.migration.onUpgrade` implements 1→2, 2→3 and 3→4 for real; every new column/table
-  must be added there too, or existing installs fail to open with "no such column" / "no such
-  table". 3→4 added the `agent_audit` table (智能体访问审计). `test/migration_test.dart`
-  hand-builds old-version databases and asserts every upgrade path — extend it whenever you add
+- **Schema changes need a migration, not just a column.** `schemaVersion` is **5** and
+  `AppDatabase.migration.onUpgrade` implements 1→2, 2→3, 3→4 and 4→5 for real; every new
+  column/table must be added there too, or existing installs fail to open with "no such
+  column" / "no such table". 3→4 added the `agent_audit` table (智能体访问审计);
+  4→5 added `password_entries.deleted_at` (回收站，NULL = 正常). `test/migration_test.dart`
+  hand-builds v1–v4 databases and asserts every upgrade path — extend it whenever you add
   a column or a table.
   Also: drift does **not** enable SQLite foreign keys, so `ON DELETE SET NULL` never fires —
   `deleteFolderAndUnassign()` clears `folder_id` explicitly.
@@ -590,11 +598,21 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
   break argument parsing (`git commit -F msg.txt`; the same bit `ov add-memory`).
 - **`Select-Object -First N` closes the pipeline early**, so the upstream command can be
   reported as `exit 1` even when it succeeded — do not use it when the exit code matters.
-- **Never hand-build `PasswordEntriesCompanion` for entry data.** Since 2.3.0 all entry
-  reads/writes go through `VaultItem` + `VaultItemMapper`; writing the `*_encrypted` columns
-  yourself is how you get a column that the master-password rotation (`reencryptAll`) and the
-  export path silently miss. The legacy row-level `VaultRepository` methods are `@Deprecated`
-  migration bridges only.
+- **Deleting an entry is a SOFT delete (trash), and that is load-bearing.** `deleteItem`
+  only writes `password_entries.deleted_at`; the row and its ciphertext are untouched, so
+  restore is free. List/search/count/health/export queries exclude trashed rows by default
+  (`getEntriesFiltered`, `countEntriesFiltered`, `getEntryCount`, `searchEntries`,
+  `watchFavoriteEntries`); only the trash UI and "must see every row" paths
+  (`getAllEntries`) see them. **Do not "simplify" this back to a hard delete** — agents can
+  delete through MCP, and recoverability is the safety net. Two invariants:
+  (a) `reencryptAll` must keep covering trashed rows (`getAllEntries()` + mapper preserves
+  `deletedAt`), otherwise restored entries stay encrypted under the old key forever;
+  (b) "delete permanently / empty trash" exists **only** in the UI action surface — never
+  add it to the MCP tools.
+- **The trash lives at `/vault/trash`** (`lib/features/vault/screens/trash_screen.dart`),
+  reachable from a fixed sidebar entry (visible affordance, not a gesture), and the delete
+  dialogs offer an "Undo" SnackBar that calls `restoreItem`. `VaultItem.deletedAt` is
+  exposed in the UI JSON shape only when non-null.
 - **Two agents running `flutter test` in the same checkout collide** on
   `build\native_assets\windows\sqlite3.dll` ("Flutter failed to delete file … cannot access
   the file"). It is not a code failure — serialize test runs, or retry after the other run
