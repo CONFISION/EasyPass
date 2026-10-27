@@ -181,14 +181,24 @@ class CoreService {
   }
 
   Future<void> _listen() async {
-    // 智能体接口（MCP）：临时端口，**启动失败不阻塞核心**——核心的主业是保险库，
-    // 不该因为多一个可选端点起不来。失败时 daemon.json 里就没有 mcpPort，
-    // 客户端据此知道"这个核心不支持 MCP"。
+    // 智能体接口（MCP）：**先试固定端口**，被占用才退化为临时端口。
+    // 固定端口是为了让客户端配置长期有效（临时端口每次核心重启都会变，
+    // 用户会反复遇到"昨天还好、今天连不上"）。
+    // 启动失败不阻塞核心——核心的主业是保险库；失败时 daemon.json 里就没有
+    // mcpPort，客户端据此知道"这个核心不支持 MCP"。
     int? mcpPort;
     try {
-      mcpPort = await _mcpServer.start();
+      mcpPort = await _mcpServer.start(port: AppConstants.coreMcpFixedPort);
     } catch (error) {
-      stderr.writeln('easypass_core: MCP 端点启动失败（已跳过）：$error');
+      stderr.writeln(
+        'easypass_core: MCP 固定端口 ${AppConstants.coreMcpFixedPort} 不可用'
+        '（$error），改用临时端口',
+      );
+      try {
+        mcpPort = await _mcpServer.start();
+      } catch (fallbackError) {
+        stderr.writeln('easypass_core: MCP 端点启动失败（已跳过）：$fallbackError');
+      }
     }
     _info = CoreInfo(
       port: _socket.port,

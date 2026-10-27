@@ -87,4 +87,14 @@ class AppConstants {
   /// 端口被别的程序占用时核心退化为临时端口（此时唯一性只靠 `daemon.json`
   /// 探测保证），见 `lib/core_service/core_singleton.dart`。
   static const int coreFixedPort = 47820;
+
+  /// 智能体接口（MCP）的**固定回环端口**。
+  ///
+  /// 为什么不能像最初那样只用临时端口：客户端（DSH / Claude Code / …）把端点写死在
+  /// 自己的配置里，而核心每次重启都会重新 bind —— 临时端口一变，配置就失效，
+  /// 用户会反复遇到"昨天还好、今天连不上"。
+  ///
+  /// 被别的程序占用时退化为临时端口（实际端口仍写在 `daemon.json` 的 `mcpPort`），
+  /// 这时用户需要按 `daemon.json` 更新一次客户端配置。
+  static const int coreMcpFixedPort = 47821;
 }
