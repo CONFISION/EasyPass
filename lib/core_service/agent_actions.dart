@@ -5,6 +5,7 @@
 import 'dart:collection';
 
 import 'package:easypass/core_service/agent_access_policy.dart';
+import 'package:easypass/core_service/agent_access_store.dart';
 import 'package:easypass/core_service/agent_pairing_store.dart';
 import 'package:easypass/core_service/session_domains.dart';
 import 'package:easypass/data/models/entry_type.dart';
@@ -85,17 +86,20 @@ class AgentActions {
     required VaultRepository repository,
     required SessionDomains sessions,
     required AgentPairingStore pairingStore,
+    required AgentAccessStore agentAccess,
     DateTime Function()? clock,
     int auditCapacity = 200,
   })  : _repository = repository,
         _sessions = sessions,
         _pairingStore = pairingStore,
+        _agentAccess = agentAccess,
         _clock = clock ?? DateTime.now,
         _auditCapacity = auditCapacity;
 
   final VaultRepository _repository;
   final SessionDomains _sessions;
   final AgentPairingStore _pairingStore;
+  final AgentAccessStore _agentAccess;
   final DateTime Function() _clock;
   final int _auditCapacity;
 
@@ -220,8 +224,18 @@ class AgentActions {
     AgentPairing pairing,
     McpPrincipal principal,
   ) async {
-    // 会话结束**立即锁 agent 域**（不调 lockAll：不把用户正在用的 UI 踢下线）。
-    _sessions.agent.lock();
+    // `end_session` 只结束**批量窗口**，不锁 agent 域。
+    //
+    // 为什么（真机实测踩过）：总开关打开的语义是"用户零介入、永久允许"。
+    // 早先这里无条件 `_sessions.agent.lock()`，于是 agent 调一次 end_session
+    // 就把自己永久锁死 —— 而自动解封只发生在核心启动/打开开关时，
+    // 之后再也解不开，直到用户重启核心。那不是"会话结束"，那是自断经脉。
+    //
+    // 真正的锁时机只有三个：关掉总开关 / 用户在界面点"锁定智能体会话" / 核心退出。
+    // 这里只在总开关已关闭时兜底锁一下（防御性，正常走不到）。
+    if (!await _isAccessEnabled()) {
+      _sessions.agent.lock();
+    }
     _window = null;
     _auditAdd(
       principal: principal,
@@ -373,6 +387,9 @@ class AgentActions {
       throw McpToolException('locked', '保险库已锁定：请先在 EasyPass 里解锁');
     }
   }
+
+  /// 总开关是否打开（`end_session` 与状态判断用）。
+  Future<bool> _isAccessEnabled() => _agentAccess.isEnabled();
 
   void _requireAllowed(AgentPairing pairing, AgentAccessRequest request) {
     final result = AgentAccessPolicy.evaluate(request);

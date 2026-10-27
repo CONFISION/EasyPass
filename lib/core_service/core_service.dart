@@ -152,6 +152,7 @@ class CoreService {
       repository: agentRepository,
       sessions: sessions,
       pairingStore: pairingStore,
+      agentAccess: agentAccess,
     );
     final mcpServer = McpHttpServer(
       handler: McpHandler(

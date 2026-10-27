@@ -6,6 +6,7 @@ import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:easypass/core/crypto/crypto_service.dart';
 import 'package:easypass/core/storage/secret_store.dart';
+import 'package:easypass/core_service/agent_access_store.dart';
 import 'package:easypass/core_service/agent_access_policy.dart';
 import 'package:easypass/core_service/agent_actions.dart';
 import 'package:easypass/core_service/agent_pairing_store.dart';
@@ -40,6 +41,7 @@ void main() {
   late McpHttpServer server;
   late HttpClient client;
   late int port;
+  late File tempBlob;
 
   setUp(() async {
     db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -47,6 +49,8 @@ void main() {
     sessions = SessionDomains(idleTimeout: const Duration(minutes: 5));
     final key = Uint8List.fromList(List<int>.filled(32, 9));
     sessions.agent.unlock(key);
+    tempBlob = File('${Directory.systemTemp.path}'
+        '\\easypass-e2e-agent-${DateTime.now().microsecondsSinceEpoch}.dpapi');
 
     repository = VaultRepository(
       db: db,
@@ -107,6 +111,7 @@ void main() {
       repository: repository,
       sessions: sessions,
       pairingStore: pairingStore,
+      agentAccess: AgentAccessStore(db, blobFile: tempBlob),
     );
     final handler = McpHandler(
       authenticate: actions.authenticate,
@@ -221,12 +226,25 @@ void main() {
     expect(status['mode'], 'approval');
   });
 
-  test('end_session 立即锁 agent 域，之后读操作报 locked', () async {
+  /// 回归（真机实测）：`end_session` 曾经无条件锁 agent 域 —— 那等于智能体
+  /// 调一次就把自己永久锁死（自动解封只在核心启动/开开关时发生），
+  /// 与"总开关打开 = 零介入"直接矛盾。
+  test('总开关打开时：end_session 只关窗口，不锁 agent 域', () async {
+    await AgentAccessStore(db, blobFile: tempBlob).setEnabled(true);
+
+    await callToolPayload(trustedKey, 'begin_session', {'purpose': '批量'});
     await callToolPayload(trustedKey, 'end_session');
-    expect(sessions.agent.isUnlocked, isFalse);
+
+    expect(sessions.agent.isUnlocked, isTrue, reason: '零介入语义：不该自锁');
 
     final payload = await callToolPayload(trustedKey, 'list_entries');
-    expect(payload['errorCode'], 'locked');
+    // 仍然能读（窗口已关，但访问权还在）。
+    expect((payload['entries'] as List).length, 2);
+  });
+
+  test('总开关关闭时：end_session 兜底锁掉 agent 域', () async {
+    await callToolPayload(trustedKey, 'end_session');
+    expect(sessions.agent.isUnlocked, isFalse);
   });
 
   test('status 在锁定时也能用，并如实报告 locked', () async {
