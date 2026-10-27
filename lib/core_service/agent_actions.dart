@@ -242,10 +242,18 @@ class AgentActions {
     _requireRequestAllowed(pairing);
     final query = (args['query'] as String? ?? '').trim();
     final folders = await _folderNames();
+    // **不传 type 就是"全部类型"**：`EntryType.fromWire(null)` 会回退成 login，
+    // 直接用它会把"没筛选"当成"只看登录条目"（真机实测：status 数到 2 条，
+    // list_entries 只回 1 条）。folder 同理：空串等于不筛。
+    final rawType = (args['type'] as String?)?.trim();
+    final rawFolder = (args['folder'] as String?)?.trim();
+    final type =
+        (rawType == null || rawType.isEmpty) ? null : EntryType.fromWire(rawType);
+    final folderId = (rawFolder == null || rawFolder.isEmpty) ? null : rawFolder;
     final items = await _visibleItems(
       pairing,
-      type: EntryType.fromWire(args['type']),
-      folderId: args['folder'] as String?,
+      type: type,
+      folderId: folderId,
       query: query,
     );
 

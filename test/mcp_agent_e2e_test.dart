@@ -75,6 +75,16 @@ void main() {
       createdAt: 1,
       updatedAt: 2,
     ));
+    // 再放一条**不同类型**的开放条目：回归"不传 type 时不能默认成 login"。
+    await repository.saveItem(VaultItem(
+      id: 'e-note',
+      type: EntryType.secureNote,
+      name: 'API 密钥备忘',
+      notes: 'note-body-must-not-leak',
+      agentOpen: true,
+      createdAt: 1,
+      updatedAt: 2,
+    ));
 
     pairingStore = AgentPairingStore(db);
     await pairingStore.save(AgentPairing(
@@ -165,14 +175,33 @@ void main() {
 
   test('list_entries：只返回"开放"的条目，且响应里没有任何秘密', () async {
     final payload = await callToolPayload(trustedKey, 'list_entries');
-    final entries = payload['entries'] as List;
-    expect(entries.length, 1);
-    expect(entries.first['name'], 'GitHub');
+    final entries = (payload['entries'] as List).cast<Map>();
+    // 两条开放（一条登录 + 一条笔记），一条未开放被过滤。
+    expect(entries.length, 2);
+    expect(entries.map((e) => e['name']), containsAll(['GitHub', 'API 密钥备忘']));
 
     final encoded = jsonEncode(payload);
-    for (final secret in [password, '这条备注不能泄露', 'other-secret']) {
+    for (final secret in [
+      password,
+      '这条备注不能泄露',
+      'other-secret',
+      'note-body-must-not-leak',
+    ]) {
       expect(encoded.contains(secret), isFalse, reason: '不得泄露 $secret');
     }
+  });
+
+  test('list_entries：不传 type 不能被当成 login（真机踩到的 bug）', () async {
+    final all = await callToolPayload(trustedKey, 'list_entries');
+    expect((all['entries'] as List).length, 2);
+
+    final logins =
+        await callToolPayload(trustedKey, 'list_entries', {'type': 'login'});
+    expect((logins['entries'] as List).map((e) => e['type']), ['login']);
+
+    final notes = await callToolPayload(
+        trustedKey, 'list_entries', {'type': 'secure_note'});
+    expect((notes['entries'] as List).map((e) => e['type']), ['secure_note']);
   });
 
   test('get_entry：开放条目可读；永久拒绝的条目被拒', () async {
