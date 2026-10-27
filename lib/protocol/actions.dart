@@ -84,6 +84,19 @@ class Actions {
   /// 请求核心退出（唯一合法的停机通道）。不受锁定状态限制。
   static const String shutdownCore = 'shutdownCore';
 
+  // ─── 智能体访问（3.1.0；**只在 ui 域**）─────────────────
+  //
+  // 为什么全部只给 `ui`：配对与解锁是"用户授权"动作，智能体自己永远不能改。
+  // 这些是**新增动作**，按协议演进规则不需要递增 `bridgeProtocolVersion`。
+
+  static const String listAgentPairings = 'listAgentPairings';
+  static const String createAgentPairing = 'createAgentPairing';
+  static const String revokeAgentPairing = 'revokeAgentPairing';
+  static const String setAgentAccessMode = 'setAgentAccessMode';
+  static const String unlockAgentDomain = 'unlockAgentDomain';
+  static const String lockAgentDomain = 'lockAgentDomain';
+  static const String getAgentAccessState = 'getAgentAccessState';
+
   // ─── 扩展既有动作（bridge 专用，形状冻结）───────────────
 
   static const String getCredentials = 'getCredentials';
@@ -133,6 +146,14 @@ class Actions {
     exportVault,
     importVault,
     shutdownCore,
+    // 智能体访问：配对管理、方式切换、agent 域解锁（**只给 ui**）。
+    listAgentPairings,
+    createAgentPairing,
+    revokeAgentPairing,
+    setAgentAccessMode,
+    unlockAgentDomain,
+    lockAgentDomain,
+    getAgentAccessState,
   };
 
   /// **智能体域（`role: agent`）** 的动作白名单。

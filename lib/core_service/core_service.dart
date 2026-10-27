@@ -162,6 +162,7 @@ class CoreService {
       exporter: exporter,
       totpService: TotpService(),
       sessions: sessions,
+      pairingStore: pairingStore,
       onDataChanged: (topics) => service._broadcastChanged(topics),
     );
 

@@ -17,6 +17,12 @@ class Events {
 
   /// 核心即将退出（收到 shutdownCore 后广播）。
   static const String coreShuttingDown = 'coreShuttingDown';
+
+  /// 智能体请求一次需要用户审批的操作（方式 1）。
+  ///
+  /// 载荷：`approvalId` / `nickname` / `tool` / `op`（读|写|删）/ `target`。
+  /// UI 用 `respondAgentApproval` 动作回话。新增事件，不需要升协议版本。
+  static const String agentApprovalRequested = 'agentApprovalRequested';
 }
 
 /// 订阅主题：与 UI 现在依赖的 4 条 drift 流一一对应。

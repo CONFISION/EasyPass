@@ -3,6 +3,7 @@
 // ignore_for_file: prefer_initializing_formals
 
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:easypass/core/constants/app_constants.dart';
@@ -17,6 +18,8 @@ import 'package:easypass/features/health/health_service.dart';
 import 'package:easypass/protocol/protocol.dart';
 import 'package:uuid/uuid.dart';
 
+import 'agent_access_policy.dart';
+import 'agent_pairing_store.dart';
 import 'session_domains.dart';
 
 /// 业务错误：核心把它映射成响应里的 `error`（字符串）+ `errorCode`。
@@ -44,6 +47,7 @@ class CoreActions {
     required ExportImportService exporter,
     required TotpService totpService,
     required SessionDomains sessions,
+    required AgentPairingStore pairingStore,
     required this.onDataChanged,
   })  : _db = db,
         _cryptoService = cryptoService,
@@ -51,7 +55,8 @@ class CoreActions {
         _rotation = rotation,
         _exporter = exporter,
         _totpService = totpService,
-        _sessions = sessions;
+        _sessions = sessions,
+        _pairingStore = pairingStore;
 
   final AppDatabase _db;
   final CryptoService _cryptoService;
@@ -60,6 +65,7 @@ class CoreActions {
   final ExportImportService _exporter;
   final TotpService _totpService;
   final SessionDomains _sessions;
+  final AgentPairingStore _pairingStore;
 
   /// 数据变更回调：参数是受影响的主题集合（`items` / `item` / `folders` / `search`）。
   final void Function(Set<String> topics) onDataChanged;
@@ -148,12 +154,147 @@ class CoreActions {
           params['format'] as String? ?? 'easypass',
           params['path'] as String?,
         );
+      case Actions.listAgentPairings:
+        return _listAgentPairings();
+      case Actions.createAgentPairing:
+        return _createAgentPairing(params);
+      case Actions.revokeAgentPairing:
+        return _revokeAgentPairing(params['id'] as String? ?? '');
+      case Actions.setAgentAccessMode:
+        return _setAgentAccessMode(params);
+      case Actions.unlockAgentDomain:
+        return _unlockAgentDomain(params['password'] as String? ?? '');
+      case Actions.lockAgentDomain:
+        return _lockAgentDomain();
+      case Actions.getAgentAccessState:
+        return _getAgentAccessState();
       default:
         throw CoreActionException(
           ErrorCodes.unsupported,
           'Unknown action: $action',
         );
     }
+  }
+
+  // ─── 智能体访问（3.1.0，只在 ui 域）──────────────────────
+
+  Future<Map<String, dynamic>> _listAgentPairings() async {
+    final pairings = await _pairingStore.list();
+    return {
+      'pairings': [
+        for (final p in pairings)
+          {
+            'id': p.id,
+            'nickname': p.nickname,
+            'mode': p.mode.name,
+            'trusted': p.trusted,
+            'revoked': p.isRevoked,
+            'createdAt': p.createdAt,
+            'lastUsedAt': p.lastUsedAt,
+            'calls': p.calls,
+            // **不返回 keyHash**：UI 不需要它，少一处泄露面。
+          },
+      ],
+      'agentUnlocked': _sessions.agent.isUnlocked,
+    };
+  }
+
+  Future<Map<String, dynamic>> _createAgentPairing(
+    Map<String, dynamic> params,
+  ) async {
+    final nickname = (params['nickname'] as String? ?? '').trim();
+    if (nickname.isEmpty) {
+      throw CoreActionException(ErrorCodes.invalidRequest, '昵称必填');
+    }
+    final mode = (params['mode'] as String?) == 'trusted'
+        ? AgentMode.trusted
+        : AgentMode.approval;
+    // 密钥**只在创建时返回这一次**；库里只存 SHA-256（见 MCP spec 的 I-11）。
+    final key = AgentPairingStore.generateKey();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final id = 'p_${now.toRadixString(16)}';
+    await _pairingStore.save(AgentPairing(
+      id: id,
+      nickname: nickname,
+      mode: mode,
+      keyHash: AgentPairingStore.hashKey(key),
+      createdAt: now,
+    ));
+    return {'id': id, 'key': key, 'nickname': nickname, 'mode': mode.name};
+  }
+
+  Future<Map<String, dynamic>> _revokeAgentPairing(String id) async {
+    if (id.isEmpty) {
+      throw CoreActionException(ErrorCodes.invalidRequest, 'id 必填');
+    }
+    await _pairingStore.revoke(id);
+    // 撤销即锁：别让已撤销的智能体继续用旧会话读数据。
+    _sessions.agent.lock();
+    return {'ok': true, 'agentUnlocked': false};
+  }
+
+  Future<Map<String, dynamic>> _setAgentAccessMode(
+    Map<String, dynamic> params,
+  ) async {
+    final id = params['id'] as String? ?? '';
+    final modeName = params['mode'] as String? ?? '';
+    final pairing = await _pairingStore.findById(id);
+    if (pairing == null) {
+      throw CoreActionException(ErrorCodes.notFound, '配对不存在');
+    }
+    if (modeName == 'approval') {
+      await _pairingStore.save(
+        pairing.copyWith(mode: AgentMode.approval, trusted: false),
+      );
+      // 切回逐次审批 ⇒ 立刻锁 agent 域（§6.5）。
+      _sessions.agent.lock();
+      return {'ok': true, 'agentUnlocked': false};
+    }
+    if (modeName != 'trusted') {
+      throw CoreActionException(ErrorCodes.invalidRequest, '未知的访问方式');
+    }
+    // 切到"可信直通"必须由用户用主密码确认；同一次校验的派生密钥正好用来解锁。
+    await _unlockAgentWithPassword(params['password'] as String? ?? '');
+    await _pairingStore.save(
+      pairing.copyWith(mode: AgentMode.trusted, trusted: true),
+    );
+    return {'ok': true, 'agentUnlocked': true};
+  }
+
+  Future<Map<String, dynamic>> _unlockAgentDomain(String password) async {
+    await _unlockAgentWithPassword(password);
+    return {'ok': true, 'agentUnlocked': true};
+  }
+
+  Future<Map<String, dynamic>> _lockAgentDomain() async {
+    _sessions.agent.lock();
+    return {'ok': true, 'agentUnlocked': false};
+  }
+
+  Future<Map<String, dynamic>> _getAgentAccessState() async => {
+        'agentUnlocked': _sessions.agent.isUnlocked,
+      };
+
+  /// 用主密码解锁智能体域（用户"显式动作"的唯一落点）。
+  ///
+  /// **密钥必须复制**（`Uint8List.fromList`）：`VaultSession._wipe()` 是原地清零，
+  /// 与 ui 域共享同一个 `Uint8List` 实例会让"锁 ui"顺手把 agent 的钥匙也清成 0。
+  Future<void> _unlockAgentWithPassword(String password) async {
+    if (password.isEmpty) {
+      throw CoreActionException(ErrorCodes.invalidRequest, '需要主密码确认');
+    }
+    final check = await _rotation.verifyCredentials(password);
+    if (check == null) {
+      throw CoreActionException(ErrorCodes.unauthorized, '主密码不正确');
+    }
+    final key = await _rotation.recoverPendingRotation(
+      check: check,
+      providedKey: check.key,
+    );
+    if (key == null) {
+      throw CoreActionException(ErrorCodes.unauthorized, '请改用新的主密码');
+    }
+    _sessions.agent.unlock(Uint8List.fromList(key));
   }
 
   // ─── 会话 / 认证 ────────────────────────────────────────
