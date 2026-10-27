@@ -84,19 +84,21 @@ void main() {
     expect(violations, isEmpty, reason: 'lib/client 越界：\n${violations.join('\n')}');
   });
 
-  test('lib/core_service/** 不得 import Flutter：核心是无 Flutter 的 AOT 程序', () {
+  test('lib/core_service/** 与 lib/mcp/** 不得 import Flutter：核心是无 Flutter 的 AOT 程序', () {
     // 这条守住"核心服务能脱离 Flutter 编译"这个前提：一旦有人图省事引入
     // flutter/foundation，`dart build cli` 会立刻失败（dart:ui 不存在）。
-    final coreDir = Directory('lib/core_service');
+    // lib/mcp 是智能体接口（MCP 传输与工具面），同样跑在核心里，规则一致。
     final violations = <String>[];
-    for (final file in dartFilesIn(coreDir)) {
-      for (final line in file.readAsLinesSync()) {
-        final trimmed = line.trim();
-        if (!trimmed.startsWith('import ')) continue;
-        if (trimmed.contains('package:flutter/') ||
-            trimmed.contains('package:flutter_riverpod/') ||
-            trimmed.contains('package:flutter_secure_storage/')) {
-          violations.add('${file.path}: $trimmed');
+    for (final dir in [Directory('lib/core_service'), Directory('lib/mcp')]) {
+      for (final file in dartFilesIn(dir)) {
+        for (final line in file.readAsLinesSync()) {
+          final trimmed = line.trim();
+          if (!trimmed.startsWith('import ')) continue;
+          if (trimmed.contains('package:flutter/') ||
+              trimmed.contains('package:flutter_riverpod/') ||
+              trimmed.contains('package:flutter_secure_storage/')) {
+            violations.add('${file.path}: $trimmed');
+          }
         }
       }
     }
