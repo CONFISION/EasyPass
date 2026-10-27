@@ -14,6 +14,7 @@ import 'features/health/screens/health_screen.dart';
 import 'features/settings/providers/font_settings_provider.dart';
 import 'features/settings/providers/theme_provider.dart';
 import 'features/settings/screens/settings_screen.dart';
+import 'features/settings/widgets/agent_approval_host.dart';
 import 'features/vault/screens/add_edit_entry_screen.dart';
 import 'features/vault/screens/entry_detail_screen.dart';
 import 'features/vault/screens/vault_screen.dart';
@@ -177,8 +178,9 @@ class EasyPassApp extends ConsumerWidget {
       // 首次启动的浏览器集成提示与"二次启动抬窗"监听都只服务于 Linux 移植版，
       // 本分支已移除（见 `linux` 分支）；Windows 的宿主注册由安装器负责、单实例由
       // 原生 Mutex 闸门负责，UI 侧不需要再挂任何 Host。
-      builder: (context, child) =>
-          _ActivityTouchHost(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) => AgentApprovalHost(
+        child: _ActivityTouchHost(child: child ?? const SizedBox.shrink()),
+      ),
     );
   }
 

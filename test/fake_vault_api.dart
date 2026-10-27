@@ -184,6 +184,7 @@ class FakeVaultApi implements VaultApi {
   void dispose() {
     _changes.close();
     _sessionEvents.close();
+    _agentApprovals.close();
   }
 
   Never _throw(Object failure) {
@@ -577,6 +578,45 @@ class FakeVaultApi implements VaultApi {
   @override
   Future<void> resetAgentKey() async {
     calls.add('resetAgentKey');
+  }
+
+  // ─── 方式 1 审批 + 审计（内存版）──────────────────────────
+
+  final StreamController<Map<String, dynamic>> _agentApprovals =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  @override
+  Stream<Map<String, dynamic>> get agentApprovalRequests =>
+      _agentApprovals.stream;
+
+  /// 测试可以推一条假审批进来。
+  void emitAgentApproval(Map<String, dynamic> request) {
+    if (!_agentApprovals.isClosed) _agentApprovals.add(request);
+  }
+
+  final List<Map<String, bool>> approvalResponses = [];
+
+  @override
+  Future<bool> respondAgentApproval({
+    required String approvalId,
+    required bool allow,
+    bool allowStandingRead = false,
+  }) async {
+    calls.add('respondAgentApproval');
+    approvalResponses.add({
+      'allow': allow,
+      'allowStandingRead': allowStandingRead,
+    });
+    return true;
+  }
+
+  /// 假审计数据（`listAgentAudit` 直接返回它）。
+  final List<Map<String, dynamic>> agentAudit = [];
+
+  @override
+  Future<List<Map<String, dynamic>>> listAgentAudit({int limit = 100}) async {
+    calls.add('listAgentAudit');
+    return agentAudit.take(limit).toList(growable: false);
   }
 
   @override

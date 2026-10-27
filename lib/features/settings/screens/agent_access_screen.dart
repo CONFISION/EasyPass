@@ -488,12 +488,49 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
             if (calls != null) l10n.agentCalls('$calls'),
           ].join(' · ')),
         ),
-        trailing: IconButton(
-          tooltip: l10n.agentRevoke,
-          icon: Icon(Icons.link_off, color: scheme.error),
-          onPressed: () => _revoke(pairing),
+        trailing: PopupMenuButton<String>(
+          onSelected: (value) {
+            if (value == 'mode') {
+              _switchMode(pairing);
+            } else if (value == 'revoke') {
+              _revoke(pairing);
+            }
+          },
+          itemBuilder: (menuContext) => [
+            PopupMenuItem(
+              value: 'mode',
+              child: Text(
+                trusted ? l10n.agentSwitchToApproval : l10n.agentSwitchToTrusted,
+              ),
+            ),
+            PopupMenuItem(
+              value: 'revoke',
+              child: Text(l10n.agentRevoke),
+            ),
+          ],
         ),
       ),
     );
+  }
+
+  /// 切换访问方式。
+  ///
+  /// 切到"可信直通"必须输入主密码（核心会二次校验）；切回"每次询问"不需要，
+  /// 但会**立刻锁掉 agent 会话域** —— 因为审批模式下对话是按次授权的。
+  Future<void> _switchMode(Map<String, dynamic> pairing) async {
+    final id = pairing['id'] as String? ?? '';
+    final isTrusted = pairing['mode'] == 'trusted';
+    final api = ref.read(vaultApiProvider);
+    if (isTrusted) {
+      await _run(() => api.setAgentAccessMode(id: id, mode: 'approval'));
+      return;
+    }
+    final password = await _askMasterPassword(_l10n.agentModeSwitch);
+    if (password == null || !mounted) return;
+    await _run(() => api.setAgentAccessMode(
+          id: id,
+          mode: 'trusted',
+          password: password,
+        ));
   }
 }

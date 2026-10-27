@@ -12,6 +12,7 @@ import '../../desktop_autostart/desktop_autostart.dart';
 import '../providers/font_settings_provider.dart';
 import '../providers/theme_provider.dart';
 import 'agent_access_screen.dart';
+import 'agent_audit_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -121,6 +122,17 @@ class SettingsScreen extends ConsumerWidget {
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (_) => const AgentAccessScreen(),
+                    ),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.history),
+                  title: Text(l10n.agentAuditTitle),
+                  subtitle: Text(l10n.agentAuditSubtitle),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const AgentAuditScreen(),
                     ),
                   ),
                 ),

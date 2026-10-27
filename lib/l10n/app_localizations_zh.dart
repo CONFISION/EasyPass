@@ -1105,6 +1105,86 @@ class AppLocalizationsZh extends AppLocalizations {
   String get agentAccessEntryDenied => '永久拒绝 —— 智能体永远读不到它。';
 
   @override
+  String get agentApprovalTitle => '智能体请求访问';
+
+  @override
+  String get agentApprovalAgent => '智能体';
+
+  @override
+  String get agentApprovalOperation => '操作';
+
+  @override
+  String get agentApprovalEntry => '条目';
+
+  @override
+  String get agentApprovalTool => '工具';
+
+  @override
+  String get agentApprovalHint => '只会执行上面显示的内容。若你并没有预期这次请求，请拒绝。';
+
+  @override
+  String get agentApprovalAllow => '同意';
+
+  @override
+  String get agentApprovalDeny => '拒绝';
+
+  @override
+  String get agentApprovalAllowStanding => '本会话内允许读取';
+
+  @override
+  String get agentApprovalOpRead => '读取（元数据）';
+
+  @override
+  String get agentApprovalOpSensitiveRead => '读取机密';
+
+  @override
+  String get agentApprovalOpWrite => '写入';
+
+  @override
+  String get agentApprovalOpDelete => '删除';
+
+  @override
+  String get agentAuditTitle => '智能体活动';
+
+  @override
+  String get agentAuditSubtitle => '每一次智能体访问：操作了哪个条目、结果如何。';
+
+  @override
+  String get agentAuditEmpty => '还没有智能体活动记录。';
+
+  @override
+  String get agentAuditRefresh => '刷新';
+
+  @override
+  String agentAuditCount(String count) {
+    return '共显示 $count 条记录';
+  }
+
+  @override
+  String get agentAuditOpClipboard => '复制到剪贴板';
+
+  @override
+  String get agentAuditDecisionAllowed => '已允许';
+
+  @override
+  String get agentAuditDecisionDenied => '已拒绝';
+
+  @override
+  String get agentAuditDecisionTimeout => '已超时';
+
+  @override
+  String get agentAuditDecisionError => '失败';
+
+  @override
+  String get agentModeSwitchTitle => '访问方式';
+
+  @override
+  String get agentSwitchToApproval => '切换为「每次询问」';
+
+  @override
+  String get agentSwitchToTrusted => '切换为「可信直通」';
+
+  @override
   String get autostartUnsupported => '本平台的自启由操作系统安装器管理。';
 
   @override

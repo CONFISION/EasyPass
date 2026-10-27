@@ -2156,6 +2156,162 @@ abstract class AppLocalizations {
   /// **'Permanently denied — agents can never read it.'**
   String get agentAccessEntryDenied;
 
+  /// No description provided for @agentApprovalTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'An agent is asking for access'**
+  String get agentApprovalTitle;
+
+  /// No description provided for @agentApprovalAgent.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent'**
+  String get agentApprovalAgent;
+
+  /// No description provided for @agentApprovalOperation.
+  ///
+  /// In en, this message translates to:
+  /// **'Action'**
+  String get agentApprovalOperation;
+
+  /// No description provided for @agentApprovalEntry.
+  ///
+  /// In en, this message translates to:
+  /// **'Entry'**
+  String get agentApprovalEntry;
+
+  /// No description provided for @agentApprovalTool.
+  ///
+  /// In en, this message translates to:
+  /// **'Tool'**
+  String get agentApprovalTool;
+
+  /// No description provided for @agentApprovalHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Only what is shown here will happen. Deny if you did not expect this request.'**
+  String get agentApprovalHint;
+
+  /// No description provided for @agentApprovalAllow.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow'**
+  String get agentApprovalAllow;
+
+  /// No description provided for @agentApprovalDeny.
+  ///
+  /// In en, this message translates to:
+  /// **'Deny'**
+  String get agentApprovalDeny;
+
+  /// No description provided for @agentApprovalAllowStanding.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow reads this session'**
+  String get agentApprovalAllowStanding;
+
+  /// No description provided for @agentApprovalOpRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Read (metadata)'**
+  String get agentApprovalOpRead;
+
+  /// No description provided for @agentApprovalOpSensitiveRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Read a secret'**
+  String get agentApprovalOpSensitiveRead;
+
+  /// No description provided for @agentApprovalOpWrite.
+  ///
+  /// In en, this message translates to:
+  /// **'Write'**
+  String get agentApprovalOpWrite;
+
+  /// No description provided for @agentApprovalOpDelete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get agentApprovalOpDelete;
+
+  /// No description provided for @agentAuditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent activity'**
+  String get agentAuditTitle;
+
+  /// No description provided for @agentAuditSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Every AI agent access, with the entry and the outcome.'**
+  String get agentAuditSubtitle;
+
+  /// No description provided for @agentAuditEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No agent activity yet.'**
+  String get agentAuditEmpty;
+
+  /// No description provided for @agentAuditRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get agentAuditRefresh;
+
+  /// Footer of the agent audit list.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} records shown'**
+  String agentAuditCount(String count);
+
+  /// No description provided for @agentAuditOpClipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy to clipboard'**
+  String get agentAuditOpClipboard;
+
+  /// No description provided for @agentAuditDecisionAllowed.
+  ///
+  /// In en, this message translates to:
+  /// **'Allowed'**
+  String get agentAuditDecisionAllowed;
+
+  /// No description provided for @agentAuditDecisionDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Denied'**
+  String get agentAuditDecisionDenied;
+
+  /// No description provided for @agentAuditDecisionTimeout.
+  ///
+  /// In en, this message translates to:
+  /// **'Timed out'**
+  String get agentAuditDecisionTimeout;
+
+  /// No description provided for @agentAuditDecisionError.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get agentAuditDecisionError;
+
+  /// No description provided for @agentModeSwitchTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Access mode'**
+  String get agentModeSwitchTitle;
+
+  /// No description provided for @agentSwitchToApproval.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch to “ask every time”'**
+  String get agentSwitchToApproval;
+
+  /// No description provided for @agentSwitchToTrusted.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch to trusted (no prompts)'**
+  String get agentSwitchToTrusted;
+
   /// No description provided for @autostartUnsupported.
   ///
   /// In en, this message translates to:

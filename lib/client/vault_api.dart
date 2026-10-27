@@ -159,6 +159,22 @@ abstract class VaultApi {
 
   Future<void> lockAgentDomain();
 
+  /// 智能体审批请求流（方式 1）：UI 收到后弹窗，再用 [respondAgentApproval] 回话。
+  Stream<Map<String, dynamic>> get agentApprovalRequests;
+
+  /// 回应一次审批请求；返回 false 表示该请求已过期/不存在。
+  ///
+  /// [allowStandingRead] 对应弹窗里的「本会话内允许读取」：**只对普通读生效**，
+  /// 核心会忽略其它操作上的该标志。
+  Future<bool> respondAgentApproval({
+    required String approvalId,
+    required bool allow,
+    bool allowStandingRead = false,
+  });
+
+  /// 最近的智能体审计记录（新的在前）。
+  Future<List<Map<String, dynamic>>> listAgentAudit({int limit = 100});
+
   // ─── 变更通知 ──────────────────────────────────────────
 
   /// 主题流（`items` / `item` / `folders` / `search`）。

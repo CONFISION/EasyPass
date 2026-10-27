@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -280,12 +281,108 @@ void main() {
     expect(emptyTotp['errorCode'], 'notFound');
   });
 
-  test('方式 1（逐次审批）在阶段 1 fail closed：读也被拒', () async {
+  test('方式 1：没有审批通道时 fail closed（读也被拒）', () async {
     final payload = await callToolPayload(approvalKey, 'list_entries');
     expect(payload['errorCode'], 'denied');
 
     final status = await callToolPayload(approvalKey, 'status');
     expect(status['mode'], 'approval');
+  });
+
+  group('方式 1：审批弹窗链路', () {
+    late List<Map<String, Object?>> requests;
+
+    setUp(() {
+      requests = [];
+      actions.onApprovalRequested = (req) {
+        requests.add(req);
+        // 自动同意（下一帧再回应，避免在 sink 里同步重入）。
+        scheduleMicrotask(() {
+          actions.respondApproval(req['approvalId'] as String, true);
+        });
+      };
+    });
+
+    tearDown(() => actions.onApprovalRequested = null);
+
+    test('用户同意后能读到数据；弹窗内容含昵称/工具/操作', () async {
+      final payload = await callToolPayload(approvalKey, 'list_entries');
+      expect((payload['entries'] as List).length, 2);
+
+      expect(requests, isNotEmpty);
+      expect(requests.first['nickname'], '谨慎模式');
+      expect(requests.first['tool'], 'list_entries');
+      expect(requests.first['op'], 'read');
+      expect(requests.first['allowStanding'], isTrue);
+    });
+
+    test('用户拒绝 ⇒ denied，且不返回任何条目', () async {
+      actions.onApprovalRequested = (req) {
+        requests.add(req);
+        scheduleMicrotask(() {
+          actions.respondApproval(req['approvalId'] as String, false);
+        });
+      };
+
+      final payload = await callToolPayload(approvalKey, 'list_entries');
+      expect(payload['errorCode'], 'denied');
+      expect(payload.containsKey('entries'), isFalse);
+    });
+
+    test('「本会话内允许读取」后不再弹窗', () async {
+      actions.onApprovalRequested = (req) {
+        requests.add(req);
+        scheduleMicrotask(() {
+          actions.respondApproval(
+            req['approvalId'] as String,
+            true,
+            allowStandingRead: true,
+          );
+        });
+      };
+
+      await callToolPayload(approvalKey, 'list_entries');
+      expect(requests.length, 1);
+
+      await callToolPayload(approvalKey, 'list_entries');
+      expect(requests.length, 1, reason: '免询问生效后不该再弹');
+
+      final rows = await db.recentAgentAudit();
+      expect(rows.any((r) => r.decision == 'allowed'), isTrue);
+    });
+
+    test('免询问**不覆盖**敏感读：copy_to_clipboard 仍要审批', () async {
+      actions.onApprovalRequested = (req) {
+        requests.add(req);
+        scheduleMicrotask(() {
+          actions.respondApproval(
+            req['approvalId'] as String,
+            true,
+            allowStandingRead: true,
+          );
+        });
+      };
+
+      // 先用一次普通读拿到免询问。
+      await callToolPayload(approvalKey, 'list_entries');
+      final before = requests.length;
+
+      // 敏感读必须再弹一次（且弹窗不允许勾免询问）。
+      await callToolPayload(
+        approvalKey,
+        'copy_to_clipboard',
+        {'id': 'e-open', 'field': 'password'},
+      );
+      expect(requests.length, before + 1);
+      expect(requests.last['op'], 'sensitiveRead');
+      expect(requests.last['allowStanding'], isFalse);
+    });
+
+    test('审批里的条目 id / 名称会传给弹窗（get_entry）', () async {
+      await callToolPayload(approvalKey, 'get_entry', {'id': 'e-open'});
+      expect(requests.last['entryId'], 'e-open');
+      expect(requests.last['entryName'], 'GitHub');
+    });
   });
 
   /// 回归（真机实测）：`end_session` 曾经无条件锁 agent 域 —— 那等于智能体

@@ -106,6 +106,12 @@ class Actions {
   /// 重置专属密钥（换新钥匙重新包裹，旧钥匙立刻作废，库密文不动）。
   static const String resetAgentKey = 'resetAgentKey';
 
+  /// 方式 1：回应用户的审批弹窗（同意 / 拒绝 / 本会话内允许读取）。
+  static const String respondAgentApproval = 'respondAgentApproval';
+
+  /// 读取智能体访问审计（最近 N 条）。
+  static const String listAgentAudit = 'listAgentAudit';
+
   // ─── 扩展既有动作（bridge 专用，形状冻结）───────────────
 
   static const String getCredentials = 'getCredentials';
@@ -166,6 +172,8 @@ class Actions {
     enableAgentAccess,
     disableAgentAccess,
     resetAgentKey,
+    respondAgentApproval,
+    listAgentAudit,
   };
 
   /// **智能体域（`role: agent`）** 的动作白名单。

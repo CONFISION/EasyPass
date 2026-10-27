@@ -79,6 +79,10 @@ class CoreActions {
   /// 先建 `CoreActions` 再建 `CoreService`（回调要指向后者）。
   void Function(bool enabled)? onAgentAccessChanged;
 
+  /// 智能体审批回应回调（方式 1）：`(approvalId, allow, allowStandingRead) -> ok`。
+  bool Function(String approvalId, bool allow, bool allowStandingRead)?
+      onAgentApprovalResponse;
+
   /// 数据变更回调：参数是受影响的主题集合（`items` / `item` / `folders` / `search`）。
   final void Function(Set<String> topics) onDataChanged;
 
@@ -186,6 +190,10 @@ class CoreActions {
         return _disableAgentAccess();
       case Actions.resetAgentKey:
         return _resetAgentKey();
+      case Actions.respondAgentApproval:
+        return _respondAgentApproval(params);
+      case Actions.listAgentAudit:
+        return _listAgentAudit(params);
       default:
         throw CoreActionException(
           ErrorCodes.unsupported,
@@ -335,6 +343,48 @@ class CoreActions {
         'agentUnlocked': _sessions.agent.isUnlocked,
         'enabled': await _agentAccess.isEnabled(),
       };
+
+  /// 方式 1 的审批回应：由 UI 弹窗调用（见 [onAgentApprovalResponse]）。
+  Future<Map<String, dynamic>> _respondAgentApproval(
+    Map<String, dynamic> params,
+  ) async {
+    final approvalId = params['approvalId'] as String? ?? '';
+    if (approvalId.isEmpty) {
+      throw CoreActionException(ErrorCodes.invalidRequest, 'approvalId 必填');
+    }
+    final allow = params['allow'] == true;
+    final allowStanding = params['allowStandingRead'] == true;
+    final handler = onAgentApprovalResponse;
+    if (handler == null) {
+      return {'ok': false};
+    }
+    return {
+      'ok': handler(approvalId, allow, allowStanding),
+    };
+  }
+
+  Future<Map<String, dynamic>> _listAgentAudit(
+    Map<String, dynamic> params,
+  ) async {
+    final limit = ((params['limit'] as num?)?.toInt() ?? 100).clamp(1, 500);
+    final rows = await _db.recentAgentAudit(limit: limit);
+    return {
+      'entries': [
+        for (final row in rows)
+          {
+            'at': row.at,
+            'nickname': row.nickname,
+            'mode': row.mode,
+            'tool': row.tool,
+            'op': row.op,
+            'entryId': row.entryId,
+            'entryName': row.entryName,
+            'decision': row.decision,
+          },
+      ],
+      'total': await _db.countAgentAudit(),
+    };
+  }
 
   /// 打开「智能体访问」总开关。
   ///

@@ -138,6 +138,128 @@ class AgentActions {
 
   AgentWindow? _window;
 
+  /// 方式 1 的"本会话内允许读取"（按配对 id）。仅对**普通读**生效，
+  /// 敏感读（明文/验证码/剪贴板）与写删一律每次都要同意。
+  final Set<String> _standingRead = <String>{};
+
+  /// 待用户回应的审批请求（`approvalId` → 结果）。
+  final Map<String, Completer<bool>> _pendingApprovals = {};
+
+  /// 审批请求归属的配对与"是否允许勾选本会话免询问"。
+  final Map<String, String> _pendingPairing = {};
+  final Map<String, bool> _pendingAllowStanding = {};
+
+  /// 当前正在执行的工具名（诊断/审计用；审批请求由各工具显式传 tool）。
+  String _currentTool = '';
+
+  String get currentTool => _currentTool;
+
+  /// 审批超时：必须短于客户端自己的 `tools/call` 超时（DSH 默认 60s），
+  /// 否则客户端先超时、用户随后点"同意"就成了对没人等待的调用授权。
+  static const Duration approvalTimeout = Duration(seconds: 45);
+
+  /// 向 UI 广播审批请求的钩子（核心把它接到 `_broadcast`）。
+  void Function(Map<String, Object?> request)? onApprovalRequested;
+
+  /// UI 的回应入口（`CoreActions.respondAgentApproval` 调它）。
+  ///
+  /// [allowStandingRead] 只在"本次是普通读、且该请求允许免询问"时才生效 ——
+  /// 核心侧再判一次，不信任 UI 传来的标志。
+  bool respondApproval(
+    String approvalId,
+    bool allow, {
+    bool allowStandingRead = false,
+  }) {
+    final completer = _pendingApprovals.remove(approvalId);
+    if (completer == null || completer.isCompleted) {
+      _pendingPairing.remove(approvalId);
+      _pendingAllowStanding.remove(approvalId);
+      return false;
+    }
+    final pairingId = _pendingPairing.remove(approvalId);
+    final standingAllowed = _pendingAllowStanding.remove(approvalId) ?? false;
+    if (allow && allowStandingRead && standingAllowed && pairingId != null) {
+      _standingRead.add(pairingId);
+    }
+    completer.complete(allow);
+    return true;
+  }
+
+  /// 某配对是否已获得"本会话内免询问读取"（UI 用它显示可撤销指示）。
+  bool isStandingRead(String pairingId) => _standingRead.contains(pairingId);
+
+  /// 撤销"本会话内免询问读取"。
+  void clearStandingRead(String pairingId) => _standingRead.remove(pairingId);
+
+  /// 清空所有免询问状态（锁定 / 关总开关 / 换方式时调用）。
+  void clearAllStandingRead() => _standingRead.clear();
+
+  /// 发一次审批并等待；超时按**拒绝**处理（fail closed）。
+  Future<bool> _requestApproval(
+    AgentPairing pairing, {
+    required AgentOp op,
+    required String toolName,
+    required bool allowStandingOption,
+    String? entryId,
+    String? entryName,
+  }) async {
+    final sink = onApprovalRequested;
+    // 没有 UI 可问（例如核心以无 UI 方式运行）⇒ 直接拒绝，绝不放行。
+    if (sink == null) return false;
+
+    final approvalId =
+        'a_${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}'
+        '_${_pendingApprovals.length}';
+    final completer = Completer<bool>();
+    _pendingApprovals[approvalId] = completer;
+    _pendingPairing[approvalId] = pairing.id;
+    _pendingAllowStanding[approvalId] = allowStandingOption;
+
+    sink({
+      'approvalId': approvalId,
+      'nickname': _nicknameOf(pairing),
+      'tool': toolName,
+      'op': _opLabel(op),
+      'entryId': entryId,
+      'entryName': entryName,
+      'allowStanding': allowStandingOption,
+    });
+
+    bool allowed;
+    try {
+      allowed = await completer.future.timeout(approvalTimeout);
+    } on TimeoutException {
+      allowed = false;
+      _auditAdd(
+        principal: McpPrincipal(
+          pairingId: pairing.id,
+          nickname: _nicknameOf(pairing),
+        ),
+        mode: pairing.mode,
+        tool: toolName,
+        op: _opLabel(op),
+        decision: 'timeout',
+        entryId: entryId,
+        entryName: entryName,
+      );
+    } finally {
+      _pendingApprovals.remove(approvalId);
+      _pendingPairing.remove(approvalId);
+      _pendingAllowStanding.remove(approvalId);
+    }
+    return allowed;
+  }
+
+  static String _opLabel(AgentOp op) => switch (op) {
+        AgentOp.read => 'read',
+        AgentOp.sensitiveRead => 'sensitiveRead',
+        AgentOp.write => 'write',
+        AgentOp.delete => 'delete',
+      };
+
+  String _nicknameOf(AgentPairing pairing) =>
+      pairing.nickname.trim().isEmpty ? '未命名智能体' : pairing.nickname;
+
   final Queue<AgentAuditEntry> _audit = Queue<AgentAuditEntry>();
 
   AgentWindow? get window => _window;
@@ -168,11 +290,11 @@ class AgentActions {
     if (pairing == null || pairing.isRevoked) {
       throw McpToolException('unauthorized', '配对不存在或已撤销');
     }
+    _currentTool = tool;
 
     switch (tool) {
       case 'status':
-        return _status(pairing, principal);
-      case 'begin_session':
+        return _status(pairing, principal);      case 'begin_session':
         return _beginSession(pairing, principal, args);
       case 'end_session':
         return _endSession(pairing, principal);
@@ -227,7 +349,7 @@ class AgentActions {
     }
     final rawTtl = (args['ttlSeconds'] as num?)?.toInt() ?? windowTtlDefaultSeconds;
     final ttl = rawTtl.clamp(windowTtlMinSeconds, windowTtlMaxSeconds);
-    _requireRequestAllowed(pairing);
+    await _gate(pairing, principal, tool: 'begin_session');
 
     final now = _now;
     _window = AgentWindow(
@@ -279,7 +401,7 @@ class AgentActions {
     Map<String, Object?> args,
   ) async {
     _requireUnlocked();
-    _requireRequestAllowed(pairing);
+    await _gate(pairing, principal, tool: 'list_entries');
     final query = (args['query'] as String? ?? '').trim();
     final folders = await _folderNames();
     // **不传 type 就是"全部类型"**：`EntryType.fromWire(null)` 会回退成 login，
@@ -325,11 +447,18 @@ class AgentActions {
     Map<String, Object?> args,
   ) async {
     _requireUnlocked();
-    _requireRequestAllowed(pairing);
     final id = (args['id'] as String? ?? '').trim();
     if (id.isEmpty) throw McpToolException('invalidRequest', 'id 必填');
     final item = await _repository.getItem(id);
     if (item == null) throw McpToolException('notFound', '找不到该条目');
+    // 审批弹窗要展示"哪个条目"，所以先取条目再闸门。
+    await _gate(
+      pairing,
+      principal,
+      tool: 'get_entry',
+      entryId: item.id,
+      entryName: item.name,
+    );
 
     final result = AgentAccessPolicy.evaluate(_requestFor(pairing, item));
     if (!result.allowed) {
@@ -374,12 +503,21 @@ class AgentActions {
     Map<String, Object?> args,
   ) async {
     _requireUnlocked();
-    _requireRequestAllowed(pairing);
     final id = (args['id'] as String? ?? '').trim();
     if (id.isEmpty) throw McpToolException('invalidRequest', 'id 必填');
 
     final item = await _repository.getItem(id);
     if (item == null) throw McpToolException('notFound', '找不到该条目');
+    // 敏感读：**不享受**本会话免询问，每次都要用户同意。
+    await _gate(
+      pairing,
+      principal,
+      tool: 'copy_to_clipboard',
+      op: AgentOp.sensitiveRead,
+      allowStanding: false,
+      entryId: item.id,
+      entryName: item.name,
+    );
 
     final result = AgentAccessPolicy.evaluate(
       _requestFor(pairing, item, op: AgentOp.sensitiveRead),
@@ -487,10 +625,9 @@ class AgentActions {
       inScope: _inScope(pairing, item),
       mode: pairing.mode,
       trusted: pairing.trusted,
-      // 阶段 1 还没有审批 UI：方式 1 一律 notApproved（fail closed）。
-      // 请求级闸门已经先把方式 1 挡住了，这里保留同样的口径以防将来加审批时漏改。
-      approvedThisCall: false,
-      standingRead: false,
+      // 由统一的 [_gate] 在读取条目之前决定（方式 1 的同意 / 免询问）。
+      approvedThisCall: _callApproved,
+      standingRead: _callStanding,
     );
   }
 
@@ -523,12 +660,70 @@ class AgentActions {
     }
   }
 
-  /// 请求级闸门（**在读任何条目之前**）。
+  /// 一次工具调用是否已获"本次同意" / 是否靠"本会话免询问"放行。
+  /// 由 [_gate] 在读取条目之前设置，[_requestFor] 读取它做逐条判定。
+  bool _callApproved = false;
+  bool _callStanding = false;
+
+  /// 请求级闸门：**在读任何条目之前**决定这次调用有没有资格继续。
   ///
-  /// 为什么要单独一道：如果只做逐条过滤，方式 1 在阶段 1 会"静默返回空列表"——
-  /// agent 看到的是"没有条目"，而不是"你没被批准"。显式拒绝才符合 fail closed，
-  /// 也让排查有据可依。
-  void _requireRequestAllowed(AgentPairing pairing) {
+  /// - 方式 2（可信直通）：直接按策略校验，不需要同意；
+  /// - 方式 1：先看"本会话免询问"（仅普通读、且仅该配对），否则向 UI 发审批并等待。
+  ///   用户拒绝 / 超时 ⇒ 抛 `denied`（fail closed），绝不静默返回空列表。
+  Future<void> _gate(
+    AgentPairing pairing,
+    McpPrincipal principal, {
+    required String tool,
+    AgentOp op = AgentOp.read,
+    bool allowStanding = true,
+    String? entryId,
+    String? entryName,
+  }) async {
+    _callApproved = false;
+    _callStanding = false;
+
+    if (pairing.mode == AgentMode.trusted) {
+      _assertRequestAllowed(pairing, approvedThisCall: false);
+      return;
+    }
+
+    // 方式 1：本会话已放行读（仅普通读）。
+    if (allowStanding &&
+        op == AgentOp.read &&
+        _standingRead.contains(pairing.id)) {
+      _callStanding = true;
+      _assertRequestAllowed(pairing, approvedThisCall: false);
+      return;
+    }
+
+    final approved = await _requestApproval(
+      pairing,
+      op: op,
+      toolName: tool,
+      allowStandingOption: allowStanding && op == AgentOp.read,
+      entryId: entryId,
+      entryName: entryName,
+    );
+    if (!approved) {
+      _auditAdd(
+        principal: principal,
+        mode: pairing.mode,
+        tool: tool,
+        op: _opLabel(op),
+        decision: 'denied',
+        entryId: entryId,
+        entryName: entryName,
+      );
+      throw McpToolException('denied', '用户未同意本次操作');
+    }
+    _callApproved = true;
+    _assertRequestAllowed(pairing, approvedThisCall: true);
+  }
+
+  void _assertRequestAllowed(
+    AgentPairing pairing, {
+    required bool approvedThisCall,
+  }) {
     _requireAllowed(
       pairing,
       AgentAccessRequest(
@@ -539,9 +734,8 @@ class AgentActions {
         sessionUnlocked: _sessions.agent.isUnlocked,
         mode: pairing.mode,
         trusted: pairing.trusted,
-        // 阶段 1 还没有审批 UI：方式 1 一律 notApproved（fail closed）。
-        approvedThisCall: false,
-        standingRead: false,
+        approvedThisCall: approvedThisCall,
+        standingRead: _callStanding,
       ),
     );
   }

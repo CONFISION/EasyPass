@@ -199,6 +199,19 @@ class CoreService {
       socket: singleton.socket,
     );
 
+    // 方式 1 的接线：智能体发起审批 → 核心广播给 UI；UI 回应 → 解除挂起。
+    agentActions.onApprovalRequested =
+        (request) => service._broadcast({
+              'event': Events.agentApprovalRequested,
+              ...request,
+            });
+    actions.onAgentApprovalResponse = (approvalId, allow, allowStanding) =>
+        agentActions.respondApproval(
+          approvalId,
+          allow,
+          allowStandingRead: allowStanding,
+        );
+
     await actions.refreshAuthMaterial();
     // 审计表自愈：只保留最近若干条，避免长期运行后无限增长。
     // 失败不影响启动（审计是旁路，不是核心功能的前提）。

@@ -25,6 +25,10 @@ class CoreSession {
   final StreamController<String> _changes = StreamController<String>.broadcast();
   final StreamController<String> _sessionEvents =
       StreamController<String>.broadcast();
+
+  /// 智能体审批请求（方式 1）：给 UI 弹窗用。
+  final StreamController<Map<String, dynamic>> _agentApprovals =
+      StreamController<Map<String, dynamic>>.broadcast();
   bool _disposed = false;
 
   /// 数据变更主题流（`items` / `item` / `folders` / `search`）。
@@ -32,6 +36,10 @@ class CoreSession {
 
   /// 会话事件流（`locked` / `unlocked` / `shuttingDown`）。
   Stream<String> get sessionEvents => _sessionEvents.stream;
+
+  /// 智能体审批请求流。
+  Stream<Map<String, dynamic>> get agentApprovalRequests =>
+      _agentApprovals.stream;
 
   bool get isConnected => _client?.isClosed == false;
 
@@ -116,6 +124,11 @@ class CoreSession {
         if (changed is String) _changes.add(changed);
         return;
       }
+      // 智能体审批请求：单独一条流给 UI 弹窗用（它携带完整请求内容）。
+      if (event['event'] == Events.agentApprovalRequested) {
+        _agentApprovals.add(Map<String, dynamic>.from(event));
+        return;
+      }
       final sessionEvent = uiSessionEvent(event);
       if (sessionEvent != null) _sessionEvents.add(sessionEvent);
     });
@@ -141,6 +154,7 @@ class CoreSession {
     _client?.close();
     await _changes.close();
     await _sessionEvents.close();
+    await _agentApprovals.close();
   }
 }
 
@@ -152,6 +166,10 @@ class CoreVaultApi implements VaultApi {
 
   @override
   Stream<String> get changes => _session.changes;
+
+  @override
+  Stream<Map<String, dynamic>> get agentApprovalRequests =>
+      _session.agentApprovalRequests;
 
   @override
   Stream<String> get sessionEvents => _session.sessionEvents;
@@ -435,6 +453,31 @@ class CoreVaultApi implements VaultApi {
   @override
   Future<void> lockAgentDomain() async {
     await _call(Actions.lockAgentDomain);
+  }
+
+  @override
+  Future<bool> respondAgentApproval({
+    required String approvalId,
+    required bool allow,
+    bool allowStandingRead = false,
+  }) async {
+    final data = await _call(Actions.respondAgentApproval, {
+      'approvalId': approvalId,
+      'allow': allow,
+      'allowStandingRead': allowStandingRead,
+    });
+    return data['ok'] == true;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listAgentAudit({int limit = 100}) async {
+    final data = await _call(Actions.listAgentAudit, {'limit': limit});
+    final raw = data['entries'];
+    if (raw is! List) return const [];
+    return [
+      for (final item in raw)
+        if (item is Map) Map<String, dynamic>.from(item),
+    ];
   }
 
   List<VaultItem> _items(Map<String, dynamic> data) {

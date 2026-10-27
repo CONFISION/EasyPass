@@ -1135,6 +1135,88 @@ class AppLocalizationsEn extends AppLocalizations {
       'Permanently denied — agents can never read it.';
 
   @override
+  String get agentApprovalTitle => 'An agent is asking for access';
+
+  @override
+  String get agentApprovalAgent => 'Agent';
+
+  @override
+  String get agentApprovalOperation => 'Action';
+
+  @override
+  String get agentApprovalEntry => 'Entry';
+
+  @override
+  String get agentApprovalTool => 'Tool';
+
+  @override
+  String get agentApprovalHint =>
+      'Only what is shown here will happen. Deny if you did not expect this request.';
+
+  @override
+  String get agentApprovalAllow => 'Allow';
+
+  @override
+  String get agentApprovalDeny => 'Deny';
+
+  @override
+  String get agentApprovalAllowStanding => 'Allow reads this session';
+
+  @override
+  String get agentApprovalOpRead => 'Read (metadata)';
+
+  @override
+  String get agentApprovalOpSensitiveRead => 'Read a secret';
+
+  @override
+  String get agentApprovalOpWrite => 'Write';
+
+  @override
+  String get agentApprovalOpDelete => 'Delete';
+
+  @override
+  String get agentAuditTitle => 'Agent activity';
+
+  @override
+  String get agentAuditSubtitle =>
+      'Every AI agent access, with the entry and the outcome.';
+
+  @override
+  String get agentAuditEmpty => 'No agent activity yet.';
+
+  @override
+  String get agentAuditRefresh => 'Refresh';
+
+  @override
+  String agentAuditCount(String count) {
+    return '$count records shown';
+  }
+
+  @override
+  String get agentAuditOpClipboard => 'Copy to clipboard';
+
+  @override
+  String get agentAuditDecisionAllowed => 'Allowed';
+
+  @override
+  String get agentAuditDecisionDenied => 'Denied';
+
+  @override
+  String get agentAuditDecisionTimeout => 'Timed out';
+
+  @override
+  String get agentAuditDecisionError => 'Failed';
+
+  @override
+  String get agentModeSwitchTitle => 'Access mode';
+
+  @override
+  String get agentSwitchToApproval => 'Switch to “ask every time”';
+
+  @override
+  String get agentSwitchToTrusted => 'Switch to trusted (no prompts)';
+
+  @override
   String get autostartUnsupported =>
       'Managed by the OS installer on this platform.';
 
