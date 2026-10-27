@@ -126,93 +126,159 @@ class _ApprovalOverlay extends StatelessWidget {
     return Material(
       type: MaterialType.transparency,
       child: ColoredBox(
-        color: Colors.black.withValues(alpha: 0.5),
+        color: Colors.black.withValues(alpha: 0.55),
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
+            constraints: const BoxConstraints(maxWidth: 380),
             child: AlertDialog(
-            icon: Icon(Icons.smart_toy_outlined,
-                color: theme.colorScheme.tertiary),
-            title: Text(l10n.agentApprovalTitle),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _row(l10n.agentApprovalAgent, nickname, theme),
-                  const SizedBox(height: 8),
-                  _row(l10n.agentApprovalOperation, _opLabel(l10n, op), theme,
-                      emphasize: true),
-                  if (entryName != null) ...[
-                    const SizedBox(height: 8),
-                    _row(l10n.agentApprovalEntry, entryName, theme,
-                        emphasize: true),
+              icon: Icon(Icons.smart_toy_outlined,
+                  size: 28, color: theme.colorScheme.tertiary),
+              title: Text(
+                l10n.agentApprovalTitle,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 竖排卡片式信息：标签在上、值在下，比"左标签右值"更好读。
+                    _field(
+                      l10n.agentApprovalAgent,
+                      nickname,
+                      theme,
+                      icon: Icons.person_outline,
+                    ),
+                    const SizedBox(height: 10),
+                    _field(
+                      l10n.agentApprovalOperation,
+                      _opLabel(l10n, op),
+                      theme,
+                      icon: Icons.bolt_outlined,
+                      emphasize: true,
+                      color: theme.colorScheme.tertiary,
+                    ),
+                    if (entryName != null) ...[
+                      const SizedBox(height: 10),
+                      _field(
+                        l10n.agentApprovalEntry,
+                        entryName,
+                        theme,
+                        icon: Icons.key_outlined,
+                        emphasize: true,
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+                    Text(
+                      l10n.agentApprovalHint,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    // 工具名放在最下面一行小字：排查时有用，但不该抢视线。
+                    Text(
+                      tool,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.outline,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
                   ],
+                ),
+              ),
+              // 按钮**竖排**、每个占满宽度：横排时英文长文案容易挤，
+              // 而且"拒绝"必须显眼 —— 红色实心 + 最下面，符合危险动作的位置直觉。
+              actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              actions: [
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: onAllow,
+                    child: Text(l10n.agentApprovalAllow),
+                  ),
+                ),
+                if (allowStanding) ...[
                   const SizedBox(height: 8),
-                  _row(l10n.agentApprovalTool, tool, theme),
-                  const SizedBox(height: 12),
-                  Text(
-                    l10n.agentApprovalHint,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.tonal(
+                      onPressed: onAllowStanding,
+                      child: Text(l10n.agentApprovalAllowStanding),
                     ),
                   ),
                 ],
-              ),
-            ),
-            // 三个按钮交给 AlertDialog 的 OverflowBar 自己排：
-            // 嵌套 Row 在窄宽度 + 长文案（英文「Allow reads this session」）时
-            // 会直接溢出 —— 这是仓库里记过的同类坑，别再包一层 Row。
-            actions: [
-              TextButton(
-                onPressed: onDeny,
-                child: Text(l10n.agentApprovalDeny),
-              ),
-              if (allowStanding)
-                TextButton(
-                  onPressed: onAllowStanding,
-                  child: Text(l10n.agentApprovalAllowStanding),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: theme.colorScheme.error,
+                      foregroundColor: theme.colorScheme.onError,
+                    ),
+                    onPressed: onDeny,
+                    child: Text(l10n.agentApprovalDeny),
+                  ),
                 ),
-              FilledButton(
-                onPressed: onAllow,
-                child: Text(l10n.agentApprovalAllow),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-      ),
       ),
     );
   }
 
-  Widget _row(
+  /// 竖排字段：图标 + 标签一行，值另起一行。
+  Widget _field(
     String label,
     String value,
     ThemeData theme, {
+    IconData? icon,
     bool emphasize = false,
+    Color? color,
   }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 72,
-          child: Text(
-            label,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+    final scheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 14, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 6),
+              ],
+              Text(
+                label,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ],
           ),
-        ),
-        Expanded(
-          child: Text(
+          const SizedBox(height: 4),
+          Text(
             value,
-            style: emphasize
-                ? theme.textTheme.bodyMedium
-                    ?.copyWith(fontWeight: FontWeight.w600)
-                : theme.textTheme.bodyMedium,
+            style: (emphasize
+                    ? theme.textTheme.titleSmall
+                    : theme.textTheme.bodyMedium)
+                ?.copyWith(
+              fontWeight: emphasize ? FontWeight.w600 : FontWeight.w400,
+              color: color,
+            ),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

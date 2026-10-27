@@ -138,6 +138,41 @@ void main() {
       expect(find.text(l10n.agentApprovalEntry), findsNothing);
       expect(find.text(l10n.agentApprovalTitle), findsOneWidget);
     });
+
+    testWidgets('拒绝按钮是红色实心，且按钮竖排（同意在上、拒绝在下）', (tester) async {
+      await pumpApprovalHost(tester);
+      api.emitAgentApproval(approvalRequest());
+      await tester.pumpAndSettle();
+
+      final denyFinder =
+          find.widgetWithText(FilledButton, l10n.agentApprovalDeny);
+      final deny = tester.widget<FilledButton>(denyFinder);
+      final context = tester.element(denyFinder);
+      final scheme = Theme.of(context).colorScheme;
+
+      expect(
+        deny.style?.backgroundColor?.resolve(<WidgetState>{}),
+        scheme.error,
+        reason: '拒绝必须是红色背景，比"同意"更显眼',
+      );
+      expect(
+        deny.style?.foregroundColor?.resolve(<WidgetState>{}),
+        scheme.onError,
+      );
+
+      final allowY = tester
+          .getCenter(find.widgetWithText(FilledButton, l10n.agentApprovalAllow))
+          .dy;
+      final denyY = tester.getCenter(denyFinder).dy;
+      expect(allowY, lessThan(denyY), reason: '按钮必须竖排，拒绝放最下面');
+
+      // 竖排 + 占满宽度：两者宽度应基本一致。
+      final allowWidth = tester
+          .getSize(find.widgetWithText(FilledButton, l10n.agentApprovalAllow))
+          .width;
+      expect((allowWidth - tester.getSize(denyFinder).width).abs(),
+          lessThan(1.0));
+    });
   });
 
   group('审计查看页', () {
