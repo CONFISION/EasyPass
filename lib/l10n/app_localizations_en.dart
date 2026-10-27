@@ -1160,7 +1160,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get agentApprovalDeny => 'Deny';
 
   @override
-  String get agentApprovalAllowStanding => 'Allow reads this session';
+  String get agentApprovalAllowStanding => 'Allow reads for this session';
 
   @override
   String get agentApprovalOpRead => 'Read (metadata)';

@@ -2207,7 +2207,7 @@ abstract class AppLocalizations {
   /// No description provided for @agentApprovalAllowStanding.
   ///
   /// In en, this message translates to:
-  /// **'Allow reads this session'**
+  /// **'Allow reads for this session'**
   String get agentApprovalAllowStanding;
 
   /// No description provided for @agentApprovalOpRead.

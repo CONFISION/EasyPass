@@ -6,6 +6,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../client/api_providers.dart';
 import '../../../l10n/app_localizations.dart';
 
+/// 审批弹窗内容区宽度（逻辑像素）。测试用它确认"弹窗确实加宽了"，
+/// 也方便以后调宽度时有个稳定锚点。
+const Key agentApprovalContentKey = Key('agentApprovalContent');
+
 /// 方式 1（逐次审批）的审批界面宿主。
 ///
 /// 挂在 `MaterialApp.builder` 上，任何页面都会显示 —— 审批是"智能体在等你回话"，
@@ -18,7 +22,9 @@ import '../../../l10n/app_localizations.dart';
 ///
 /// 其余纪律：
 /// - 完整展示：来自哪个智能体、什么操作、哪个条目、哪个工具；
-/// - 只有「同意 / 拒绝」，外加「本会话内允许读取」（只在普通读时出现）；
+/// - 弹窗做宽（内容区 520），三个动作**一排横放**：同意 / 本会话内允许读取 / 拒绝
+///   —— 横排一眼读完，竖排像一张表单；「本会话内允许读取」只在普通读时出现；
+/// - 拒绝 = 红色实心，是这一排里唯一带色块的按钮；
 /// - 关掉 = 拒绝；同一时刻只显示一个，其余排队。
 class AgentApprovalHost extends ConsumerStatefulWidget {
   const AgentApprovalHost({required this.child, super.key});
@@ -104,6 +110,10 @@ class _ApprovalOverlay extends StatelessWidget {
     required this.onAllowStanding,
   });
 
+  /// 内容区宽度。宽度给足，三个按钮才有资格横着排；窄弹窗是当初只能竖排的
+  /// 借口，而竖排读起来像一张表单，不像"现在就要你做个决定"。
+  static const double _dialogWidth = 520;
+
   final Map<String, dynamic> request;
   final VoidCallback onAllow;
   final VoidCallback onDeny;
@@ -113,6 +123,7 @@ class _ApprovalOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
     final nickname = request['nickname'] as String? ?? '';
     final tool = request['tool'] as String? ?? '';
@@ -128,157 +139,215 @@ class _ApprovalOverlay extends StatelessWidget {
       child: ColoredBox(
         color: Colors.black.withValues(alpha: 0.55),
         child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 380),
-            child: AlertDialog(
-              icon: Icon(Icons.smart_toy_outlined,
-                  size: 28, color: theme.colorScheme.tertiary),
-              title: Text(
-                l10n.agentApprovalTitle,
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w600),
+          child: AlertDialog(
+            icon: Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: scheme.tertiaryContainer.withValues(alpha: 0.55),
+                shape: BoxShape.circle,
               ),
-              content: SingleChildScrollView(
+              child: Icon(
+                Icons.smart_toy_outlined,
+                size: 27,
+                color: scheme.onTertiaryContainer,
+              ),
+            ),
+            title: Text(
+              l10n.agentApprovalTitle,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            content: SizedBox(
+              key: agentApprovalContentKey,
+              width: _dialogWidth,
+              child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // 竖排卡片式信息：标签在上、值在下，比"左标签右值"更好读。
-                    _field(
-                      l10n.agentApprovalAgent,
-                      nickname,
-                      theme,
-                      icon: Icons.person_outline,
-                    ),
-                    const SizedBox(height: 10),
-                    _field(
-                      l10n.agentApprovalOperation,
-                      _opLabel(l10n, op),
-                      theme,
-                      icon: Icons.bolt_outlined,
-                      emphasize: true,
-                      color: theme.colorScheme.tertiary,
-                    ),
-                    if (entryName != null) ...[
-                      const SizedBox(height: 10),
-                      _field(
-                        l10n.agentApprovalEntry,
-                        entryName,
-                        theme,
-                        icon: Icons.key_outlined,
-                        emphasize: true,
+                    // 信息面板：标签左对齐成一列，值在右 —— 宽弹窗里这种
+                    // "表格"比竖排卡片矮一半，一眼就能扫完四行。
+                    Container(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      decoration: BoxDecoration(
+                        color: scheme.surfaceContainerHighest
+                            .withValues(alpha: 0.45),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: scheme.outlineVariant.withValues(alpha: 0.6),
+                        ),
                       ),
-                    ],
+                      child: Column(
+                        children: [
+                          _infoRow(
+                            theme: theme,
+                            icon: Icons.person_outline,
+                            label: l10n.agentApprovalAgent,
+                            value: Text(
+                              nickname,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          _infoRow(
+                            theme: theme,
+                            icon: Icons.bolt_outlined,
+                            label: l10n.agentApprovalOperation,
+                            value: Align(
+                              alignment: Alignment.centerLeft,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: scheme.tertiaryContainer,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  _opLabel(l10n, op),
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: scheme.onTertiaryContainer,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (entryName != null) ...[
+                            const SizedBox(height: 10),
+                            _infoRow(
+                              theme: theme,
+                              icon: Icons.key_outlined,
+                              label: l10n.agentApprovalEntry,
+                              value: Text(
+                                entryName,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: scheme.onSurface,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 10),
+                          // 工具名不需要抢视线，但排查时要看得到。
+                          _infoRow(
+                            theme: theme,
+                            icon: Icons.terminal_outlined,
+                            label: l10n.agentApprovalTool,
+                            value: Text(
+                              tool,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                                fontFamily: 'monospace',
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     const SizedBox(height: 14),
                     Text(
                       l10n.agentApprovalHint,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    // 工具名放在最下面一行小字：排查时有用，但不该抢视线。
-                    Text(
-                      tool,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.outline,
-                        fontFamily: 'monospace',
+                        color: scheme.onSurfaceVariant,
+                        height: 1.4,
                       ),
                     ),
                   ],
                 ),
               ),
-              // 按钮**竖排**、每个占满宽度：横排时英文长文案容易挤，
-              // 而且"拒绝"必须显眼 —— 红色实心 + 最下面，符合危险动作的位置直觉。
-              actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              actions: [
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
+            ),
+            // 三个动作**一排横放**，顺序按用户直觉：同意 → 本会话内允许读取 → 拒绝，
+            // 拒绝红底白字垫最右，是一排里唯一带色块的按钮。
+            // 中间那个用 Flexible：文案再长（英文 / 大字号）也只让它自己换行，
+            // 绝不会把「拒绝」挤到第二排去。
+            actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+            actions: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  FilledButton(
+                    style: _actionStyle(),
                     onPressed: onAllow,
                     child: Text(l10n.agentApprovalAllow),
                   ),
-                ),
-                if (allowStanding) ...[
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.tonal(
-                      onPressed: onAllowStanding,
-                      child: Text(l10n.agentApprovalAllowStanding),
+                  if (allowStanding) ...[
+                    const SizedBox(width: 12),
+                    Flexible(
+                      child: FilledButton.tonal(
+                        style: _actionStyle(),
+                        onPressed: onAllowStanding,
+                        child: Text(l10n.agentApprovalAllowStanding),
+                      ),
                     ),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: theme.colorScheme.error,
-                      foregroundColor: theme.colorScheme.onError,
-                    ),
+                  ],
+                  const SizedBox(width: 12),
+                  FilledButton(
+                    style: _actionStyle(danger: true, scheme: scheme),
                     onPressed: onDeny,
                     child: Text(l10n.agentApprovalDeny),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  /// 竖排字段：图标 + 标签一行，值另起一行。
-  Widget _field(
-    String label,
-    String value,
-    ThemeData theme, {
-    IconData? icon,
-    bool emphasize = false,
-    Color? color,
+  /// 三个动作按钮共用一套尺寸，保证同一排里高度/内边距一致。
+  /// `danger` 只负责上色：拒绝是红色实心，红底白字，一眼能认出来。
+  ButtonStyle _actionStyle({bool danger = false, ColorScheme? scheme}) {
+    // 只声明尺寸/内边距，颜色留给主题（「本会话内允许读取」是 tonal 变体，
+    // 显式传 null 颜色会把它变成普通实心按钮）。
+    const base = ButtonStyle(
+      minimumSize: WidgetStatePropertyAll<Size>(Size(0, 44)),
+      padding: WidgetStatePropertyAll<EdgeInsetsGeometry>(
+        EdgeInsets.symmetric(horizontal: 20),
+      ),
+    );
+    if (!danger) return base;
+    return base.copyWith(
+      backgroundColor: WidgetStatePropertyAll<Color?>(scheme?.error),
+      foregroundColor: WidgetStatePropertyAll<Color?>(scheme?.onError),
+    );
+  }
+
+  /// 一行「图标 + 标签 + 值」，标签固定宽度对齐成一列。
+  Widget _infoRow({
+    required ThemeData theme,
+    required IconData icon,
+    required String label,
+    required Widget value,
   }) {
     final scheme = theme.colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 14, color: scheme.onSurfaceVariant),
-                const SizedBox(width: 6),
-              ],
-              Text(
-                label,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                  letterSpacing: 0.4,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: (emphasize
-                    ? theme.textTheme.titleSmall
-                    : theme.textTheme.bodyMedium)
-                ?.copyWith(
-              fontWeight: emphasize ? FontWeight.w600 : FontWeight.w400,
-              color: color,
+    return Row(
+      children: [
+        Icon(icon, size: 15, color: scheme.onSurfaceVariant),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 56,
+          child: Text(
+            label,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
             ),
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
           ),
-        ],
-      ),
+        ),
+        Expanded(child: value),
+      ],
     );
   }
 

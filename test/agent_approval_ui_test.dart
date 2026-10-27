@@ -139,17 +139,22 @@ void main() {
       expect(find.text(l10n.agentApprovalTitle), findsOneWidget);
     });
 
-    testWidgets('拒绝按钮是红色实心，且按钮竖排（同意在上、拒绝在下）', (tester) async {
+    testWidgets('按钮横排一行（同意 → 本会话内允许读取 → 拒绝），拒绝红色实心且最显眼',
+        (tester) async {
       await pumpApprovalHost(tester);
       api.emitAgentApproval(approvalRequest());
       await tester.pumpAndSettle();
 
+      final allowFinder =
+          find.widgetWithText(FilledButton, l10n.agentApprovalAllow);
+      final standingFinder =
+          find.widgetWithText(FilledButton, l10n.agentApprovalAllowStanding);
       final denyFinder =
           find.widgetWithText(FilledButton, l10n.agentApprovalDeny);
-      final deny = tester.widget<FilledButton>(denyFinder);
-      final context = tester.element(denyFinder);
-      final scheme = Theme.of(context).colorScheme;
 
+      // 拒绝必须是红色实心：红底 + onError 前景，比"同意"更显眼。
+      final deny = tester.widget<FilledButton>(denyFinder);
+      final scheme = Theme.of(tester.element(denyFinder)).colorScheme;
       expect(
         deny.style?.backgroundColor?.resolve(<WidgetState>{}),
         scheme.error,
@@ -160,18 +165,22 @@ void main() {
         scheme.onError,
       );
 
-      final allowY = tester
-          .getCenter(find.widgetWithText(FilledButton, l10n.agentApprovalAllow))
-          .dy;
-      final denyY = tester.getCenter(denyFinder).dy;
-      expect(allowY, lessThan(denyY), reason: '按钮必须竖排，拒绝放最下面');
+      // 横排：三个按钮中心同一条水平线，且从左到右依次是 同意 → 允许读取 → 拒绝。
+      final allowRect = tester.getRect(allowFinder);
+      final standingRect = tester.getRect(standingFinder);
+      final denyRect = tester.getRect(denyFinder);
+      expect((allowRect.center.dy - denyRect.center.dy).abs(), lessThan(1.0),
+          reason: '按钮必须横排，不能竖着堆');
+      expect((standingRect.center.dy - denyRect.center.dy).abs(), lessThan(1.0));
+      expect(allowRect.center.dx, lessThan(standingRect.center.dx));
+      expect(standingRect.center.dx, lessThan(denyRect.center.dx));
 
-      // 竖排 + 占满宽度：两者宽度应基本一致。
-      final allowWidth = tester
-          .getSize(find.widgetWithText(FilledButton, l10n.agentApprovalAllow))
-          .width;
-      expect((allowWidth - tester.getSize(denyFinder).width).abs(),
-          lessThan(1.0));
+      // 弹窗要够宽，横排才不憋屈（用户明确要求加宽，不要小气）。
+      expect(
+        tester.getSize(find.byKey(agentApprovalContentKey)).width,
+        greaterThan(480),
+        reason: '弹窗内容区加宽到 520，三个按钮才有资格横排',
+      );
     });
   });
 

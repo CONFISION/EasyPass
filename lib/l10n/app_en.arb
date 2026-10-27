@@ -574,7 +574,7 @@
   "agentApprovalHint": "Only what is shown here will happen. Deny if you did not expect this request.",
   "agentApprovalAllow": "Allow",
   "agentApprovalDeny": "Deny",
-  "agentApprovalAllowStanding": "Allow reads this session",
+  "agentApprovalAllowStanding": "Allow reads for this session",
   "agentApprovalOpRead": "Read (metadata)",
   "agentApprovalOpSensitiveRead": "Read a secret",
   "agentApprovalOpWrite": "Write",
