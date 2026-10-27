@@ -85,6 +85,8 @@ class VaultItemMapper {
           ? (payload.sshKey ?? SshKeyData.empty)
           : null,
       customFields: payload.customFields,
+      // 智能体开关跟着加密载荷走（明文列会让"这条对智能体开放"泄露进库里）。
+      agentOpen: payload.agentOpen,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     );
@@ -198,6 +200,7 @@ class VaultItemMapper {
       customFields: item.effectiveCustomFields,
       identity: item.type == EntryType.identity ? item.identity : null,
       sshKey: item.type == EntryType.sshKey ? item.sshKey : null,
+      agentOpen: item.agentOpen,
     );
   }
 
@@ -220,6 +223,7 @@ class VaultItemMapper {
           notes: item.notes,
           isFavorite: item.isFavorite,
           login: item.login ?? LoginData.empty,
+          agentOpen: item.agentOpen,
           customFields: fields,
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,
@@ -233,6 +237,7 @@ class VaultItemMapper {
           name: item.name,
           notes: item.notes,
           isFavorite: item.isFavorite,
+          agentOpen: item.agentOpen,
           customFields: fields,
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,
@@ -247,6 +252,7 @@ class VaultItemMapper {
           notes: item.notes,
           isFavorite: item.isFavorite,
           identity: item.identityOrEmpty,
+          agentOpen: item.agentOpen,
           customFields: fields,
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,
@@ -261,6 +267,7 @@ class VaultItemMapper {
           notes: item.notes,
           isFavorite: item.isFavorite,
           sshKey: _withDerivedSshFields(item.sshKeyOrEmpty),
+          agentOpen: item.agentOpen,
           customFields: fields,
           createdAt: item.createdAt,
           updatedAt: item.updatedAt,

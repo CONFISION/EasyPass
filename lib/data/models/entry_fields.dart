@@ -358,6 +358,16 @@ class EntryPayload {
   final IdentityData? identity;
   final SshKeyData? sshKey;
 
+  /// 智能体可访问性（v0.5 起）：**只支持"开放"**，其余一律按"永久拒绝"。
+  ///
+  /// 为什么只存"开放"：默认值就是拒绝，所以"永久拒绝"不需要落任何字节 ——
+  /// 老条目天然是拒绝态，**零迁移**。这也是"最小新增实体"的一部分：
+  /// 不新增明文列，开关跟着加密载荷走（明文列等于把"这条对智能体开放"写进库里）。
+  ///
+  /// 陷阱：本字段参与 [isEmpty] 判定。只设了开关、没有其它载荷内容的条目
+  /// **必须**写出 `data_encrypted`，否则开关会被静默丢弃。
+  final bool agentOpen;
+
   /// 载荷格式版本，便于以后升级（当前 1）。
   static const int version = 1;
 
@@ -365,18 +375,23 @@ class EntryPayload {
     this.customFields = const [],
     this.identity,
     this.sshKey,
+    this.agentOpen = false,
   });
 
   static const EntryPayload empty = EntryPayload();
 
   /// 没有任何需要加密的内容 → 不写 `data_encrypted`（保持空串）。
   bool get isEmpty =>
-      customFields.every((f) => f.isEmpty) && identity == null && sshKey == null;
+      customFields.every((f) => f.isEmpty) &&
+      identity == null &&
+      sshKey == null &&
+      !agentOpen;
 
   EntryPayload copyWith({
     List<CustomField>? customFields,
     IdentityData? identity,
     SshKeyData? sshKey,
+    bool? agentOpen,
     bool clearIdentity = false,
     bool clearSshKey = false,
   }) {
@@ -384,6 +399,7 @@ class EntryPayload {
       customFields: customFields ?? this.customFields,
       identity: clearIdentity ? null : (identity ?? this.identity),
       sshKey: clearSshKey ? null : (sshKey ?? this.sshKey),
+      agentOpen: agentOpen ?? this.agentOpen,
     );
   }
 
@@ -398,6 +414,8 @@ class EntryPayload {
               effectiveCustomFields.map((f) => f.toJson()).toList(growable: false),
         if (identity != null) 'identity': identity!.toJson(),
         if (sshKey != null) 'ssh_key': sshKey!.toJson(),
+        // 只写"开放"；拒绝是默认态，不占字节。
+        if (agentOpen) 'agent_access': 'open',
       };
 
   factory EntryPayload.fromJson(Map<String, dynamic>? json) {
@@ -424,6 +442,8 @@ class EntryPayload {
       sshKey: rawSsh is Map
           ? SshKeyData.fromJson(Map<String, dynamic>.from(rawSsh))
           : null,
+      // 宽容：只认字面值 "open"；缺失 / 其它值（含旧数据里的 "denied"）都算拒绝。
+      agentOpen: json['agent_access'] == 'open',
     );
   }
 }

@@ -11,8 +11,15 @@ enum SessionDomain {
   /// 桌面 UI 的会话。
   ui,
 
-  /// 浏览器扩展 / 未来智能体的会话。
+  /// 浏览器扩展的会话。
   bridge,
+
+  /// 智能体（MCP）的会话。
+  ///
+  /// **独立于 `ui` 与 `bridge`**：智能体是可被提示注入驱动的调用者，
+  /// 不能借用"用户自己解锁了 App / 浏览器"带来的解锁态（见 MCP spec 的 I-3 与 D4）。
+  /// 空闲超时同样独立（默认 5 分钟），`end_session` 会立刻把它锁掉。
+  agent,
 }
 
 /// 会话域集合：各自一份密钥副本与空闲计时器，外加"谁锁了"的传播规则。
@@ -20,16 +27,20 @@ class SessionDomains {
   SessionDomains({required Duration idleTimeout}) {
     _ui = VaultSession(idleTimeout: idleTimeout);
     _bridge = VaultSession(idleTimeout: idleTimeout);
+    _agent = VaultSession(idleTimeout: idleTimeout);
     _lastKnown[SessionDomain.ui] = false;
     _lastKnown[SessionDomain.bridge] = false;
+    _lastKnown[SessionDomain.agent] = false;
     // 解锁/锁定**立即**触发比对与广播，不等 5 秒节拍器 ——
     // 见 `VaultSession.onStateChanged` 的注释（"关窗上锁只生效一次"的根因）。
     _ui.onStateChanged = notifyIfChanged;
     _bridge.onStateChanged = notifyIfChanged;
+    _agent.onStateChanged = notifyIfChanged;
   }
 
   late VaultSession _ui;
   late VaultSession _bridge;
+  late VaultSession _agent;
 
   final Map<SessionDomain, bool> _lastKnown = {};
   Timer? _timer;
@@ -46,8 +57,20 @@ class SessionDomains {
 
   VaultSession get bridge => _bridge;
 
-  VaultSession of(SessionDomain domain) =>
-      domain == SessionDomain.ui ? _ui : _bridge;
+  /// 智能体会话域。**绝不与 ui/bridge 共享密钥实例**：`VaultSession._wipe()` 是
+  /// 原地清零，共享实例会让"锁一个域"顺手清掉另一个域的密钥。
+  VaultSession get agent => _agent;
+
+  VaultSession of(SessionDomain domain) {
+    switch (domain) {
+      case SessionDomain.ui:
+        return _ui;
+      case SessionDomain.bridge:
+        return _bridge;
+      case SessionDomain.agent:
+        return _agent;
+    }
+  }
 
   void start() {
     _timer ??= Timer.periodic(tickInterval, (_) => notifyIfChanged());
@@ -58,10 +81,12 @@ class SessionDomains {
     _timer = null;
   }
 
-  /// UI 锁定 ⇒ 两个域一起锁（既有语义：锁 App 不能留下解锁的浏览器会话）。
+  /// UI 锁定 ⇒ 所有域一起锁（既有语义：锁 App 不能留下解锁的浏览器会话）。
+  /// 智能体接口起 agent 域也纳入：用户锁库时智能体不该还能读。
   void lockAll() {
     _ui.lock();
     _bridge.lock();
+    _agent.lock();
     notifyIfChanged();
   }
 
@@ -69,6 +94,7 @@ class SessionDomains {
   void setIdleTimeout(Duration value) {
     _ui.idleTimeout = value;
     _bridge.idleTimeout = value;
+    _agent.idleTimeout = value;
   }
 
   Duration get idleTimeout => _ui.idleTimeout;

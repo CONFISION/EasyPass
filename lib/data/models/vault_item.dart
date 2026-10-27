@@ -27,6 +27,12 @@ class VaultItem {
 
   final bool isFavorite;
 
+  /// 智能体可访问性（智能体接口 v1）：`true` = 开放，`false` = **永久拒绝**（默认）。
+  ///
+  /// 存储落在加密载荷 `EntryPayload.agentOpen`（不是明文列），所以库里看不到
+  /// "这条对智能体开放"这个事实。只有智能体接口会读它；UI 只用它渲染开关。
+  final bool agentOpen;
+
   /// 登录专属字段；仅当 [type] 为 [EntryType.login] 时非空。
   final LoginData? login;
 
@@ -49,6 +55,7 @@ class VaultItem {
     required this.name,
     this.notes = '',
     this.isFavorite = false,
+    this.agentOpen = false,
     this.login,
     this.identity,
     this.sshKey,
@@ -157,6 +164,7 @@ class VaultItem {
     String? name,
     String? notes,
     bool? isFavorite,
+    bool? agentOpen,
     LoginData? login,
     IdentityData? identity,
     SshKeyData? sshKey,
@@ -172,6 +180,7 @@ class VaultItem {
       name: name ?? this.name,
       notes: notes ?? this.notes,
       isFavorite: isFavorite ?? this.isFavorite,
+      agentOpen: agentOpen ?? this.agentOpen,
       login: login ?? this.login,
       identity: identity ?? this.identity,
       sshKey: sshKey ?? this.sshKey,
@@ -190,6 +199,7 @@ class VaultItem {
       name: name,
       notes: notes,
       isFavorite: isFavorite,
+      agentOpen: agentOpen,
       customFields: customFields,
       createdAt: createdAt,
       updatedAt: updatedAt,
@@ -207,6 +217,8 @@ class VaultItem {
         'name': name,
         'notes': notes,
         'is_favorite': isFavorite,
+        // UI / 导出都拿到显值（"开放"/"永久拒绝"），避免"缺省"与"拒绝"两种空态并存。
+        'agent_access': agentOpen ? 'open' : 'denied',
         'created_at': createdAt,
         'updated_at': updatedAt,
         if (type == EntryType.login) 'login': loginOrEmpty.toJson(),
@@ -248,6 +260,7 @@ class VaultItem {
       name: decodeString(json['name']),
       notes: decodeString(json['notes']),
       isFavorite: json['is_favorite'] == true,
+      agentOpen: json['agent_access'] == 'open',
       login: type == EntryType.login
           ? (rawLogin is Map
               ? LoginData.fromJson(Map<String, dynamic>.from(rawLogin))
