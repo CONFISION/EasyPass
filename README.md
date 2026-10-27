@@ -6,7 +6,7 @@ A **local-first password manager for Windows** with a companion Chrome/Edge
 extension: an encrypted vault on your own machine, one-click auto-fill in the
 browser. Long-term goal: a self-hostable Bitwarden alternative.
 
-![release](https://img.shields.io/badge/release-3.0.0-blue)
+![release](https://img.shields.io/badge/release-3.1.0-blue)
 ![platform](https://img.shields.io/badge/platform-Windows-0078D6)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
@@ -38,7 +38,7 @@ browser. Long-term goal: a self-hostable Bitwarden alternative.
 - **Local by design** — no account, no server, no telemetry; the master password is
   never stored (PBKDF2-HMAC-SHA256 + AES-256-CBC, see [SECURITY.md](SECURITY.md)).
 
-## Architecture (3.0.0)
+## Architecture
 
 The vault has exactly one owner: a standalone, always-on, windowless core service.
 The Flutter app is a pure client — it never opens the database and never holds the key.

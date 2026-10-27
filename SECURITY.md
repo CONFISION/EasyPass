@@ -49,8 +49,8 @@ the next tagged release; there are no backports to older minor versions.
   master-password verification, key derivation and the rotation path.
 - The vault database: what is written in plaintext, file permissions, and whether
   ciphertext columns can be correlated with each other.
-- The browser bridge: the native-messaging protocol (`com.easypass.app`), the daemon
-  (`--service`) and its local TCP listener, and the extension's content script
+- The browser bridge: the native-messaging protocol (`com.easypass.app`), the core service
+  and its local TCP listener, and the extension's content script
   (autofill injection, URL matching, origin checks).
 - The bridge's trust boundary — e.g. whether a web page or another local process can
   obtain credentials it should not.
@@ -73,15 +73,13 @@ Being precise here is more useful than a reassuring sentence, so:
 
 - **The master password is never stored.** `PBKDF2-HMAC-SHA256(masterPassword, salt,
   100_000 iterations)` derives a 32-byte AES-256 key. Only the salt and a
-  `SHA-256(derivedKey)` verifier are persisted — **since 3.0.0 inside the vault database
-  itself** (`vault_meta`, keys prefixed `secret.`), not in the OS keychain. This is not a
-  downgrade: deriving the key and checking the verifier cost the same PBKDF2 work, so
-  anyone holding `easypass.db` could already brute-force the password at that cost, and
-  the rotation journal had been storing the same material in that table since 2.4.0. The
-  upside is that the core process needs no OS keychain and the verifier lives in the same
-  SQLite transaction domain as the data it protects. Upgrading from 2.4.x hands the old
-  keychain values to the core **once** (`adoptLegacyKeyMaterial`); the old keychain entries
-  are deliberately left in place so you can roll back.
+  `SHA-256(derivedKey)` verifier are persisted — **inside the vault database itself**
+  (`vault_meta`, keys prefixed `secret.`), not in the OS keychain. Deriving and checking
+  cost the same PBKDF2 work either way; keeping the verifier in the DB puts it in the same
+  SQLite transaction domain as the data it protects. On first upgrade from an older
+  install, the old keychain values are handed to the core **once**
+  (`adoptLegacyKeyMaterial`); the old keychain entries are left in place so a rollback
+  still works.
 - **Entry fields are encrypted individually** with AES-256-CBC as `base64(IV ‖
   ciphertext)`, a fresh random IV per value. All encryption goes through
   `VaultItemMapper`.
@@ -97,15 +95,16 @@ Being precise here is more useful than a reassuring sentence, so:
   known weakness of the storage format and is on the roadmap for the key-hierarchy
   rework; it is why the rotation path refuses to proceed when any row fails to decrypt.
   (The **transport** is authenticated — see the channel-encryption bullet below.)
-- **One process owns the vault (3.0.0).** `easypass_core` is the only process that opens
+- **One process owns the vault.** `easypass_core` is the only process that opens
   `easypass.db` and the only one that holds the derived key. The desktop UI is a client:
   it has no database handle and never sees the key, so a compromised UI can read what it
   displays but cannot decrypt the vault on its own. The key lives only in the core's
   memory (`SessionDomains`) and is zeroed on lock.
-- **Two session domains.** The core keeps separate `ui` and `bridge` sessions. Locking
-  from the desktop locks **both** (closing the window, the tray's *Exit UI Only*, the
-  auto-lock timer); unlocking the desktop does **not** unlock the browser extension,
-  because unlocking should stay an explicit act. Auto-lock is enforced by the core
+- **Three session domains (`ui` / `bridge` / `agent`).** Locking the desktop locks
+  `ui` + `bridge` (closing the window, the tray's *Exit UI Only*, the auto-lock timer);
+  unlocking the desktop does **not** unlock the browser extension, because unlocking
+  should stay an explicit act. The `agent` domain is separate and auto-unsealed only
+  while agent access is on (see the MCP section). Auto-lock is enforced by the core
   (default 5 minutes, configurable 1–60) and the UI only reports user activity.
 - **Transport encryption, protocol 5.** UI ↔ core traffic is encrypted and
   authenticated: the handshake exchanges two nonces and mutual HMAC proofs, so **the
@@ -114,17 +113,14 @@ Being precise here is more useful than a reassuring sentence, so:
   both nonces). Clients that still speak the old plaintext handshake are refused with
   `unsupported` rather than silently downgraded — plaintext is accepted only for the
   `bridge` role (see the known limitations).
-- **Master-password rotation is atomic.** Since 3.0.0 the ciphertext, the rotation
-  journal and the new salt/verifier all live in `easypass.db`, and the whole re-encryption
-  plus the new verifier are written in **one SQLite transaction**. The 2.4.x window where
-  the verifier could sit in the database because the OS keychain write failed no longer
-  exists. The journal never contains the password, the derived key, or entry plaintext,
-  and its rule is unchanged: a journal exists ⇒ only the journal's target password is
-  valid.
-- **Password verification has a single implementation** (`MasterPasswordVerifier`, now
-  running inside the core). Any code path that compared stored salt/hash on its own would
-  disagree with the vault's actual key during a rotation window — that was a real bug in
-  2.4.0, where the browser bridge kept accepting the old master password.
+- **Master-password rotation is atomic.** The ciphertext, the rotation journal and the
+  new salt/verifier all live in `easypass.db`, and the whole re-encryption plus the new
+  verifier are written in **one SQLite transaction** — there is no window where the old
+  password still works. The journal never contains the password, the derived key, or entry
+  plaintext; its rule: a journal exists ⇒ only the journal's target password is valid.
+- **Password verification has a single implementation** (`MasterPasswordVerifier`, running
+  inside the core). No other code path compares stored salt/hash on its own; the UI asks the
+  core via the `verifyMasterPassword` action.
 - **Changing the master password ends both sessions**, so no session outlives the key it
   was opened with; the UI returns to the lock screen.
 - **The browser bridge** reaches the core over `127.0.0.1` only. The core writes a token,
@@ -139,10 +135,12 @@ Being precise here is more useful than a reassuring sentence, so:
 
 EasyPass can expose a local MCP endpoint (`POST http://127.0.0.1:47821/mcp`) so that AI
 agents can read entry *metadata* and — when you allow it — create, update and delete entries.
-It is **off by default** and the whole design assumes
-agents are compromised-by-default: the tool surface never returns passwords, notes, TOTP
-seeds, SSH keys or custom-field values, and every entry is **permanently denied** to
-agents unless you switch "Accessible to agents" on for that entry.
+It is **off by default** and the whole design assumes agents are compromised-by-default:
+the tool surface never returns passwords, notes, TOTP seeds, SSH keys or custom-field
+values. Each entry has a user-only **"Accessible to agents"** switch (existing entries
+default to permanent deny). An entry **created by an agent is open to that agent by
+default** so it can manage what it just made; you can flip any entry to permanent deny at
+any time, and the switch itself is never writable by the agent.
 
 To make agent access work without prompting you every five minutes, turning it on does
 something the rest of this document does not do elsewhere:
@@ -183,12 +181,16 @@ Consequences you should be aware of:
   decision). The key, the real client identity, plaintext arguments and field values are
   never written there.
 - **Write access is deliberately narrow.** `create_entry` / `update_entry` only cover
-  `login` and `secure_note` fields; an entry created by an agent is **open to that agent**
-  by default (otherwise the agent could not manage what it just created), but the switch
-  itself is user-only — you can set it to permanent deny at any moment and updates are then
-  rejected. In the ask-every-time mode every write, delete and restore is confirmed by you —
-  the "allow reads this session" exemption covers reads only. The approval dialog lists
-  **field names and the action**, never values.
+  `login` and `secure_note` fields; **identity and SSH-key entries are never exposed to
+  agents** (product decision — agents do not need them and should not reach them), and
+  there is no TOTP-code tool (the clipboard path below covers that need). In the
+  ask-every-time mode every write, delete and restore is confirmed by you — the "allow
+  reads this session" exemption covers reads only. The approval dialog lists **field
+  names and the action**, never values.
+- **No spurious approval prompts.** Hard gates (entry closed, outside the pairing scope,
+  pairing revoked/expired) are evaluated **before** the dialog is shown, so an agent
+  cannot use the approval UI to train you into approving blindly; the denial is still
+  audited.
 - **Agent deletion is recoverable.** `delete_entry` only moves the entry to the **trash**
   (a `deleted_at` timestamp; the ciphertext is not touched). There is no
   "delete permanently" tool: emptying the trash or deleting an entry for good is a UI-only
@@ -221,9 +223,9 @@ roadmap and will change in future releases:
   the core, or attach a debugger to the UI/core process — and the UI has to display
   plaintext passwords by design. Transport encryption protects against passive capture
   and unauthenticated impostors, not against same-user malware.
-- **This branch ships Windows only.** The Linux desktop port (2.3.3-era AppImage, GTK
-  runner, tray, XDG paths) lives in the `linux` branch and is **not** covered by the
-  security guarantees in this document. Windows is the supported and verified platform.
+- **This branch ships Windows only.** The Linux desktop port lives in the `linux` branch
+  and is **not** covered by the security guarantees in this document. Windows is the
+  supported and verified platform.
 - **Upgrading from 2.4.x leaves the old `--service` process alive for up to 10 minutes.**
   It exits on its own idle timer and will not delete the new core's `daemon.json`
   (port + pid are checked), and the installer asks it to close first; during that window

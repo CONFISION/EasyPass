@@ -5,7 +5,7 @@
 **Windows 上的本地优先密码管理器**，配套 Chrome / Edge 扩展：加密保险库就在自己的
 机器上，浏览器里一键自动填充。长期目标：一个可自部署的 Bitwarden 替代品。
 
-![release](https://img.shields.io/badge/release-3.0.0-blue)
+![release](https://img.shields.io/badge/release-3.1.0-blue)
 ![platform](https://img.shields.io/badge/platform-Windows-0078D6)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
@@ -32,7 +32,7 @@
 - **本地优先** —— 无账号、无服务器、无遥测；主密码从不保存
   （PBKDF2-HMAC-SHA256 + AES-256-CBC，见 [SECURITY.md](SECURITY.md)）。
 
-## 架构（3.0.0）
+## 架构
 
 保险库只有一个所有者：一个独立、常驻、无窗口的核心服务进程。Flutter 界面是纯客户端 ——
 自己不开库、也不持密钥。

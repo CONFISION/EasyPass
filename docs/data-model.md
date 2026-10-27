@@ -1,15 +1,10 @@
 # EasyPass 数据模型与持久化规范
 
-> **本地文档**（`docs/` 被 `.gitignore` 忽略；入库建议见 `technical-spec.md` §13）。
+> **入库文档**（`.gitignore` 反向规则放行）。本文是**数据的权威规范**：改 schema、加字段、
+> 写导入导出、动加密列之前必读。
 >
-> 本文是**数据的权威规范**：改 schema、加字段、写导入导出、动加密列之前必读。
-> 它取代了 2.3.x 的 `docs/entry-types.md`（已删除）—— 那里仍然有效的部分被搬到本文，
-> 过时的部分（桥接协议 v3、四处版本号同步、l10n 约定、验证门槛、踩坑清单）分别由
-> `protocol-api.md`、`AGENTS.md`、`CONTRIBUTING.md` 承担。
->
-> 事实基准：**3.1.0**（智能体 MCP 阶段 2 + 回收站，schema **5**）。数据层自 2.3.0 起的
-> 加密口径未变；3.0.0 新增了 `vault_meta`（校验材料），3.1.0 新增了 `agent_audit` 表
-> 与 `password_entries.deleted_at`（回收站）。
+> 事实基准：**3.1.0**（schema **5**）。当前 schema：`folders`、`password_entries`（含 `deleted_at`）、
+> `vault_meta`（校验材料）、`agent_audit`（智能体访问审计）。
 
 ---
 
@@ -21,7 +16,7 @@ import drift / 数据库 / 仓储。所以：
 
 - **核心侧**（`lib/core_service/**`、`lib/data/**`）用本文 §3 的仓储 API。
 - **UI 侧**用 `VaultApi` 的同名动作（`listItems` / `saveItem` / …），**没有**数据库句柄，
-  也**没有** `session_key.dart`（3.0.0 已删除：密钥只活在核心的 `SessionDomains`）。
+  也不持有密钥（密钥只活在核心的 `SessionDomains`）。
 
 ---
 
@@ -73,7 +68,7 @@ import drift / 数据库 / 仓储。所以：
 - **绝不**在加密失败时退化成写明文。宁可抛错。
 - 切换条目类型时用 `item.withoutTypeData()` 丢掉原类型字段（UI 负责二次确认）。
 
-### 2.0 回收站：`deleted_at`（schemaVersion 5 新增）
+### 2.0 回收站：`deleted_at`
 
 `password_entries` 增加一个**可空**列：
 
@@ -95,7 +90,7 @@ import drift / 数据库 / 仓储。所以：
   （恢复后落在"无文件夹"）。
 - 智能体**只能把条目删进回收站**（`delete_entry`），"彻底删除 / 清空"只存在于 UI 动作面。
 
-### 2.1 `vault_meta`（schemaVersion 3 新增）
+### 2.1 `vault_meta`
 
 键值表，承载两类东西：
 
@@ -111,7 +106,7 @@ import drift / 数据库 / 仓储。所以：
 "没有日志 ⇒ 库还是旧钥匙；有日志 ⇒ 库已经是新钥匙"，日志的存在就是"哪个密码有效"的权威。
 `test/master_password_rotation_atomicity_test.dart` 与 `change_password_then_lock_test.dart` 守着这条。
 
-### 2.2 `agent_audit`（schemaVersion 4 新增）
+### 2.2 `agent_audit`
 
 智能体（MCP）访问审计。**只存"发生了什么"，不存秘密**：
 
@@ -126,21 +121,19 @@ import drift / 数据库 / 仓储。所以：
 
 **绝不写入**：配对密钥、真实客户端标识、明文参数、条目字段值。
 写入是**旁路**（`AgentActions.auditSink`）：落库失败不影响工具调用，只在内存环形缓冲里保底。
-表按 `id` 保留最近 **1000** 条（`pruneAgentAudit({int keep = 1000})`，
-启动时执行一次；早期草案写的是 5000，已收紧）。
+表按 `id` 保留最近 **1000** 条（`pruneAgentAudit({int keep = 1000})`，启动时执行一次）。
 
-3.1.0 阶段 2 补上了 `allowed_standing` 与 `error` 两个取值：
-`_gate` 记住这次是否靠免询问放行（审计要能区分"用户点了同意"与"被免询问绕过"）；
-`callTool` 的异常兜底在"本次还没写过审计"时补一行 `error`（`notFound` / 参数错误 / 意外异常）。
-UI（设置 → 智能体活动）分别显示为「已允许（本会话免询问）」与「失败」。
+`allowed_standing` 与 `error` 两个取值的含义：`_gate` 记住这次是否靠免询问放行
+（审计要能区分"用户点了同意"与"被免询问绕过"）；`callTool` 的异常兜底在"本次还没写过审计"时
+补一行 `error`（`notFound` / 参数错误 / 意外异常）。UI（侧边栏 → 智能体活动）
+分别显示为「已允许（本会话免询问）」与「失败」。
 
 ---
 
 ## 3. 仓储 API（核心内部使用；UI 不得直接调用）
 
 文件：`lib/data/repositories/vault_repository.dart`。密钥来源是**核心的会话域**
-（`lib/core_service/session_domains.dart`）—— 3.0.0 起 `lib/data/state/session_key.dart`
-已删除，UI 侧不存在"当前密钥"这种东西。
+（`lib/core_service/session_domains.dart`）；UI 侧不持有密钥，也没有"当前密钥"这种东西。
 
 ```dart
 // 条目（新代码只用这套）
@@ -183,8 +176,8 @@ Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
 - 同一套语义由核心的 `searchItems` 动作暴露给 UI（`protocol-api.md` §5.2），
   两边必须一致 —— 改一处要改另一处。
 - 旧的行级 API（`watchEntries` / `getAllEntries` / `search` / `saveEntry`…）标了
-  `@Deprecated`，只是 2.x 迁移期的桥梁；**新代码不要用**。
-- **3.0.0 起没有 `watch*` 流**：仓储不再暴露 drift 流（UI 进程根本没有库句柄）。
+  `@Deprecated`，只用于历史数据兼容；**新代码不要用**。
+- **没有 `watch*` 流**：仓储不暴露 drift 流（UI 进程根本没有库句柄）。
   变更通知由核心在事务提交后广播 `changed` 事件，客户端重取快照 —— 见
   `protocol-api.md` §7 与 `lib/features/vault/providers/core_stream.dart`。
 
@@ -224,8 +217,8 @@ Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
 - 侧边栏 / 工具栏提供**类型筛选**（全部 / 登录 / 安全笔记 / 身份 / SSH），可与文件夹、收藏叠加。
 - 搜索走 `VaultApi.searchItems`，搜索框下方给出前缀提示（`searchPrefixesHint`）。
 - **文件夹管理**：新建 / 重命名 / 换图标 / **删除**。删除入口必须**看得见**
-  （每行常驻 ⋮ 按钮）并且给鼠标原生手势（右键 `onSecondaryTap`），长按只是第三条路 ——
-  2.3.2 之前只有长按，用户直接得出"文件夹只能加不能删"的结论。
+  （每行常驻 ⋮ 按钮）并且给鼠标原生手势（右键 `onSecondaryTap`），长按只是第三条路——
+  只挂长按会让桌面用户以为"文件夹只能加不能删"。
   删除前先数条目（`countItemsInFolder`）：**空文件夹**普通确认；**有条目**时提示必须写明
   "有 N 条、条目**不会**被删除、会被移到『无文件夹』"，确认按钮文案也随之变化。
   删除只解除归属（`removeFolder` 先清 `folder_id` 再删），任何路径都不删条目。
@@ -303,4 +296,4 @@ Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
 | 动作层面的读写接口（UI / bridge） | `protocol-api.md` §5、§6 |
 | 扩展形状为什么冻结、字段叫什么 | `protocol-api.md` §6 |
 | 改 schema 的工程流程与门禁 | `CONTRIBUTING.md` |
-| 3.0.0 为什么把校验材料搬进库 | `technical-spec.md` §5.2、`SECURITY.md` |
+| 校验材料为什么放在库里 | `technical-spec.md` §5.2、`SECURITY.md` |

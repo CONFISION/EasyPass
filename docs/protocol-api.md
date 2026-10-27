@@ -1,7 +1,7 @@
 # EasyPass 协议 API 规范（协议 5）
 
-> **本地文档**（`docs/` 被 `.gitignore` 忽略，见 `technical-spec.md` §13 的入库建议）。
-> 本文是**对外接口契约**：任何客户端（桌面 UI、浏览器桥、未来的 MCP）都按本文实现。
+> **入库文档**（`.gitignore` 反向规则放行）。本文是**对外接口契约**：桌面 UI 与浏览器桥都按本文实现。
+> MCP 智能体接口是独立协议（见 `technical-spec.md` §12），不经过本文的 UI/bridge 动作面。
 >
 > 实现位置：`lib/protocol/**`（线格式，核心与客户端共用）+ `lib/core_service/**`（服务端）。
 > 契约变更纪律见 §9。
@@ -36,7 +36,7 @@
   "clientNonce": "<32 字节随机数的 hex，64 字符>",
   "role": "ui",                 // ui | bridge | agent
   "protocolVersion": 5,
-  "clientVersion": "3.0.0"
+  "clientVersion": "3.1.0"
 }
 ```
 
@@ -48,7 +48,7 @@
 {
   "serverNonce": "<64 hex>",
   "serverProof": "<HMAC-SHA256 hex，64 字符>",
-  "coreVersion": "3.0.0",
+  "coreVersion": "3.1.0",
   "protocolVersion": 5
 }
 ```
@@ -56,7 +56,7 @@
 拒绝（不进入后续步骤，连接随即关闭）：
 
 ```jsonc
-{ "ok": false, "error": "unsupported", "coreVersion": "3.0.0", "protocolVersion": 5 }
+{ "ok": false, "error": "unsupported", "coreVersion": "3.1.0", "protocolVersion": 5 }
 ```
 
 证明算法（`lib/protocol/secure_channel.dart`）：
@@ -84,7 +84,7 @@ tokenBytes  = hexDecode(token)（失败则退回 token 的 UTF-8 字节）
 ```jsonc
 {
   "ok": true,
-  "coreVersion": "3.0.0",
+  "coreVersion": "3.1.0",
   "protocolVersion": 5,
   "role": "ui",
   "capabilities": ["events", "multiType", "uiActions", "shutdown"]
@@ -103,7 +103,7 @@ C++ 桥无法实现 AES/HMAC，走一条**受限的**兼容分支（`lib/core_se
 // 客户端 → 核心（**必须 role 缺省或 "bridge"**）
 { "token": "<daemon.json 里的 token>" }
 // 核心 → 客户端（明文；本连接的后续帧也是明文）
-{ "ok": true, "coreVersion": "3.0.0", "protocolVersion": 5, "role": "bridge", "encrypted": false, "capabilities": [...] }
+{ "ok": true, "coreVersion": "3.1.0", "protocolVersion": 5, "role": "bridge", "encrypted": false, "capabilities": [...] }
 ```
 
 约束：
@@ -253,7 +253,7 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 }
 ```
 
-### 5.7 智能体访问（12 个，3.1.0）
+### 5.7 智能体访问（12 个）
 
 这些动作**只对 `ui` 角色开放**。智能体自己不用本协议（它走核心的 HTTP MCP 端点，
 见 `technical-spec.md` §12），UI 用这组动作管理开关、配对、访问方式与审批回话。
@@ -277,7 +277,7 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 > 审计的 `decision` 取 `allowed` / `allowed_standing`（「本会话内允许读取」放行）/
 > `denied` / `timeout` / `error`（执行失败兜底；一次调用只写一行）。
 
-### 5.8 回收站（4 个，3.1.0 / schema 5）
+### 5.8 回收站（4 个，schema 5）
 
 删除 = 移到回收站（软删）；彻底删除只存在于这组 UI 动作，**不在智能体工具面里**。
 
@@ -420,13 +420,13 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 
 ```
 # 1) 客户端 → 核心（明文）
-{"hello":"easypass","clientNonce":"9f2c…","role":"ui","protocolVersion":5,"clientVersion":"3.0.0"}
+{"hello":"easypass","clientNonce":"9f2c…","role":"ui","protocolVersion":5,"clientVersion":"3.1.0"}
 # 2) 核心 → 客户端（明文）
-{"serverNonce":"41ab…","serverProof":"d3e1…","coreVersion":"3.0.0","protocolVersion":5}
+{"serverNonce":"41ab…","serverProof":"d3e1…","coreVersion":"3.1.0","protocolVersion":5}
 # 3) 客户端 → 核心（明文）
 {"clientProof":"7c90…"}
 # 4) 核心 → 客户端（密文；解密后）
-{"ok":true,"coreVersion":"3.0.0","protocolVersion":5,"role":"ui","capabilities":["events","multiType","uiActions","shutdown"]}
+{"ok":true,"coreVersion":"3.1.0","protocolVersion":5,"role":"ui","capabilities":["events","multiType","uiActions","shutdown"]}
 
 # 5) 请求（密文）
 {"requestId":"7-1750000000123","action":"listItems","type":"login"}
@@ -455,3 +455,4 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 - 报 `Unknown action: xxx` ⇒ 对端是**旧版本**（协议不匹配），不是代码 bug。
 - 报 `核心身份校验失败（serverProof 不匹配）` ⇒ 端口被别的进程占用，或 `daemon.json` 过期。
 - 报 `保险库已锁定` ⇒ 先 `unlock`（`ui` 域）或用 `--lock`/`getAuthState` 确认状态。
+

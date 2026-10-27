@@ -44,11 +44,11 @@ cmd /c windows\runner\check_syntax.bat
 
 CI runs the same set on every push, so a green local run means a green PR.
 
-**Reading the test count.** A Windows run reports **570 passing / 9 skipped**. The tree
-declares more cases than that (~602), and the difference is deliberate: several files
-guard on the platform and register nothing here (they target the Linux port, which
-lives in the `linux` branch). So a run reports *fewer cases*, not failures — do not
-"fix" the numbers by forcing platform-specific tests to run everywhere.
+**Reading the test count.** A Windows run currently reports **728 passing** (63 test files).
+A few platform-specific tests have `skip:` guards on unsupported hosts (DPAPI / system
+clipboard), so a run can report fewer cases than are declared — that is a reduced case
+count, not failures. Do not "fix" the numbers by forcing platform-specific tests to run
+everywhere.
 
 If something behaves strangely only when launched from `build\` — no tray icon,
 settings that do not stick — run `cmd /c windows\runner\check_integrity.bat` before

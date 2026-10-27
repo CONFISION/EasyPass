@@ -113,7 +113,7 @@ on:
 ```
 
 只由 tag 触发（没有 `workflow_dispatch`：这个工作流会直接发布 Release）。
-`v2.4.0` 里的 `2.4.0` 必须与 `pubspec.yaml` 的 `version:` 一致，否则第一个任务就失败。
+tag 里的版本（如 `v3.1.0` 的 `3.1.0`）必须与 `pubspec.yaml` 的 `version:` 一致，否则第一个任务就失败。
 
 ### 任务
 
@@ -128,7 +128,7 @@ on:
 （安装包本体仍是 `build\installer\EasypassSetup.exe`，只是上传前改了名）、
 `SHA256SUMS.txt` 以及 `release-manifest.json`。
 
-### 核心服务（3.0.0 起）
+### 核心服务
 
 两个平台都在 UI 构建之后多跑一步**核心服务**构建（`easypass_core.exe` /
 `easypass_core`），这是与 UI 并列的独立常驻进程，独占密码库：
@@ -150,7 +150,7 @@ on:
   Flutter 自己那份 `Release\sqlite3.dll`（UI 用）保持不动。
 - **数据坐标不变**：`AppPaths._resolveDataDirectory()`（`lib/core/platform/app_paths.dart`）
   发现父目录里有 UI 二进制（`easypass.exe`）就取父目录，所以核心在 `{app}\core\` 时
-  保险库与 `daemon.json` 仍是 `{app}`，与 2.4.x 一致，不需要迁移数据。
+  保险库与 `daemon.json` 仍是 `{app}`，不需要迁移数据。
 - Windows 的 `Verify build output` 断言 `core\easypass_core.exe` 与 `lib\sqlite3.dll`。
 
   `source: system`）。`.iss` 里核心与它的库分别装到 `{app}\core` 与 `{app}\lib`，
