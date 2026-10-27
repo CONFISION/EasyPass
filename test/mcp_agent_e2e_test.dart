@@ -121,6 +121,18 @@ void main() {
         clipboardWrites.add(text);
         return true;
       },
+      // 审计落库（与核心装配一致：写 agent_audit 表）。
+      auditSink: (entry) => db.insertAgentAudit(
+        at: entry.at,
+        pairingId: entry.pairingId,
+        nickname: entry.nickname,
+        mode: entry.mode,
+        tool: entry.tool,
+        op: entry.op,
+        entryId: entry.entryId,
+        entryName: entry.entryName,
+        decision: entry.decision,
+      ),
     );
     final handler = McpHandler(
       authenticate: actions.authenticate,
@@ -325,5 +337,34 @@ void main() {
     expect(json.contains(trustedKey), isFalse);
     expect(json.contains(password), isFalse);
     expect(json.contains('DSH（工作机）'), isTrue);
+  });
+
+  test('审计落库：调用后写进 agent_audit 表，且库里没有秘密', () async {
+    await callToolPayload(trustedKey, 'list_entries');
+    await callToolPayload(trustedKey, 'get_entry', {'id': 'e-open'});
+    await callToolPayload(
+      trustedKey,
+      'copy_to_clipboard',
+      {'id': 'e-open', 'field': 'password'},
+    );
+    // sink 是旁路异步写入，等它落库。
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+
+    final rows = await db.recentAgentAudit();
+    expect(rows, isNotEmpty, reason: '方式 2 承诺"每次访问都留日志"');
+
+    final tools = rows.map((r) => r.tool).toSet();
+    expect(tools,
+        containsAll(['list_entries', 'get_entry', 'copy_to_clipboard']));
+    expect(rows.every((r) => r.nickname == 'DSH（工作机）'), isTrue);
+    expect(rows.every((r) => r.decision == 'allowed'), isTrue);
+    expect(await db.countAgentAudit(), greaterThanOrEqualTo(3));
+
+    // 库里不能出现密钥或明文密码。
+    final dump = rows
+        .map((r) => '${r.nickname}|${r.tool}|${r.op}|${r.entryId}|${r.entryName}')
+        .join('\n');
+    expect(dump.contains(trustedKey), isFalse);
+    expect(dump.contains(password), isFalse);
   });
 }

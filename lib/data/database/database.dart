@@ -12,10 +12,11 @@ class AppDatabase extends _$AppDatabase {
 
   AppDatabase.forTesting(super.e);
 
+  /// 4 = 智能体访问审计（`agent_audit` 表，3.1.0）。
   /// 3 = 改主密码的轮换日志（`vault_meta` 表，v2.4）。
   /// 2 = 2.3.0 多条目类型（`type` + `data_encrypted`）。
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   /// 迁移策略。
   ///
@@ -23,6 +24,7 @@ class AppDatabase extends _$AppDatabase {
   /// `data_encrypted=''`，无需拷贝数据），并补上类型索引。
   /// 2 → 3：新增 `vault_meta` 键值表（改主密码的轮换日志）。纯新增表，
   /// 不动任何已有数据。
+  /// 3 → 4：新增 `agent_audit` 审计表（智能体访问日志）。纯新增表 + 索引。
   /// **每加一列/一表都必须同时改这里**，否则老用户升级后一开库就抛
   /// "no such column" / "no such table"（1.x 的 `onUpgrade` 是空实现，
   /// 没有先例可抄）。
@@ -42,6 +44,13 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 3) {
         await m.createTable(vaultMeta);
+      }
+      if (from < 4) {
+        await m.createTable(agentAudit);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_agent_audit_at '
+          'ON agent_audit(at)',
+        );
       }
     },
   );
@@ -64,6 +73,58 @@ class AppDatabase extends _$AppDatabase {
   Future<void> deleteMeta(String metaKey) {
     return (delete(vaultMeta)..where((t) => t.metaKey.equals(metaKey))).go();
   }
+
+  // ─── 智能体审计 ────────────────────────────────────────
+
+  /// 追加一条审计记录。**只写"发生了什么"**（见 `tables.drift` 的说明）。
+  Future<int> insertAgentAudit({
+    required int at,
+    required String pairingId,
+    required String nickname,
+    required String mode,
+    required String tool,
+    required String op,
+    String? entryId,
+    String? entryName,
+    required String decision,
+  }) {
+    return into(agentAudit).insert(AgentAuditCompanion.insert(
+      at: at,
+      pairingId: pairingId,
+      nickname: nickname,
+      mode: mode,
+      tool: tool,
+      op: op,
+      entryId: Value(entryId),
+      entryName: Value(entryName),
+      decision: decision,
+    ));
+  }
+
+  /// 最近的审计记录（新的在前）。
+  Future<List<AgentAuditData>> recentAgentAudit({int limit = 200}) {
+    return (select(agentAudit)
+          ..orderBy([(t) => OrderingTerm(expression: t.at, mode: OrderingMode.desc)])
+          ..limit(limit))
+        .get();
+  }
+
+  Future<int> countAgentAudit() async {
+    final query = selectOnly(agentAudit)..addColumns([agentAudit.id.count()]);
+    final row = await query.getSingle();
+    return row.read(agentAudit.id.count()) ?? 0;
+  }
+
+  /// 只保留最近 [keep] 条（防止审计表无限增长）。
+  Future<void> pruneAgentAudit({int keep = 5000}) async {
+    await customStatement(
+      'DELETE FROM agent_audit WHERE id NOT IN '
+      '(SELECT id FROM agent_audit ORDER BY id DESC LIMIT ?)',
+      [keep],
+    );
+  }
+
+  Future<void> clearAgentAudit() => delete(agentAudit).go();
 
   /// 按前缀列出 `vault_meta`（智能体配对记录用 `agent.pairing.` 前缀）。
   ///

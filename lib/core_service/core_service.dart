@@ -154,6 +154,18 @@ class CoreService {
       pairingStore: pairingStore,
       agentAccess: agentAccess,
       totpService: TotpService(),
+      // 审计落库：方式 2 承诺"每次访问都留日志"，内存环形缓冲重启即丢。
+      auditSink: (entry) => db.insertAgentAudit(
+        at: entry.at,
+        pairingId: entry.pairingId,
+        nickname: entry.nickname,
+        mode: entry.mode,
+        tool: entry.tool,
+        op: entry.op,
+        entryId: entry.entryId,
+        entryName: entry.entryName,
+        decision: entry.decision,
+      ),
     );
     final mcpServer = McpHttpServer(
       handler: McpHandler(
@@ -188,6 +200,13 @@ class CoreService {
     );
 
     await actions.refreshAuthMaterial();
+    // 审计表自愈：只保留最近若干条，避免长期运行后无限增长。
+    // 失败不影响启动（审计是旁路，不是核心功能的前提）。
+    try {
+      await db.pruneAgentAudit();
+    } catch (_) {
+      // 老库还没迁移完 / 只读介质：忽略。
+    }
     await service._listen();
     return service;
   }

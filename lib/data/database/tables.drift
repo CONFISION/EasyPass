@@ -52,3 +52,27 @@ CREATE TABLE vault_meta (
   meta_key TEXT PRIMARY KEY NOT NULL,
   meta_value TEXT NOT NULL
 );
+
+-- 智能体（MCP）访问审计（schema 4 新增）。
+--
+-- 为什么必须进库而不是留在内存：方式 2（可信直通）对用户的承诺是
+-- "每次访问都留日志"。内存环形缓冲重启即丢，等于承诺没兑现。
+--
+-- 安全纪律：**只存"发生了什么"，不存秘密**。
+-- - `nickname` 是用户在配对时起的名字（审计里唯一允许出现的身份信息）；
+-- - **绝不**存配对密钥、真实客户端标识、明文参数或条目字段值；
+-- - `entry_name` 用于让用户看懂"动的是哪一条"，它本来就是明文列。
+CREATE TABLE agent_audit (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+  at INTEGER NOT NULL,
+  pairing_id TEXT NOT NULL,
+  nickname TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  op TEXT NOT NULL,
+  entry_id TEXT,
+  entry_name TEXT,
+  decision TEXT NOT NULL
+);
+
+CREATE INDEX idx_agent_audit_at ON agent_audit(at);

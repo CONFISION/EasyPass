@@ -99,6 +99,19 @@ void main() {
     db.execute('PRAGMA user_version = 2;');
   }
 
+  /// v3（2.4.0）的建表语句：v2 + `vault_meta`，但**没有 agent_audit**，
+  /// `user_version` 停在 3。用来验证 3.1.0 的智能体审计表迁移。
+  void createV3Schema(dynamic db) {
+    createV2Schema(db);
+    db.execute('''
+      CREATE TABLE vault_meta (
+        meta_key TEXT PRIMARY KEY NOT NULL,
+        meta_value TEXT NOT NULL
+      );
+    ''');
+    db.execute('PRAGMA user_version = 3;');
+  }
+
   test('v1 → v2：旧数据保留、新列可用、类型默认登录', () async {
     final crypto = CryptoService(secureStorage: FakeSecureStorage());
     final key = crypto.deriveKey('master', crypto.generateSalt());
@@ -185,6 +198,48 @@ void main() {
     // 旧密文仍能用旧钥匙解开（迁移没碰加密）。
     final mapper = VaultItemMapper(crypto);
     expect(mapper.fromRow(rows.single, key).loginOrEmpty.password, 'v2-pw');
+  });
+
+  test('v3 → v4：新增 agent_audit 表，旧数据不动，审计可读写', () async {
+    final crypto = CryptoService(secureStorage: FakeSecureStorage());
+    final key = crypto.deriveKey('master', crypto.generateSalt());
+    final legacyPassword = crypto.encryptData('v3-pw', key);
+
+    final executor = NativeDatabase.memory(setup: (raw) {
+      createV3Schema(raw);
+      raw.execute(
+        'INSERT INTO password_entries '
+        '(id, folder_id, type, name, url, username, password_encrypted, '
+        ' notes_encrypted, totp_secret_encrypted, data_encrypted, '
+        ' is_favorite, created_at, updated_at) '
+        "VALUES ('e1', NULL, 'login', 'GitHub', 'https://github.com', 'alice', "
+        "'$legacyPassword', '', '', '', 0, 100, 200);",
+      );
+    });
+
+    final db = AppDatabase.forTesting(executor);
+    addTearDown(db.close);
+
+    final rows = await db.getAllEntries();
+    expect(rows.length, 1, reason: '迁移不该动旧数据');
+    expect(await db.countAgentAudit(), 0, reason: 'v4 的 agent_audit 表必须建出来');
+
+    await db.insertAgentAudit(
+      at: 123,
+      pairingId: 'p1',
+      nickname: 'DSH',
+      mode: 'trusted',
+      tool: 'list_entries',
+      op: 'read',
+      decision: 'allowed',
+    );
+    final audit = await db.recentAgentAudit();
+    expect(audit.single.nickname, 'DSH');
+    expect(audit.single.entryId, isNull);
+    expect(await db.countAgentAudit(), 1);
+
+    final mapper = VaultItemMapper(crypto);
+    expect(mapper.fromRow(rows.single, key).loginOrEmpty.password, 'v3-pw');
   });
 
   test('v1 → v3：一路升到最新 schema，旧数据与轮换日志都可用', () async {

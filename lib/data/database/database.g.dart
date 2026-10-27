@@ -1358,6 +1358,591 @@ class VaultMetaCompanion extends UpdateCompanion<VaultMetaData> {
   }
 }
 
+class AgentAudit extends Table with TableInfo<AgentAudit, AgentAuditData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  AgentAudit(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    $customConstraints: 'NOT NULL PRIMARY KEY AUTOINCREMENT',
+  );
+  static const VerificationMeta _atMeta = const VerificationMeta('at');
+  late final GeneratedColumn<int> at = GeneratedColumn<int>(
+    'at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL',
+  );
+  static const VerificationMeta _pairingIdMeta = const VerificationMeta(
+    'pairingId',
+  );
+  late final GeneratedColumn<String> pairingId = GeneratedColumn<String>(
+    'pairing_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL',
+  );
+  static const VerificationMeta _nicknameMeta = const VerificationMeta(
+    'nickname',
+  );
+  late final GeneratedColumn<String> nickname = GeneratedColumn<String>(
+    'nickname',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL',
+  );
+  static const VerificationMeta _modeMeta = const VerificationMeta('mode');
+  late final GeneratedColumn<String> mode = GeneratedColumn<String>(
+    'mode',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL',
+  );
+  static const VerificationMeta _toolMeta = const VerificationMeta('tool');
+  late final GeneratedColumn<String> tool = GeneratedColumn<String>(
+    'tool',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL',
+  );
+  static const VerificationMeta _opMeta = const VerificationMeta('op');
+  late final GeneratedColumn<String> op = GeneratedColumn<String>(
+    'op',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL',
+  );
+  static const VerificationMeta _entryIdMeta = const VerificationMeta(
+    'entryId',
+  );
+  late final GeneratedColumn<String> entryId = GeneratedColumn<String>(
+    'entry_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    $customConstraints: '',
+  );
+  static const VerificationMeta _entryNameMeta = const VerificationMeta(
+    'entryName',
+  );
+  late final GeneratedColumn<String> entryName = GeneratedColumn<String>(
+    'entry_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    $customConstraints: '',
+  );
+  static const VerificationMeta _decisionMeta = const VerificationMeta(
+    'decision',
+  );
+  late final GeneratedColumn<String> decision = GeneratedColumn<String>(
+    'decision',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL',
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    at,
+    pairingId,
+    nickname,
+    mode,
+    tool,
+    op,
+    entryId,
+    entryName,
+    decision,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'agent_audit';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<AgentAuditData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('at')) {
+      context.handle(_atMeta, at.isAcceptableOrUnknown(data['at']!, _atMeta));
+    } else if (isInserting) {
+      context.missing(_atMeta);
+    }
+    if (data.containsKey('pairing_id')) {
+      context.handle(
+        _pairingIdMeta,
+        pairingId.isAcceptableOrUnknown(data['pairing_id']!, _pairingIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_pairingIdMeta);
+    }
+    if (data.containsKey('nickname')) {
+      context.handle(
+        _nicknameMeta,
+        nickname.isAcceptableOrUnknown(data['nickname']!, _nicknameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nicknameMeta);
+    }
+    if (data.containsKey('mode')) {
+      context.handle(
+        _modeMeta,
+        mode.isAcceptableOrUnknown(data['mode']!, _modeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_modeMeta);
+    }
+    if (data.containsKey('tool')) {
+      context.handle(
+        _toolMeta,
+        tool.isAcceptableOrUnknown(data['tool']!, _toolMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_toolMeta);
+    }
+    if (data.containsKey('op')) {
+      context.handle(_opMeta, op.isAcceptableOrUnknown(data['op']!, _opMeta));
+    } else if (isInserting) {
+      context.missing(_opMeta);
+    }
+    if (data.containsKey('entry_id')) {
+      context.handle(
+        _entryIdMeta,
+        entryId.isAcceptableOrUnknown(data['entry_id']!, _entryIdMeta),
+      );
+    }
+    if (data.containsKey('entry_name')) {
+      context.handle(
+        _entryNameMeta,
+        entryName.isAcceptableOrUnknown(data['entry_name']!, _entryNameMeta),
+      );
+    }
+    if (data.containsKey('decision')) {
+      context.handle(
+        _decisionMeta,
+        decision.isAcceptableOrUnknown(data['decision']!, _decisionMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_decisionMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  AgentAuditData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return AgentAuditData(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      at: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}at'],
+      )!,
+      pairingId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}pairing_id'],
+      )!,
+      nickname: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}nickname'],
+      )!,
+      mode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}mode'],
+      )!,
+      tool: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}tool'],
+      )!,
+      op: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}op'],
+      )!,
+      entryId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}entry_id'],
+      ),
+      entryName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}entry_name'],
+      ),
+      decision: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}decision'],
+      )!,
+    );
+  }
+
+  @override
+  AgentAudit createAlias(String alias) {
+    return AgentAudit(attachedDatabase, alias);
+  }
+
+  @override
+  bool get dontWriteConstraints => true;
+}
+
+class AgentAuditData extends DataClass implements Insertable<AgentAuditData> {
+  final int id;
+  final int at;
+  final String pairingId;
+  final String nickname;
+  final String mode;
+  final String tool;
+  final String op;
+  final String? entryId;
+  final String? entryName;
+  final String decision;
+  const AgentAuditData({
+    required this.id,
+    required this.at,
+    required this.pairingId,
+    required this.nickname,
+    required this.mode,
+    required this.tool,
+    required this.op,
+    this.entryId,
+    this.entryName,
+    required this.decision,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['at'] = Variable<int>(at);
+    map['pairing_id'] = Variable<String>(pairingId);
+    map['nickname'] = Variable<String>(nickname);
+    map['mode'] = Variable<String>(mode);
+    map['tool'] = Variable<String>(tool);
+    map['op'] = Variable<String>(op);
+    if (!nullToAbsent || entryId != null) {
+      map['entry_id'] = Variable<String>(entryId);
+    }
+    if (!nullToAbsent || entryName != null) {
+      map['entry_name'] = Variable<String>(entryName);
+    }
+    map['decision'] = Variable<String>(decision);
+    return map;
+  }
+
+  AgentAuditCompanion toCompanion(bool nullToAbsent) {
+    return AgentAuditCompanion(
+      id: Value(id),
+      at: Value(at),
+      pairingId: Value(pairingId),
+      nickname: Value(nickname),
+      mode: Value(mode),
+      tool: Value(tool),
+      op: Value(op),
+      entryId: entryId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(entryId),
+      entryName: entryName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(entryName),
+      decision: Value(decision),
+    );
+  }
+
+  factory AgentAuditData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return AgentAuditData(
+      id: serializer.fromJson<int>(json['id']),
+      at: serializer.fromJson<int>(json['at']),
+      pairingId: serializer.fromJson<String>(json['pairing_id']),
+      nickname: serializer.fromJson<String>(json['nickname']),
+      mode: serializer.fromJson<String>(json['mode']),
+      tool: serializer.fromJson<String>(json['tool']),
+      op: serializer.fromJson<String>(json['op']),
+      entryId: serializer.fromJson<String?>(json['entry_id']),
+      entryName: serializer.fromJson<String?>(json['entry_name']),
+      decision: serializer.fromJson<String>(json['decision']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'at': serializer.toJson<int>(at),
+      'pairing_id': serializer.toJson<String>(pairingId),
+      'nickname': serializer.toJson<String>(nickname),
+      'mode': serializer.toJson<String>(mode),
+      'tool': serializer.toJson<String>(tool),
+      'op': serializer.toJson<String>(op),
+      'entry_id': serializer.toJson<String?>(entryId),
+      'entry_name': serializer.toJson<String?>(entryName),
+      'decision': serializer.toJson<String>(decision),
+    };
+  }
+
+  AgentAuditData copyWith({
+    int? id,
+    int? at,
+    String? pairingId,
+    String? nickname,
+    String? mode,
+    String? tool,
+    String? op,
+    Value<String?> entryId = const Value.absent(),
+    Value<String?> entryName = const Value.absent(),
+    String? decision,
+  }) => AgentAuditData(
+    id: id ?? this.id,
+    at: at ?? this.at,
+    pairingId: pairingId ?? this.pairingId,
+    nickname: nickname ?? this.nickname,
+    mode: mode ?? this.mode,
+    tool: tool ?? this.tool,
+    op: op ?? this.op,
+    entryId: entryId.present ? entryId.value : this.entryId,
+    entryName: entryName.present ? entryName.value : this.entryName,
+    decision: decision ?? this.decision,
+  );
+  AgentAuditData copyWithCompanion(AgentAuditCompanion data) {
+    return AgentAuditData(
+      id: data.id.present ? data.id.value : this.id,
+      at: data.at.present ? data.at.value : this.at,
+      pairingId: data.pairingId.present ? data.pairingId.value : this.pairingId,
+      nickname: data.nickname.present ? data.nickname.value : this.nickname,
+      mode: data.mode.present ? data.mode.value : this.mode,
+      tool: data.tool.present ? data.tool.value : this.tool,
+      op: data.op.present ? data.op.value : this.op,
+      entryId: data.entryId.present ? data.entryId.value : this.entryId,
+      entryName: data.entryName.present ? data.entryName.value : this.entryName,
+      decision: data.decision.present ? data.decision.value : this.decision,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AgentAuditData(')
+          ..write('id: $id, ')
+          ..write('at: $at, ')
+          ..write('pairingId: $pairingId, ')
+          ..write('nickname: $nickname, ')
+          ..write('mode: $mode, ')
+          ..write('tool: $tool, ')
+          ..write('op: $op, ')
+          ..write('entryId: $entryId, ')
+          ..write('entryName: $entryName, ')
+          ..write('decision: $decision')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    at,
+    pairingId,
+    nickname,
+    mode,
+    tool,
+    op,
+    entryId,
+    entryName,
+    decision,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is AgentAuditData &&
+          other.id == this.id &&
+          other.at == this.at &&
+          other.pairingId == this.pairingId &&
+          other.nickname == this.nickname &&
+          other.mode == this.mode &&
+          other.tool == this.tool &&
+          other.op == this.op &&
+          other.entryId == this.entryId &&
+          other.entryName == this.entryName &&
+          other.decision == this.decision);
+}
+
+class AgentAuditCompanion extends UpdateCompanion<AgentAuditData> {
+  final Value<int> id;
+  final Value<int> at;
+  final Value<String> pairingId;
+  final Value<String> nickname;
+  final Value<String> mode;
+  final Value<String> tool;
+  final Value<String> op;
+  final Value<String?> entryId;
+  final Value<String?> entryName;
+  final Value<String> decision;
+  const AgentAuditCompanion({
+    this.id = const Value.absent(),
+    this.at = const Value.absent(),
+    this.pairingId = const Value.absent(),
+    this.nickname = const Value.absent(),
+    this.mode = const Value.absent(),
+    this.tool = const Value.absent(),
+    this.op = const Value.absent(),
+    this.entryId = const Value.absent(),
+    this.entryName = const Value.absent(),
+    this.decision = const Value.absent(),
+  });
+  AgentAuditCompanion.insert({
+    this.id = const Value.absent(),
+    required int at,
+    required String pairingId,
+    required String nickname,
+    required String mode,
+    required String tool,
+    required String op,
+    this.entryId = const Value.absent(),
+    this.entryName = const Value.absent(),
+    required String decision,
+  }) : at = Value(at),
+       pairingId = Value(pairingId),
+       nickname = Value(nickname),
+       mode = Value(mode),
+       tool = Value(tool),
+       op = Value(op),
+       decision = Value(decision);
+  static Insertable<AgentAuditData> custom({
+    Expression<int>? id,
+    Expression<int>? at,
+    Expression<String>? pairingId,
+    Expression<String>? nickname,
+    Expression<String>? mode,
+    Expression<String>? tool,
+    Expression<String>? op,
+    Expression<String>? entryId,
+    Expression<String>? entryName,
+    Expression<String>? decision,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (at != null) 'at': at,
+      if (pairingId != null) 'pairing_id': pairingId,
+      if (nickname != null) 'nickname': nickname,
+      if (mode != null) 'mode': mode,
+      if (tool != null) 'tool': tool,
+      if (op != null) 'op': op,
+      if (entryId != null) 'entry_id': entryId,
+      if (entryName != null) 'entry_name': entryName,
+      if (decision != null) 'decision': decision,
+    });
+  }
+
+  AgentAuditCompanion copyWith({
+    Value<int>? id,
+    Value<int>? at,
+    Value<String>? pairingId,
+    Value<String>? nickname,
+    Value<String>? mode,
+    Value<String>? tool,
+    Value<String>? op,
+    Value<String?>? entryId,
+    Value<String?>? entryName,
+    Value<String>? decision,
+  }) {
+    return AgentAuditCompanion(
+      id: id ?? this.id,
+      at: at ?? this.at,
+      pairingId: pairingId ?? this.pairingId,
+      nickname: nickname ?? this.nickname,
+      mode: mode ?? this.mode,
+      tool: tool ?? this.tool,
+      op: op ?? this.op,
+      entryId: entryId ?? this.entryId,
+      entryName: entryName ?? this.entryName,
+      decision: decision ?? this.decision,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (at.present) {
+      map['at'] = Variable<int>(at.value);
+    }
+    if (pairingId.present) {
+      map['pairing_id'] = Variable<String>(pairingId.value);
+    }
+    if (nickname.present) {
+      map['nickname'] = Variable<String>(nickname.value);
+    }
+    if (mode.present) {
+      map['mode'] = Variable<String>(mode.value);
+    }
+    if (tool.present) {
+      map['tool'] = Variable<String>(tool.value);
+    }
+    if (op.present) {
+      map['op'] = Variable<String>(op.value);
+    }
+    if (entryId.present) {
+      map['entry_id'] = Variable<String>(entryId.value);
+    }
+    if (entryName.present) {
+      map['entry_name'] = Variable<String>(entryName.value);
+    }
+    if (decision.present) {
+      map['decision'] = Variable<String>(decision.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AgentAuditCompanion(')
+          ..write('id: $id, ')
+          ..write('at: $at, ')
+          ..write('pairingId: $pairingId, ')
+          ..write('nickname: $nickname, ')
+          ..write('mode: $mode, ')
+          ..write('tool: $tool, ')
+          ..write('op: $op, ')
+          ..write('entryId: $entryId, ')
+          ..write('entryName: $entryName, ')
+          ..write('decision: $decision')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -1380,6 +1965,11 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'CREATE INDEX idx_password_entries_type ON password_entries (type)',
   );
   late final VaultMeta vaultMeta = VaultMeta(this);
+  late final AgentAudit agentAudit = AgentAudit(this);
+  late final Index idxAgentAuditAt = Index(
+    'idx_agent_audit_at',
+    'CREATE INDEX idx_agent_audit_at ON agent_audit (at)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1392,6 +1982,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     idxPasswordEntriesFavorite,
     idxPasswordEntriesType,
     vaultMeta,
+    agentAudit,
+    idxAgentAuditAt,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -2118,6 +2710,302 @@ typedef $VaultMetaProcessedTableManager =
       VaultMetaData,
       PrefetchHooks Function()
     >;
+typedef $AgentAuditCreateCompanionBuilder =
+    AgentAuditCompanion Function({
+      Value<int> id,
+      required int at,
+      required String pairingId,
+      required String nickname,
+      required String mode,
+      required String tool,
+      required String op,
+      Value<String?> entryId,
+      Value<String?> entryName,
+      required String decision,
+    });
+typedef $AgentAuditUpdateCompanionBuilder =
+    AgentAuditCompanion Function({
+      Value<int> id,
+      Value<int> at,
+      Value<String> pairingId,
+      Value<String> nickname,
+      Value<String> mode,
+      Value<String> tool,
+      Value<String> op,
+      Value<String?> entryId,
+      Value<String?> entryName,
+      Value<String> decision,
+    });
+
+class $AgentAuditFilterComposer extends Composer<_$AppDatabase, AgentAudit> {
+  $AgentAuditFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get at => $composableBuilder(
+    column: $table.at,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get pairingId => $composableBuilder(
+    column: $table.pairingId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get nickname => $composableBuilder(
+    column: $table.nickname,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get mode => $composableBuilder(
+    column: $table.mode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get tool => $composableBuilder(
+    column: $table.tool,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get op => $composableBuilder(
+    column: $table.op,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get entryId => $composableBuilder(
+    column: $table.entryId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get entryName => $composableBuilder(
+    column: $table.entryName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get decision => $composableBuilder(
+    column: $table.decision,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $AgentAuditOrderingComposer extends Composer<_$AppDatabase, AgentAudit> {
+  $AgentAuditOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get at => $composableBuilder(
+    column: $table.at,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get pairingId => $composableBuilder(
+    column: $table.pairingId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get nickname => $composableBuilder(
+    column: $table.nickname,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get mode => $composableBuilder(
+    column: $table.mode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get tool => $composableBuilder(
+    column: $table.tool,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get op => $composableBuilder(
+    column: $table.op,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get entryId => $composableBuilder(
+    column: $table.entryId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get entryName => $composableBuilder(
+    column: $table.entryName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get decision => $composableBuilder(
+    column: $table.decision,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $AgentAuditAnnotationComposer
+    extends Composer<_$AppDatabase, AgentAudit> {
+  $AgentAuditAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get at =>
+      $composableBuilder(column: $table.at, builder: (column) => column);
+
+  GeneratedColumn<String> get pairingId =>
+      $composableBuilder(column: $table.pairingId, builder: (column) => column);
+
+  GeneratedColumn<String> get nickname =>
+      $composableBuilder(column: $table.nickname, builder: (column) => column);
+
+  GeneratedColumn<String> get mode =>
+      $composableBuilder(column: $table.mode, builder: (column) => column);
+
+  GeneratedColumn<String> get tool =>
+      $composableBuilder(column: $table.tool, builder: (column) => column);
+
+  GeneratedColumn<String> get op =>
+      $composableBuilder(column: $table.op, builder: (column) => column);
+
+  GeneratedColumn<String> get entryId =>
+      $composableBuilder(column: $table.entryId, builder: (column) => column);
+
+  GeneratedColumn<String> get entryName =>
+      $composableBuilder(column: $table.entryName, builder: (column) => column);
+
+  GeneratedColumn<String> get decision =>
+      $composableBuilder(column: $table.decision, builder: (column) => column);
+}
+
+class $AgentAuditTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          AgentAudit,
+          AgentAuditData,
+          $AgentAuditFilterComposer,
+          $AgentAuditOrderingComposer,
+          $AgentAuditAnnotationComposer,
+          $AgentAuditCreateCompanionBuilder,
+          $AgentAuditUpdateCompanionBuilder,
+          (
+            AgentAuditData,
+            BaseReferences<_$AppDatabase, AgentAudit, AgentAuditData>,
+          ),
+          AgentAuditData,
+          PrefetchHooks Function()
+        > {
+  $AgentAuditTableManager(_$AppDatabase db, AgentAudit table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $AgentAuditFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $AgentAuditOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $AgentAuditAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<int> at = const Value.absent(),
+                Value<String> pairingId = const Value.absent(),
+                Value<String> nickname = const Value.absent(),
+                Value<String> mode = const Value.absent(),
+                Value<String> tool = const Value.absent(),
+                Value<String> op = const Value.absent(),
+                Value<String?> entryId = const Value.absent(),
+                Value<String?> entryName = const Value.absent(),
+                Value<String> decision = const Value.absent(),
+              }) => AgentAuditCompanion(
+                id: id,
+                at: at,
+                pairingId: pairingId,
+                nickname: nickname,
+                mode: mode,
+                tool: tool,
+                op: op,
+                entryId: entryId,
+                entryName: entryName,
+                decision: decision,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required int at,
+                required String pairingId,
+                required String nickname,
+                required String mode,
+                required String tool,
+                required String op,
+                Value<String?> entryId = const Value.absent(),
+                Value<String?> entryName = const Value.absent(),
+                required String decision,
+              }) => AgentAuditCompanion.insert(
+                id: id,
+                at: at,
+                pairingId: pairingId,
+                nickname: nickname,
+                mode: mode,
+                tool: tool,
+                op: op,
+                entryId: entryId,
+                entryName: entryName,
+                decision: decision,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<AgentAudit, AgentAuditData>(table),
+                  BaseReferences<_$AppDatabase, AgentAudit, AgentAuditData>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $AgentAuditProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      AgentAudit,
+      AgentAuditData,
+      $AgentAuditFilterComposer,
+      $AgentAuditOrderingComposer,
+      $AgentAuditAnnotationComposer,
+      $AgentAuditCreateCompanionBuilder,
+      $AgentAuditUpdateCompanionBuilder,
+      (
+        AgentAuditData,
+        BaseReferences<_$AppDatabase, AgentAudit, AgentAuditData>,
+      ),
+      AgentAuditData,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -2127,4 +3015,6 @@ class $AppDatabaseManager {
       $PasswordEntriesTableManager(_db, _db.passwordEntries);
   $VaultMetaTableManager get vaultMeta =>
       $VaultMetaTableManager(_db, _db.vaultMeta);
+  $AgentAuditTableManager get agentAudit =>
+      $AgentAuditTableManager(_db, _db.agentAudit);
 }

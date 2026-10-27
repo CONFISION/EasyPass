@@ -2,6 +2,7 @@
 // 同款），刻意不用 initializing formal。
 // ignore_for_file: prefer_initializing_formals
 
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:easypass/core/crypto/totp_service.dart';
@@ -42,6 +43,7 @@ class AgentWindow {
 class AgentAuditEntry {
   const AgentAuditEntry({
     required this.at,
+    required this.pairingId,
     required this.nickname,
     required this.mode,
     required this.tool,
@@ -52,6 +54,9 @@ class AgentAuditEntry {
   });
 
   final int at;
+
+  /// 配对的内部 id。**只进库、不进模型上下文**（模型只看昵称）。
+  final String pairingId;
   final String nickname;
   final String mode;
   final String tool;
@@ -91,6 +96,7 @@ class AgentActions {
     required AgentAccessStore agentAccess,
     required TotpService totpService,
     Future<bool> Function(String text)? clipboardWriter,
+    Future<void> Function(AgentAuditEntry entry)? auditSink,
     DateTime Function()? clock,
     int auditCapacity = 200,
   })  : _repository = repository,
@@ -99,6 +105,7 @@ class AgentActions {
         _agentAccess = agentAccess,
         _totpService = totpService,
         _clipboardWriter = clipboardWriter ?? SystemClipboard.writeText,
+        _auditSink = auditSink,
         _clock = clock ?? DateTime.now,
         _auditCapacity = auditCapacity;
 
@@ -110,6 +117,13 @@ class AgentActions {
 
   /// 剪贴板写入（可注入：单测不要真的动系统剪贴板，否则并行用例会互相抢）。
   final Future<bool> Function(String text) _clipboardWriter;
+
+  /// 审计落库回调（生产环境由核心接到 `agent_audit` 表；测试可注入假实现）。
+  ///
+  /// 为什么要有它：方式 2 对用户的承诺是"每次访问都留日志"，内存环形缓冲
+  /// 重启即丢，等于没兑现。落库失败**不能**让工具调用失败（审计是旁路），
+  /// 因此这里吞掉异常，只在内存里保底。
+  final Future<void> Function(AgentAuditEntry entry)? _auditSink;
   final DateTime Function() _clock;
   final int _auditCapacity;
 
@@ -543,6 +557,7 @@ class AgentActions {
   }) {
     _audit.addLast(AgentAuditEntry(
       at: _now,
+      pairingId: principal.pairingId,
       nickname: principal.nickname,
       mode: mode.name,
       tool: tool,
@@ -553,6 +568,14 @@ class AgentActions {
     ));
     while (_audit.length > _auditCapacity) {
       _audit.removeFirst();
+    }
+
+    // 落库（旁路）：失败只记 stderr，绝不让工具调用因此失败 ——
+    // 审计是"事后可查"，不是"通过的前提"。
+    final sink = _auditSink;
+    if (sink != null) {
+      final entry = _audit.last;
+      unawaited(Future<void>.sync(() => sink(entry)).catchError((Object _) {}));
     }
   }
 }

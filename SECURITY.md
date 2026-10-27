@@ -174,6 +174,13 @@ Consequences you should be aware of:
 - The MCP listener rejects any request carrying an `Origin` header, validates `Host`,
   refuses non-`POST` methods, requires a per-pairing bearer key (only its SHA-256 is
   stored), accepts no query-string credentials, and never sends CORS headers.
+- **Passwords never travel to the model.** There is no "reveal" tool: the agent can only ask
+  the core to put a field value on the **system clipboard** (`copy_to_clipboard`) and learns
+  whether that succeeded. The value goes from the core process to the clipboard and nowhere
+  else; the call is audited by entry and field name, never by value.
+- **Every agent call is recorded** in the `agent_audit` table (nickname, tool, entry,
+  decision). The key, the real client identity, plaintext arguments and field values are
+  never written there.
 
 ## Known limitations (please don't report these as vulnerabilities)
 

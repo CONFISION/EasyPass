@@ -78,10 +78,30 @@ import drift / 数据库 / 仓储。所以：
 | --- | --- | --- |
 | `secret.*` | 主密码校验材料：salt、`SHA-256(derivedKey)` 验证子 | `VaultMetaSecretStore`（升级迁移 `auth.*` 一次） |
 | `rotation.*` | 主密码轮换日志（目标 salt + 验签子 + 状态） | `MasterPasswordRotation` |
+| `agent.pairing.<id>` | 智能体配对记录（昵称 / 方式 / **密钥的 SHA-256** / 撤销时间） | `AgentPairingStore` |
+| `agent.enabled` | 智能体访问总开关（`'1'` = 开） | `AgentAccessStore` |
+| `agent.wrap` | 用专属密钥**包裹后**的保险库密钥（base64，见 `AgentKeyMaterial`） | `AgentAccessStore` |
 
 **轮换的原子性不变量**：目标 salt/验签子与整库重加密在**同一个 SQLite 事务**里写入。
 "没有日志 ⇒ 库还是旧钥匙；有日志 ⇒ 库已经是新钥匙"，日志的存在就是"哪个密码有效"的权威。
 `test/master_password_rotation_atomicity_test.dart` 与 `change_password_then_lock_test.dart` 守着这条。
+
+### 2.2 `agent_audit`（schemaVersion 4 新增）
+
+智能体（MCP）访问审计。**只存"发生了什么"，不存秘密**：
+
+| 列 | 含义 |
+| --- | --- |
+| `at` | 毫秒时间戳 |
+| `pairing_id` / `nickname` | 哪个配对、用户给它起的名字（**只进库，不进模型上下文**） |
+| `mode` | `trusted` / `approval` |
+| `tool` / `op` | 工具名 + 读 / 写 / 删 / 剪贴板 |
+| `entry_id` / `entry_name` | 被操作的条目（可空，例如 `status`） |
+| `decision` | `allowed` / `allowed_standing` / `denied` / `timeout` / `error` |
+
+**绝不写入**：配对密钥、真实客户端标识、明文参数、条目字段值。
+写入是**旁路**（`AgentActions.auditSink`）：落库失败不影响工具调用，只在内存环形缓冲里保底。
+表按 `id` 保留最近 5000 条（`pruneAgentAudit`）。
 
 ---
 
@@ -197,14 +217,15 @@ Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
 
 ## 6. 迁移规则（改 schema 必读）
 
-- **`schemaVersion` 当前是 3**，`AppDatabase.migration.onUpgrade` 真实实现了 1→2 与 2→3；
+- **`schemaVersion` 当前是 4**，`AppDatabase.migration.onUpgrade` 真实实现了 1→2、2→3、3→4；
   每个新列 / 新表**都**要加进去，否则老库打开时报 "no such column" / "no such table"。
+  - 3 → 4 新增 `agent_audit`（智能体访问审计，见 §2.2）；
 - **改 `tables.drift` 必须跑**
   `dart run build_runner build --delete-conflicting-outputs`。
   先读 `pubspec.yaml` 里那段注释：analyzer 版本必须跟得上 Dart SDK，
   否则 `drift_dev` 会以 `Missing implementation of visitDotShorthandPropertyAccess` 崩，
   而且**什么都不写**（`--delete-conflicting-outputs` 已经把旧文件删了 ⇒ 仓库直接编不过）。
-- `test/migration_test.dart` 手工构造 v1 / v2 库并断言两条升级路径 —— 新增列 / 表时扩展它。
+- `test/migration_test.dart` 手工构造 v1 / v2 / v3 库并断言三条升级路径 —— 新增列 / 表时扩展它。
 - drift **不启用** SQLite 外键，所以 `ON DELETE SET NULL` 永远不会触发：
   `deleteFolderAndUnassign()` 显式清 `folder_id`。
 - **迁移没有退路**：升级必须能在老库上补出新列，且不破坏旧密文。
