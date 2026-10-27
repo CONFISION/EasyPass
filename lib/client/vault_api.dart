@@ -137,9 +137,12 @@ abstract class VaultApi {
   Future<List<Map<String, dynamic>>> listAgentPairings();
 
   /// 创建配对：返回的 `key` **只出现这一次**，之后库里只有哈希。
+  ///
+  /// [mode] 为 `trusted` 时必须给 [password]（核心二次校验后才置 trusted）。
   Future<Map<String, dynamic>> createAgentPairing({
     required String nickname,
     required String mode,
+    String? password,
   });
 
   Future<void> revokeAgentPairing(String id);

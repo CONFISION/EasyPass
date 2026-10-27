@@ -154,11 +154,16 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
     controller.dispose();
     if (nickname == null || nickname.isEmpty || !mounted) return;
 
+    // 建"可信直通"配对必须用主密码确认一次（核心据此置 trusted）。
+    final password = await _askMasterPassword(_l10n.agentCreatePairing);
+    if (password == null || !mounted) return;
+
     final api = ref.read(vaultApiProvider);
     try {
       final created = await api.createAgentPairing(
         nickname: nickname,
         mode: 'trusted',
+        password: password,
       );
       await _showKeyOnce(created['key'] as String? ?? '');
       await _refresh();

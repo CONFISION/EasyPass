@@ -400,10 +400,12 @@ class CoreVaultApi implements VaultApi {
   Future<Map<String, dynamic>> createAgentPairing({
     required String nickname,
     required String mode,
+    String? password,
   }) {
     return _call(Actions.createAgentPairing, {
       'nickname': nickname,
       'mode': mode,
+      'password': ?password,
     });
   }
 

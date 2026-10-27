@@ -237,18 +237,35 @@ class CoreActions {
     final mode = (params['mode'] as String?) == 'trusted'
         ? AgentMode.trusted
         : AgentMode.approval;
+    // **trusted 不能只靠一个字符串就成立**：必须由用户用主密码确认一次
+    // （与"切换到可信直通"同一条校验路径）。否则界面传 mode:'trusted'
+    // 就能把"每次审批"悄悄降级成"直接放行"。
+    var trusted = false;
+    if (mode == AgentMode.trusted) {
+      await _unlockAgentWithPassword(params['password'] as String? ?? '');
+      trusted = true;
+    }
     // 密钥**只在创建时返回这一次**；库里只存 SHA-256（见 MCP spec 的 I-11）。
     final key = AgentPairingStore.generateKey();
     final now = DateTime.now().millisecondsSinceEpoch;
-    final id = 'p_${now.toRadixString(16)}';
+    // **不能用时间戳当 id**：同一毫秒内连建两个配对会撞 id，后一个直接覆盖前一个
+    // （全量测试里就复现成"撤销一个却剩下 0 个"）。用 UUID。
+    final id = 'p_${_uuid.v4()}';
     await _pairingStore.save(AgentPairing(
       id: id,
       nickname: nickname,
       mode: mode,
+      trusted: trusted,
       keyHash: AgentPairingStore.hashKey(key),
       createdAt: now,
     ));
-    return {'id': id, 'key': key, 'nickname': nickname, 'mode': mode.name};
+    return {
+      'id': id,
+      'key': key,
+      'nickname': nickname,
+      'mode': mode.name,
+      'trusted': trusted,
+    };
   }
 
   /// 撤销配对 = **彻底移除**这条配对记录（不是打标记留着）。

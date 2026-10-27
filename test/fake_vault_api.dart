@@ -589,15 +589,18 @@ class FakeVaultApi implements VaultApi {
   Future<Map<String, dynamic>> createAgentPairing({
     required String nickname,
     required String mode,
+    String? password,
   }) async {
     calls.add('createAgentPairing');
     final id = 'p_${agentPairings.length + 1}';
     final key = 'key-$id';
+    // 与核心一致：trusted 需要主密码确认，否则只是 approval。
+    final trusted = mode == 'trusted' && (password ?? '').isNotEmpty;
     agentPairings.add({
       'id': id,
       'nickname': nickname,
-      'mode': mode,
-      'trusted': mode == 'trusted',
+      'mode': trusted ? 'trusted' : 'approval',
+      'trusted': trusted,
       'revoked': false,
       'createdAt': 0,
       'lastUsedAt': null,

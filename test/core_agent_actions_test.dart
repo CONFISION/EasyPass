@@ -33,7 +33,7 @@ void main() {
     test('密钥只返回一次，库里只有哈希', () async {
       final created = await core.call(
         Actions.createAgentPairing,
-        {'nickname': 'DSH', 'mode': 'trusted'},
+        {'nickname': 'DSH', 'mode': 'trusted', 'password': password},
       );
       final key = created['key'] as String;
       final id = created['id'] as String;
@@ -61,6 +61,41 @@ void main() {
         core.call(Actions.createAgentPairing, {'nickname': '   '}),
         throwsA(anything),
       );
+    });
+
+    test('要 trusted 却没有任何主密码 ⇒ 拒绝，且不留下配对', () async {
+      await expectLater(
+        core.call(Actions.createAgentPairing, {'nickname': 'DSH', 'mode': 'trusted'}),
+        throwsA(anything),
+      );
+      expect(await store().list(), isEmpty,
+          reason: 'trusted 必须由主密码确认，失败不能留下半成品配对');
+      expect(core.sessions.agent.isUnlocked, isFalse);
+    });
+
+    test('主密码错 ⇒ 拒绝，且不留下配对', () async {
+      await expectLater(
+        core.call(Actions.createAgentPairing, {
+          'nickname': 'DSH',
+          'mode': 'trusted',
+          'password': 'wrong-pw',
+        }),
+        throwsA(anything),
+      );
+      expect(await store().list(), isEmpty);
+    });
+
+    test('trusted 配对成功后 trusted=true（否则策略会判 notTrusted）', () async {
+      final created = await core.call(Actions.createAgentPairing, {
+        'nickname': 'DSH',
+        'mode': 'trusted',
+        'password': password,
+      });
+      expect(created['trusted'], isTrue);
+
+      final stored = await store().findById(created['id'] as String);
+      expect(stored!.trusted, isTrue);
+      expect(stored.mode, AgentMode.trusted);
     });
   });
 
@@ -130,11 +165,9 @@ void main() {
     test('切回逐次审批：信任清零并立刻锁 agent 域', () async {
       final created = await core.call(
         Actions.createAgentPairing,
-        {'nickname': 'DSH', 'mode': 'trusted'},
+        {'nickname': 'DSH', 'mode': 'trusted', 'password': password},
       );
       final id = created['id'] as String;
-      await core.call(Actions.setAgentAccessMode,
-          {'id': id, 'mode': 'trusted', 'password': password});
       expect(core.sessions.agent.isUnlocked, isTrue);
 
       final back =
@@ -182,6 +215,14 @@ void main() {
       expect(core.sessions.agent.isUnlocked, isTrue,
           reason: '总开关还开着，撤一个配对不该殃及其它智能体');
       expect(result['remaining'], 1);
+    });
+
+    test('同一毫秒内连建两个配对不会撞 id（回归：曾用时间戳当 id）', () async {
+      final a = await core.call(Actions.createAgentPairing, {'nickname': 'A'});
+      final b = await core.call(Actions.createAgentPairing, {'nickname': 'B'});
+
+      expect(a['id'], isNot(b['id']));
+      expect((await store().list()).length, 2);
     });
 
     test('撤销不存在的配对 ⇒ notFound', () async {
