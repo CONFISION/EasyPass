@@ -117,4 +117,43 @@ void main() {
       expect(now, isNotNull); // 保持变量被使用，避免 lint
     });
   });
+
+  /// 跨域密钥纪律（阶段 0，为 agent 域铺路）。
+  ///
+  /// `VaultSession._wipe()` 是**原地** `fillRange(0, …)` 清零。所以两个域如果
+  /// 持有**同一个 `Uint8List` 实例**，锁定其中一个就会把另一个的密钥清零 ——
+  /// 而另一个域仍然"处于解锁态"，后续读写直接解密失败（现场看起来像库坏了）。
+  /// 因此：**任何跨域授权都必须复制一份**（`Uint8List.fromList`），
+  /// 例如"用户同意后把 ui 的密钥借给 agent 域跑一次操作"。
+  group('跨域密钥必须复制', () {
+    test('各持一份副本时，锁一个域不影响另一个域', () {
+      final domains = build();
+      final original = fakeKey();
+      domains.ui.unlock(original);
+      domains.bridge.unlock(Uint8List.fromList(original));
+
+      domains.ui.lock();
+
+      expect(domains.bridge.isUnlocked, isTrue,
+          reason: '副本是独立的缓冲，ui 的 lock 不该波及 bridge');
+      expect(domains.bridge.key, everyElement(0x5A),
+          reason: 'bridge 的密钥必须完好');
+    });
+
+    test('共享同一实例时会被对方清零 —— 反面教材，别这么写', () {
+      final domains = build();
+      final shared = fakeKey();
+      domains.ui.unlock(shared);
+      domains.bridge.unlock(shared); // 错误示范：两个域拿到同一个实例
+
+      domains.ui.lock();
+
+      // ui 的 _wipe 就地清零了共享缓冲：bridge 仍显示"解锁"，但密钥已废。
+      expect(shared, everyElement(0));
+      expect(domains.bridge.isUnlocked, isTrue);
+      expect(domains.bridge.key, everyElement(0),
+          reason: '这正是"锁 A 域把 B 域密钥清掉"的现场，'
+              '也是跨域必须 Uint8List.fromList 复制的原因');
+    });
+  });
 }

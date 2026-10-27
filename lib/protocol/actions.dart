@@ -134,5 +134,39 @@ class Actions {
     importVault,
     shutdownCore,
   };
+
+  /// **智能体域（`role: agent`）** 的动作白名单。
+  ///
+  /// 为什么单独一份，而且**不是** `bridgeAllowed` 的子集：智能体是"可被提示注入
+  /// 驱动的调用者"，与"用户点一下自动填充的浏览器扩展"不是一个确定性等级。
+  /// `bridgeAllowed` 里有 `unlock` / `getTotp` / `shutdownCore`，这些能力一旦被
+  /// 智能体拿到，等于绕过整个授权模型（见 `docs/agent-mcp-spec.md` 的 I-3）。
+  ///
+  /// 阶段 0 先留空 —— **空集合 = 默认全拒**，比"先继承 bridge 再慢慢收"安全。
+  /// 阶段 1 起由 `AgentActions` 逐个填入（`status` / `begin_session` /
+  /// `listAgentItems` / …）；届时本集合仍必须与 bridge 白名单**没有交集**。
+  static const Set<String> agentAllowed = <String>{};
+
+  /// 角色 → 动作白名单；**未知角色返回 `null`，调用方必须拒绝该连接**。
+  ///
+  /// 单一来源：握手期的角色校验与服务端分发都走这里，避免"两处各判一次"
+  /// 之后慢慢分叉。曾经 `_dispatch` 写的是 `role == 'ui' ? ui : bridge`，
+  /// 于是任何非 ui 角色都继承了 bridge 的全部权限 —— `agent` 只是文档里的
+  /// 预留，代码层面等于 bridge。
+  static Set<String>? allowedFor(String role) {
+    switch (role) {
+      case 'ui':
+        return uiAllowed;
+      case 'bridge':
+        return bridgeAllowed;
+      case 'agent':
+        return agentAllowed;
+      default:
+        return null;
+    }
+  }
+
+  /// 握手阶段可接受的角色（`allowedFor` 非空即合法）。
+  static bool isKnownRole(String role) => allowedFor(role) != null;
 }
 

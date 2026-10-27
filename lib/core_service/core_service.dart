@@ -273,6 +273,21 @@ class CoreService {
       }
 
       final role = (step1['role'] as String?) ?? 'bridge';
+      // 角色必须在白名单里，且判定只有一个来源（`Actions.allowedFor`）。
+      // 不能等 `_dispatch` 才拒绝：那会把"未知角色继承 bridge 权限"的窗口
+      // 留到握手之后 —— 能连上就等于已经有权限了。
+      if (!Actions.isKnownRole(role)) {
+        socket.add(encodeMessage({
+          'ok': false,
+          'error': ErrorCodes.unsupported,
+          'coreVersion': AppConstants.coreVersion,
+          'protocolVersion': coreProtocolVersion,
+          'hint': 'unknown role "$role"',
+        }));
+        await socket.flush();
+        socket.destroy();
+        return;
+      }
       final clientProtocol = (step1['protocolVersion'] as num?)?.toInt() ?? 0;
       if (clientProtocol < coreProtocolVersion) {
         socket.add(encodeMessage({
@@ -379,9 +394,17 @@ class CoreService {
       };
     }
 
-    final allowed = connection.role == 'ui'
-        ? Actions.uiAllowed
-        : Actions.bridgeAllowed;
+    // 三分支：ui / bridge / agent 各自一份白名单，**未知角色一律拒绝**。
+    // 旧的二分支写法（`ui` 否则 `bridge`）会让任何新角色默认继承 bridge 的
+    // 全部权限，包括 `unlock` / `getTotp` / `shutdownCore`。
+    final allowed = Actions.allowedFor(connection.role);
+    if (allowed == null) {
+      return {
+        'requestId': requestId,
+        'error': 'Unknown role: ${connection.role}',
+        'errorCode': ErrorCodes.unsupported,
+      };
+    }
     if (!allowed.contains(action)) {
       return {
         'requestId': requestId,
