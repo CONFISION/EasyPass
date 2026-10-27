@@ -1012,6 +1012,50 @@ class AppLocalizationsEn extends AppLocalizations {
   String get agentAccessSection => 'Agent access';
 
   @override
+  String get agentEnableTitle => 'Agent access (MCP)';
+
+  @override
+  String get agentEnabledSubtitle =>
+      'On — agents can read entries marked open, without you unlocking each time.';
+
+  @override
+  String get agentDisabledSubtitle =>
+      'Off — the MCP service is stopped and agents have no access.';
+
+  @override
+  String get agentWarningBanner =>
+      'Agent access is ON: this vault can be unlocked automatically by EasyPass itself, for any process running as your Windows account. Turn it off to remove that ability immediately.';
+
+  @override
+  String get agentServiceOn => 'MCP service running';
+
+  @override
+  String get agentServiceOff => 'MCP service stopped';
+
+  @override
+  String get agentEnableFirst =>
+      'Turn on agent access first, then pair an agent.';
+
+  @override
+  String get agentAdvancedSection => 'Advanced';
+
+  @override
+  String get agentResetKey => 'Reset the agent key';
+
+  @override
+  String get agentResetKeySubtitle =>
+      'Replaces the key that wraps the vault key. The old key stops working immediately; your entries are untouched.';
+
+  @override
+  String get agentResetKeyConfirm =>
+      'Reset the agent key? Every agent using the old key will stop working until you pair it again.';
+
+  @override
+  String agentCalls(String count) {
+    return '$count calls';
+  }
+
+  @override
   String get agentAccessTitle => 'Agent access (MCP)';
 
   @override

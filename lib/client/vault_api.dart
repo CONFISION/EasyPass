@@ -121,6 +121,18 @@ abstract class VaultApi {
   /// 智能体域是否已解锁。
   Future<bool> agentDomainUnlocked();
 
+  /// 总开关状态：`{enabled: bool, agentUnlocked: bool}`。
+  Future<Map<String, dynamic>> agentAccessState();
+
+  /// 打开总开关（需要保险库已解锁）：包裹 vaultKey + DPAPI 落盘 + 启动 MCP。
+  Future<void> enableAgentAccess();
+
+  /// 关闭总开关：清掉全部密钥材料、锁 agent 域、**停 MCP 服务**。
+  Future<void> disableAgentAccess();
+
+  /// 重置专属密钥（旧钥匙立刻作废，库密文不动）。
+  Future<void> resetAgentKey();
+
   /// 配对列表（**不含密钥哈希**）。
   Future<List<Map<String, dynamic>>> listAgentPairings();
 

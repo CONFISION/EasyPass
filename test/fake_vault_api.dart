@@ -546,11 +546,37 @@ class FakeVaultApi implements VaultApi {
   final List<Map<String, dynamic>> agentPairings = <Map<String, dynamic>>[];
 
   bool agentUnlocked = false;
+  bool agentEnabled = false;
 
   @override
   Future<bool> agentDomainUnlocked() async {
     calls.add('agentDomainUnlocked');
     return agentUnlocked;
+  }
+
+  @override
+  Future<Map<String, dynamic>> agentAccessState() async {
+    calls.add('agentAccessState');
+    return {'enabled': agentEnabled, 'agentUnlocked': agentUnlocked};
+  }
+
+  @override
+  Future<void> enableAgentAccess() async {
+    calls.add('enableAgentAccess');
+    agentEnabled = true;
+    agentUnlocked = true;
+  }
+
+  @override
+  Future<void> disableAgentAccess() async {
+    calls.add('disableAgentAccess');
+    agentEnabled = false;
+    agentUnlocked = false;
+  }
+
+  @override
+  Future<void> resetAgentKey() async {
+    calls.add('resetAgentKey');
   }
 
   @override

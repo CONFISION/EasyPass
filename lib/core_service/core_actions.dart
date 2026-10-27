@@ -74,7 +74,10 @@ class CoreActions {
   final AgentAccessStore _agentAccess;
 
   /// 总开关变化回调：核心用它启动 / 停止 MCP 监听。
-  final void Function(bool enabled)? onAgentAccessChanged;
+  ///
+  /// 非 final：测试要断言"开关切换时到底通知了什么"，而生产装配顺序是
+  /// 先建 `CoreActions` 再建 `CoreService`（回调要指向后者）。
+  void Function(bool enabled)? onAgentAccessChanged;
 
   /// 数据变更回调：参数是受影响的主题集合（`items` / `item` / `folders` / `search`）。
   final void Function(Set<String> topics) onDataChanged;
@@ -499,13 +502,48 @@ class CoreActions {
       PendingRotation(salt: newSalt, passwordHash: newHash),
     );
 
+    // 改主密码会**换掉 vaultKey**：智能体访问若开着，必须同步重包裹。
+    // 不做这件事会有两个后果二选一：agent 手里还是旧钥匙（读不了新库），
+    // 或者包裹里还是旧钥匙（等于旧密文仍可解）。重包裹失败 ⇒ **自动关闭**
+    // 智能体访问（fail closed），绝不留下"旧钥匙还能解"的窗口。
+    var agentAccessEnabled = await _agentAccess.isEnabled();
+    if (agentAccessEnabled) {
+      try {
+        final agentKey = await _agentAccess.loadAgentKey();
+        if (agentKey == null) {
+          await _agentAccess.wipe();
+          agentAccessEnabled = false;
+        } else {
+          try {
+            await _agentAccess.writeWrap(
+              AgentKeyMaterial.wrap(vaultKey: newKey, agentKey: agentKey),
+            );
+          } finally {
+            agentKey.fillRange(0, agentKey.length, 0);
+          }
+        }
+      } catch (_) {
+        await _agentAccess.wipe();
+        agentAccessEnabled = false;
+      }
+    }
+
     // 改完回到锁定态：强制用户用新密码重新进来（与桌面端既有语义一致）。
     _sessions.lockAll();
+    if (agentAccessEnabled) {
+      // agent 域此刻还持着旧钥匙 → 换成新钥匙（**副本**，不与 ui 共享实例）。
+      _sessions.agent.unlock(Uint8List.fromList(newKey));
+      onAgentAccessChanged?.call(true);
+    } else {
+      _sessions.agent.lock();
+      onAgentAccessChanged?.call(false);
+    }
     onDataChanged({Topics.items, Topics.item, Topics.folders, Topics.search});
     return {
       'success': true,
       'reencrypted': reencrypted,
       'keyMaterialPersisted': stored,
+      'agentAccessEnabled': agentAccessEnabled,
     };
   }
 

@@ -4,8 +4,10 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:easypass/core/constants/app_constants.dart';
+import 'package:easypass/core/crypto/agent_key_material.dart';
 import 'package:easypass/core/crypto/crypto_service.dart';
 import 'package:easypass/core/crypto/totp_service.dart';
 import 'package:easypass/core/storage/secret_store.dart';
@@ -49,12 +51,14 @@ class CoreService {
     required CoreActions actions,
     required NativeMessagingService bridgeService,
     required McpHttpServer mcpServer,
+    required AgentAccessStore agentAccess,
     required ServerSocket socket,
   })  : _db = db,
         _sessions = sessions,
         _actions = actions,
         _bridgeService = bridgeService,
         _mcpServer = mcpServer,
+        _agentAccess = agentAccess,
         _socket = socket;
 
   final AppDatabase _db;
@@ -62,6 +66,7 @@ class CoreService {
   final CoreActions _actions;
   final NativeMessagingService _bridgeService;
   final McpHttpServer _mcpServer;
+  final AgentAccessStore _agentAccess;
   final ServerSocket _socket;
 
   final List<_CoreConnection> _connections = [];
@@ -166,6 +171,7 @@ class CoreService {
       sessions: sessions,
       pairingStore: pairingStore,
       agentAccess: agentAccess,
+      onAgentAccessChanged: (enabled) => service._setAgentAccessEnabled(enabled),
       onDataChanged: (topics) => service._broadcastChanged(topics),
     );
 
@@ -175,6 +181,7 @@ class CoreService {
       actions: actions,
       bridgeService: bridgeService,
       mcpServer: mcpServer,
+      agentAccess: agentAccess,
       socket: singleton.socket,
     );
 
@@ -184,23 +191,19 @@ class CoreService {
   }
 
   Future<void> _listen() async {
-    // 智能体接口（MCP）：**先试固定端口**，被占用才退化为临时端口。
-    // 固定端口是为了让客户端配置长期有效（临时端口每次核心重启都会变，
-    // 用户会反复遇到"昨天还好、今天连不上"）。
-    // 启动失败不阻塞核心——核心的主业是保险库；失败时 daemon.json 里就没有
+    // 智能体接口（MCP）：**只有总开关打开、且专属密钥能解出来时才启动**。
+    // 开关默认关；关着的时候端口不会被监听（不是"起来再拒绝"，是压根没开）。
+    // 启动失败不阻塞核心——核心的主业是保险库；失败时 daemon.json 里没有
     // mcpPort，客户端据此知道"这个核心不支持 MCP"。
     int? mcpPort;
-    try {
-      mcpPort = await _mcpServer.start(port: AppConstants.coreMcpFixedPort);
-    } catch (error) {
-      stderr.writeln(
-        'easypass_core: MCP 固定端口 ${AppConstants.coreMcpFixedPort} 不可用'
-        '（$error），改用临时端口',
-      );
-      try {
-        mcpPort = await _mcpServer.start();
-      } catch (fallbackError) {
-        stderr.writeln('easypass_core: MCP 端点启动失败（已跳过）：$fallbackError');
+    if (await _agentAccess.isEnabled()) {
+      if (await _autoUnsealAgent()) {
+        mcpPort = await _startMcpListener();
+      } else {
+        stderr.writeln(
+          'easypass_core: 智能体访问已开启，但专属密钥不可用'
+          '（换过 Windows 账户/机器，或文件损坏）；MCP 未启动',
+        );
       }
     }
     _info = CoreInfo(
@@ -233,6 +236,82 @@ class CoreService {
       'easypass_core: serving on 127.0.0.1:${_socket.port} '
       '(pid=$pid, protocol=$coreProtocolVersion, version=${AppConstants.coreVersion})',
     );
+  }
+
+  /// 启动 MCP 监听：先试固定端口，被占用才退化为临时端口。
+  ///
+  /// 固定端口是为了让客户端配置长期有效（临时端口每次核心重启都会变）。
+  /// 返回 null 表示启动失败（不影响核心其它功能）。
+  Future<int?> _startMcpListener() async {
+    if (_mcpServer.isRunning) return _mcpServer.port;
+    try {
+      return await _mcpServer.start(port: AppConstants.coreMcpFixedPort);
+    } catch (error) {
+      stderr.writeln(
+        'easypass_core: MCP 固定端口 ${AppConstants.coreMcpFixedPort} 不可用'
+        '（$error），改用临时端口',
+      );
+      try {
+        return await _mcpServer.start();
+      } catch (fallbackError) {
+        stderr.writeln('easypass_core: MCP 端点启动失败（已跳过）：$fallbackError');
+        return null;
+      }
+    }
+  }
+
+  /// 总开关变化：启停监听，并把最新的 `mcpPort` 写回 `daemon.json`。
+  ///
+  /// 关闭时写回 **null**：客户端看到 `daemon.json` 里没有 `mcpPort` 就知道
+  /// 服务已停，而不是一直往一个死端口重连。
+  Future<void> _setAgentAccessEnabled(bool enabled) async {
+    int? mcpPort;
+    if (enabled) {
+      mcpPort = await _startMcpListener();
+    } else {
+      await _mcpServer.stop();
+    }
+    await _persistMcpPort(mcpPort);
+  }
+
+  Future<void> _persistMcpPort(int? mcpPort) async {
+    final info = _info;
+    if (info == null) return; // 还没开始监听：_listen 会带着新值写。
+    _info = CoreInfo(
+      port: info.port,
+      token: info.token,
+      pid: info.pid,
+      protocolVersion: info.protocolVersion,
+      coreVersion: info.coreVersion,
+      exe: info.exe,
+      mcpPort: mcpPort,
+    );
+    await CoreDiscovery.write(_info!);
+  }
+
+  /// 核心启动时自动解封智能体域（**零介入**）。
+  ///
+  /// 链路：DPAPI 读出专属密钥 → 用它解包 `vault_meta` 里的 wrapped vaultKey
+  /// → 解锁 agent 域。任一步失败都返回 false（调用方据此不启动 MCP），
+  /// **绝不回退**到弱存储或"先解锁再试"。
+  Future<bool> _autoUnsealAgent() async {
+    try {
+      final wrapped = await _agentAccess.readWrap();
+      final agentKey = await _agentAccess.loadAgentKey();
+      if (wrapped == null || agentKey == null) return false;
+      final vaultKey =
+          AgentKeyMaterial.unwrap(blob: wrapped, agentKey: agentKey);
+      try {
+        _sessions.agent.unlock(Uint8List.fromList(vaultKey));
+      } finally {
+        vaultKey.fillRange(0, vaultKey.length, 0);
+        agentKey.fillRange(0, agentKey.length, 0);
+      }
+      return true;
+    } catch (error) {
+      stderr.writeln('easypass_core: 智能体密钥解封失败：$error');
+      return false;
+    }
   }
 
   String _generateToken() {

@@ -518,6 +518,24 @@
   "autostartSubtitleEnabled": "EasyPass starts automatically when you log in.",
   "autostartSubtitleDisabled": "EasyPass does not start automatically. Toggle to launch it at login.",
   "agentAccessSection": "Agent access",
+  "agentEnableTitle": "Agent access (MCP)",
+  "agentEnabledSubtitle": "On — agents can read entries marked open, without you unlocking each time.",
+  "agentDisabledSubtitle": "Off — the MCP service is stopped and agents have no access.",
+  "agentWarningBanner": "Agent access is ON: this vault can be unlocked automatically by EasyPass itself, for any process running as your Windows account. Turn it off to remove that ability immediately.",
+  "agentServiceOn": "MCP service running",
+  "agentServiceOff": "MCP service stopped",
+  "agentEnableFirst": "Turn on agent access first, then pair an agent.",
+  "agentAdvancedSection": "Advanced",
+  "agentResetKey": "Reset the agent key",
+  "agentResetKeySubtitle": "Replaces the key that wraps the vault key. The old key stops working immediately; your entries are untouched.",
+  "agentResetKeyConfirm": "Reset the agent key? Every agent using the old key will stop working until you pair it again.",
+  "agentCalls": "{count} calls",
+  "@agentCalls": {
+    "description": "How many times this pairing called the MCP service.",
+    "placeholders": {
+      "count": { "type": "String" }
+    }
+  },
   "agentAccessTitle": "Agent access (MCP)",
   "agentAccessSubtitle": "Pair AI agents, choose how they may act, and decide per entry what they can read.",
   "agentDomainLocked": "Agent session is locked",

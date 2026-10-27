@@ -992,6 +992,45 @@ class AppLocalizationsZh extends AppLocalizations {
   String get agentAccessSection => '智能体访问';
 
   @override
+  String get agentEnableTitle => '智能体访问（MCP）';
+
+  @override
+  String get agentEnabledSubtitle => '已开启 —— 智能体可读取标记为「开放」的条目，无需每次解锁。';
+
+  @override
+  String get agentDisabledSubtitle => '已关闭 —— MCP 服务已停止，智能体没有任何访问权。';
+
+  @override
+  String get agentWarningBanner =>
+      '智能体访问已开启：EasyPass 现在能自行解锁本保险库，凡以你的 Windows 账户运行的程序都可能读到。关掉开关即可立刻收回这个能力。';
+
+  @override
+  String get agentServiceOn => 'MCP 服务运行中';
+
+  @override
+  String get agentServiceOff => 'MCP 服务已停止';
+
+  @override
+  String get agentEnableFirst => '请先打开上方的智能体访问，再配对智能体。';
+
+  @override
+  String get agentAdvancedSection => '高级';
+
+  @override
+  String get agentResetKey => '重置智能体密钥';
+
+  @override
+  String get agentResetKeySubtitle => '更换用于包裹保险库密钥的那把密钥。旧密钥立刻失效，条目数据不受影响。';
+
+  @override
+  String get agentResetKeyConfirm => '重置智能体密钥？所有使用旧密钥的智能体会立刻失去访问权，需要重新配对。';
+
+  @override
+  String agentCalls(String count) {
+    return '调用 $count 次';
+  }
+
+  @override
   String get agentAccessTitle => '智能体访问（MCP）';
 
   @override

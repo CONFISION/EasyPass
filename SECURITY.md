@@ -135,6 +135,46 @@ Being precise here is more useful than a reassuring sentence, so:
   host permissions for `<all_urls>` (needed for autofill on any site). It stores no
   vault data itself; the unlocked session lives in the desktop app.
 
+## Agent access (MCP) — opt-in, and what it changes
+
+EasyPass can expose a local MCP endpoint (`POST http://127.0.0.1:47821/mcp`) so that AI
+agents can read entry *metadata*. It is **off by default** and the whole design assumes
+agents are compromised-by-default: the tool surface never returns passwords, notes, TOTP
+seeds, SSH keys or custom-field values, and every entry is **permanently denied** to
+agents unless you switch "Accessible to agents" on for that entry.
+
+To make agent access work without prompting you every five minutes, turning it on does
+something the rest of this document does not do elsewhere:
+
+- EasyPass generates a random 256-bit **agent key** and stores it protected by Windows
+  **DPAPI** (current user, fixed entropy) in `agent.key.dpapi`.
+- A copy of the vault key is **wrapped** with that agent key (AES-256-CBC + HMAC-SHA256,
+  encrypt-then-MAC) and stored in the vault database (`vault_meta.agent.wrap`).
+- On startup the core unseals that wrapped key and unlocks the **agent session only**.
+  The `ui` and `bridge` sessions still require the master password.
+
+Consequences you should be aware of:
+
+- **While agent access is on, the vault can be unlocked without a password** by any
+  process running as your Windows account. That is the point of the feature (zero
+  interaction), and it is why the switch is off by default and why the settings page
+  shows a persistent warning whenever it is on.
+- DPAPI keeps the blob unreadable for **other Windows users** and for copies of the files
+  moved to another machine or account. It does **not** protect against malware running as
+  you — the same-user boundary described under "Known limitations" applies unchanged.
+- Turning the switch off deletes the DPAPI blob, the wrapped key **and** stops the local
+  MCP listener; there is no "disabled but still listening" state.
+- **Resetting the agent key** replaces it and re-wraps the vault key. The old key stops
+  working immediately; the entries themselves are not re-encrypted.
+- **Changing the master password re-wraps automatically** in the same operation. If that
+  re-wrap fails, agent access is switched off rather than left with a stale key.
+- If the DPAPI blob is missing or cannot be decrypted (different account, different
+  machine, corrupted file), the core does **not** start the MCP listener — it fails
+  closed and says so in the log. It never falls back to a weaker store.
+- The MCP listener rejects any request carrying an `Origin` header, validates `Host`,
+  refuses non-`POST` methods, requires a per-pairing bearer key (only its SHA-256 is
+  stored), accepts no query-string credentials, and never sends CORS headers.
+
 ## Known limitations (please don't report these as vulnerabilities)
 
 These are deliberate, documented gaps rather than bugs. They are tracked in the

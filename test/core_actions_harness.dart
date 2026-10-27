@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 
@@ -58,6 +60,7 @@ class CoreVault {
   /// 但**复用同一份库**（就是"重启核心"）。
   Future<CoreHarness> boot({
     Duration idleTimeout = const Duration(minutes: 5),
+    File? agentKeyFile,
   }) async {
     // 生产环境里核心启动时会把 VaultMetaSecretStore 注册到进程级 registry。
     SecretStoreRegistry.register(store);
@@ -97,7 +100,13 @@ class CoreVault {
       totpService: TotpService(),
       sessions: sessions,
       pairingStore: AgentPairingStore(db),
-      agentAccess: AgentAccessStore(db),
+      agentAccess: AgentAccessStore(
+        db,
+        // 别把测试的 DPAPI blob 写进真实数据目录。
+        blobFile: agentKeyFile ??
+            File('${Directory.systemTemp.path}'
+                '\\easypass-test-agent-$pid-${DateTime.now().microsecondsSinceEpoch}.dpapi'),
+      ),
       onDataChanged: harness.changedTopics.addAll,
     );
     harness.actions = actions;

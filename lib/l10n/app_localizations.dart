@@ -1940,6 +1940,78 @@ abstract class AppLocalizations {
   /// **'Agent access'**
   String get agentAccessSection;
 
+  /// No description provided for @agentEnableTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent access (MCP)'**
+  String get agentEnableTitle;
+
+  /// No description provided for @agentEnabledSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'On — agents can read entries marked open, without you unlocking each time.'**
+  String get agentEnabledSubtitle;
+
+  /// No description provided for @agentDisabledSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Off — the MCP service is stopped and agents have no access.'**
+  String get agentDisabledSubtitle;
+
+  /// No description provided for @agentWarningBanner.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent access is ON: this vault can be unlocked automatically by EasyPass itself, for any process running as your Windows account. Turn it off to remove that ability immediately.'**
+  String get agentWarningBanner;
+
+  /// No description provided for @agentServiceOn.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP service running'**
+  String get agentServiceOn;
+
+  /// No description provided for @agentServiceOff.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP service stopped'**
+  String get agentServiceOff;
+
+  /// No description provided for @agentEnableFirst.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on agent access first, then pair an agent.'**
+  String get agentEnableFirst;
+
+  /// No description provided for @agentAdvancedSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Advanced'**
+  String get agentAdvancedSection;
+
+  /// No description provided for @agentResetKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset the agent key'**
+  String get agentResetKey;
+
+  /// No description provided for @agentResetKeySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Replaces the key that wraps the vault key. The old key stops working immediately; your entries are untouched.'**
+  String get agentResetKeySubtitle;
+
+  /// No description provided for @agentResetKeyConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset the agent key? Every agent using the old key will stop working until you pair it again.'**
+  String get agentResetKeyConfirm;
+
+  /// How many times this pairing called the MCP service.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} calls'**
+  String agentCalls(String count);
+
   /// No description provided for @agentAccessTitle.
   ///
   /// In en, this message translates to:

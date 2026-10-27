@@ -367,6 +367,25 @@ class CoreVaultApi implements VaultApi {
   }
 
   @override
+  Future<Map<String, dynamic>> agentAccessState() =>
+      _call(Actions.getAgentAccessState);
+
+  @override
+  Future<void> enableAgentAccess() async {
+    await _call(Actions.enableAgentAccess);
+  }
+
+  @override
+  Future<void> disableAgentAccess() async {
+    await _call(Actions.disableAgentAccess);
+  }
+
+  @override
+  Future<void> resetAgentKey() async {
+    await _call(Actions.resetAgentKey);
+  }
+
+  @override
   Future<List<Map<String, dynamic>>> listAgentPairings() async {
     final data = await _call(Actions.listAgentPairings);
     final raw = data['pairings'];
