@@ -81,12 +81,14 @@ class SessionDomains {
     _timer = null;
   }
 
-  /// UI 锁定 ⇒ 所有域一起锁（既有语义：锁 App 不能留下解锁的浏览器会话）。
-  /// 智能体接口起 agent 域也纳入：用户锁库时智能体不该还能读。
+  /// UI 锁定 ⇒ **只锁 ui + bridge**。
+  ///
+  /// **agent 域刻意不在此列**（用户 2026-10-27 明确要求）：智能体访问一旦被用户
+  /// 授权，就应该是"零介入、不随 UI 状态变化"的。agent 域只随
+  /// 总开关关闭 / MCP 会话结束（`end_session`）/ 撤销配对 / 核心退出 而锁。
   void lockAll() {
     _ui.lock();
     _bridge.lock();
-    _agent.lock();
     notifyIfChanged();
   }
 

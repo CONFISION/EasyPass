@@ -137,11 +137,12 @@ void main() {
       expect(domains.bridge.isUnlocked, isFalse);
     });
 
-    test('lockAll 会锁掉 agent 域', () {
+    test('lockAll 不锁 agent 域（智能体访问与 UI 状态解耦）', () {
       final domains = build();
       domains.agent.unlock(fakeKey());
       domains.lockAll();
-      expect(domains.agent.isUnlocked, isFalse);
+      expect(domains.agent.isUnlocked, isTrue,
+          reason: '用户明确要求：智能体访问一旦授权，不随 UI 锁库而失效');
     });
 
     test('改空闲超时会同步到 agent 域', () {

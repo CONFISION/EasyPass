@@ -5,6 +5,7 @@ import 'package:easypass/core/crypto/crypto_service.dart';
 import 'package:easypass/core/crypto/totp_service.dart';
 import 'package:easypass/core/storage/secret_store.dart';
 import 'package:easypass/core/storage/vault_meta_secret_store.dart';
+import 'package:easypass/core_service/agent_access_store.dart';
 import 'package:easypass/core_service/agent_pairing_store.dart';
 import 'package:easypass/core_service/core_actions.dart';
 import 'package:easypass/core_service/session_domains.dart';
@@ -96,6 +97,7 @@ class CoreVault {
       totpService: TotpService(),
       sessions: sessions,
       pairingStore: AgentPairingStore(db),
+      agentAccess: AgentAccessStore(db),
       onDataChanged: harness.changedTopics.addAll,
     );
     harness.actions = actions;

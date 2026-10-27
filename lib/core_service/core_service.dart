@@ -19,6 +19,7 @@ import 'package:easypass/mcp/mcp_handler.dart';
 import 'package:easypass/mcp/mcp_http_server.dart';
 import 'package:easypass/protocol/protocol.dart';
 
+import 'agent_access_store.dart';
 import 'agent_actions.dart';
 import 'agent_pairing_store.dart';
 import 'core_actions.dart';
@@ -141,6 +142,7 @@ class CoreService {
       keyReader: () => sessions.agent.key,
     );
     final pairingStore = AgentPairingStore(db);
+    final agentAccess = AgentAccessStore(db);
     final agentActions = AgentActions(
       repository: agentRepository,
       sessions: sessions,
@@ -163,6 +165,7 @@ class CoreService {
       totpService: TotpService(),
       sessions: sessions,
       pairingStore: pairingStore,
+      agentAccess: agentAccess,
       onDataChanged: (topics) => service._broadcastChanged(topics),
     );
 

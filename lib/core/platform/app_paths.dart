@@ -84,6 +84,13 @@ abstract final class AppPaths {
     return File('$localAppData\\EasyPass\\daemon.json');
   }
 
+  /// 智能体专属密钥的 DPAPI 落盘文件。
+  ///
+  /// 与库文件分开存：**只拿到库文件**（备份、同步盘）不足以解出保险库密钥，
+  /// 还需要这个 DPAPI blob；反过来只拿到 blob 也没有库里的 wrapped key。
+  static File get agentKeyBlobFile =>
+      File(p.join(dataDirectory.path, 'agent.key.dpapi'));
+
   /// 确保数据库文件可用（**Windows 上是 no-op**）。
   ///
   /// Linux 版本要在这一步建数据目录、把目录/库文件 chmod 到 700/600，并把

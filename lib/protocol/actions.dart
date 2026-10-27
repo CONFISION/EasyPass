@@ -97,6 +97,15 @@ class Actions {
   static const String lockAgentDomain = 'lockAgentDomain';
   static const String getAgentAccessState = 'getAgentAccessState';
 
+  /// 总开关：打开 = 包裹 vaultKey + DPAPI 落盘 + 解锁 agent 域 + 启动 MCP 服务。
+  static const String enableAgentAccess = 'enableAgentAccess';
+
+  /// 总开关关闭 = 清 wrap、删 DPAPI blob、锁 agent 域、**停 MCP 服务**。
+  static const String disableAgentAccess = 'disableAgentAccess';
+
+  /// 重置专属密钥（换新钥匙重新包裹，旧钥匙立刻作废，库密文不动）。
+  static const String resetAgentKey = 'resetAgentKey';
+
   // ─── 扩展既有动作（bridge 专用，形状冻结）───────────────
 
   static const String getCredentials = 'getCredentials';
@@ -154,6 +163,9 @@ class Actions {
     unlockAgentDomain,
     lockAgentDomain,
     getAgentAccessState,
+    enableAgentAccess,
+    disableAgentAccess,
+    resetAgentKey,
   };
 
   /// **智能体域（`role: agent`）** 的动作白名单。

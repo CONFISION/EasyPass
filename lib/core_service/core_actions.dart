@@ -7,6 +7,7 @@ import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:easypass/core/constants/app_constants.dart';
+import 'package:easypass/core/crypto/agent_key_material.dart';
 import 'package:easypass/core/crypto/crypto_service.dart';
 import 'package:easypass/core/crypto/totp_service.dart';
 import 'package:easypass/data/database/database.dart';
@@ -19,6 +20,7 @@ import 'package:easypass/protocol/protocol.dart';
 import 'package:uuid/uuid.dart';
 
 import 'agent_access_policy.dart';
+import 'agent_access_store.dart';
 import 'agent_pairing_store.dart';
 import 'session_domains.dart';
 
@@ -48,6 +50,8 @@ class CoreActions {
     required TotpService totpService,
     required SessionDomains sessions,
     required AgentPairingStore pairingStore,
+    required AgentAccessStore agentAccess,
+    this.onAgentAccessChanged,
     required this.onDataChanged,
   })  : _db = db,
         _cryptoService = cryptoService,
@@ -56,7 +60,8 @@ class CoreActions {
         _exporter = exporter,
         _totpService = totpService,
         _sessions = sessions,
-        _pairingStore = pairingStore;
+        _pairingStore = pairingStore,
+        _agentAccess = agentAccess;
 
   final AppDatabase _db;
   final CryptoService _cryptoService;
@@ -66,6 +71,10 @@ class CoreActions {
   final TotpService _totpService;
   final SessionDomains _sessions;
   final AgentPairingStore _pairingStore;
+  final AgentAccessStore _agentAccess;
+
+  /// 总开关变化回调：核心用它启动 / 停止 MCP 监听。
+  final void Function(bool enabled)? onAgentAccessChanged;
 
   /// 数据变更回调：参数是受影响的主题集合（`items` / `item` / `folders` / `search`）。
   final void Function(Set<String> topics) onDataChanged;
@@ -168,6 +177,12 @@ class CoreActions {
         return _lockAgentDomain();
       case Actions.getAgentAccessState:
         return _getAgentAccessState();
+      case Actions.enableAgentAccess:
+        return _enableAgentAccess();
+      case Actions.disableAgentAccess:
+        return _disableAgentAccess();
+      case Actions.resetAgentKey:
+        return _resetAgentKey();
       default:
         throw CoreActionException(
           ErrorCodes.unsupported,
@@ -273,7 +288,55 @@ class CoreActions {
 
   Future<Map<String, dynamic>> _getAgentAccessState() async => {
         'agentUnlocked': _sessions.agent.isUnlocked,
+        'enabled': await _agentAccess.isEnabled(),
       };
+
+  /// 打开「智能体访问」总开关。
+  ///
+  /// 需要保险库已解锁（要拿 vaultKey 来包裹）。打开后：
+  /// 1. 生成**专属密钥**并用 DPAPI 落盘；
+  /// 2. 用它包裹一份 vaultKey 存进 `vault_meta`；
+  /// 3. 解锁 agent 域（副本，不与 ui 共享实例）；
+  /// 4. 通知核心启动 MCP 服务。
+  Future<Map<String, dynamic>> _enableAgentAccess() async {
+    final vaultKey = _sessions.ui.key;
+    if (vaultKey == null) {
+      throw CoreActionException(ErrorCodes.locked, '请先解锁保险库再打开智能体访问');
+    }
+    final agentKey = AgentKeyMaterial.generateAgentKey();
+    final wrapped = AgentKeyMaterial.wrap(vaultKey: vaultKey, agentKey: agentKey);
+    await _agentAccess.storeAgentKey(agentKey);
+    await _agentAccess.writeWrap(wrapped);
+    await _agentAccess.setEnabled(true);
+    _sessions.agent.unlock(Uint8List.fromList(vaultKey));
+    onAgentAccessChanged?.call(true);
+    return {'ok': true, 'enabled': true, 'agentUnlocked': true};
+  }
+
+  /// 关闭总开关：清 wrap、删 DPAPI blob、锁 agent 域、**停 MCP 服务**。
+  Future<Map<String, dynamic>> _disableAgentAccess() async {
+    await _agentAccess.wipe();
+    _sessions.agent.lock();
+    onAgentAccessChanged?.call(false);
+    return {'ok': true, 'enabled': false, 'agentUnlocked': false};
+  }
+
+  /// 重置专属密钥：换一把新的重新包裹。旧密钥立刻作废，库密文一个字节都不动。
+  Future<Map<String, dynamic>> _resetAgentKey() async {
+    if (!await _agentAccess.isEnabled()) {
+      throw CoreActionException(ErrorCodes.invalidRequest, '智能体访问未开启');
+    }
+    final vaultKey = _sessions.ui.key;
+    if (vaultKey == null) {
+      throw CoreActionException(ErrorCodes.locked, '请先解锁保险库');
+    }
+    final agentKey = AgentKeyMaterial.generateAgentKey();
+    final wrapped = AgentKeyMaterial.wrap(vaultKey: vaultKey, agentKey: agentKey);
+    await _agentAccess.storeAgentKey(agentKey);
+    await _agentAccess.writeWrap(wrapped);
+    _sessions.agent.unlock(Uint8List.fromList(vaultKey));
+    return {'ok': true, 'enabled': true, 'agentUnlocked': true};
+  }
 
   /// 用主密码解锁智能体域（用户"显式动作"的唯一落点）。
   ///
