@@ -71,6 +71,19 @@ flutter build windows   # ⚠️ 一条命令完整构建：easypass.exe + x86 �
   `lib\sqlite3.dll` 摊平进 Release 目录。**不要再手动跑一遍** `tool/build_core.ps1`
   （幂等，但纯属浪费）。只想调 UI 时跳过核心：
   `flutter build windows -- -DEASYPASS_SKIP_CORE_BUILD=ON`。
+- **新增/更换 Material 图标后，必须删掉 `build\flutter_assets` 再 build。**
+  Flutter 的 `CopyAssets` 目标（负责把 `MaterialIcons-Regular.otf` 裁成"用到的字形"）
+  的输入里**没有 `app.dill`**（见 `flutter_tools/lib/src/build_system/targets/assets.dart`），
+  所以只改 Dart 代码时图标字体子集**不会重新生成**：新图标在真机上是**空白**，
+  而老图标正常。判断方法：`build\flutter_assets\fonts\MaterialIcons-Regular.otf`
+  的 mtime 早于 `Release\data\app.so`。修法（构建前，秒级）：
+  `Remove-Item -Recurse -Force build\flutter_assets -ErrorAction SilentlyContinue`
+  然后 `flutter build windows`（或 `flutter clean` 后重建）。加完图标务必在真机截图确认。
+- **底部提示气泡不要和 `Scaffold.floatingActionButton` 同屏。** floating `SnackBar`
+  在有 FAB 时会坐到 **FAB 顶部**（`scaffold.dart`：`snackBarYOffsetBase =
+  floatingActionButtonRect.top`），看起来就是"气泡不贴底"。vault 页因此把 FAB 放进
+  body 的 `Stack + Positioned`（视觉位置不变，Scaffold 不再给它让位）；新页面如果要
+  底部气泡，也按这个模式做。
 - **构建卡在 `Building native assets failed` 时，先查网络/代理，不要改依赖版本。**
   `package:sqlite3` 的 build hook 在 Windows 上默认**从 GitHub 下载**预编译
   `sqlite3.x64.windows.dll`；代理没开时 `flutter build windows` 在 `build_hooks`

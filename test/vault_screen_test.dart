@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:easypass/app.dart' show EasyPassApp;
 import 'package:easypass/client/api_providers.dart';
 import 'package:easypass/data/models/entry_fields.dart';
 import 'package:easypass/data/models/entry_type.dart';
@@ -65,6 +66,7 @@ void main() {
   Future<AppLocalizations> pumpVaultScreen(
     WidgetTester tester, {
     Size size = minWindow,
+    ThemeData? theme,
   }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
@@ -75,6 +77,7 @@ void main() {
       UncontrolledProviderScope(
         container: container,
         child: MaterialApp(
+          theme: theme,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           home: const VaultScreen(),
@@ -254,6 +257,47 @@ void main() {
         reason: '删除 = 软删进回收站');
     expect(find.text(l10n.trashMoved), findsOneWidget);
     expect(find.text(l10n.undo), findsOneWidget);
+  });
+
+  testWidgets('删除后的提示气泡贴底（不被右下角 FAB 抬高）', (tester) async {
+    await seedFourTypes();
+    final l10n = await pumpVaultScreen(
+      tester,
+      // 用真实的全局气泡主题（生产：EasyPassApp.snackBarTheme）。
+      theme: ThemeData(
+        useMaterial3: true,
+        snackBarTheme: EasyPassApp.snackBarTheme,
+      ),
+    );
+
+    // 结构上先钉住根因：FAB 必须在 body 里，不能占用 Scaffold 的
+    // floatingActionButton 槽位（否则 floating SnackBar 会被抬到 FAB 顶部）。
+    final scaffold = tester.widget<Scaffold>(find.byType(Scaffold));
+    expect(scaffold.floatingActionButton, isNull,
+        reason: 'FAB 占用 Scaffold 槽位会把底部气泡抬高');
+
+    await tester.tap(find.byTooltip(l10n.entryActions).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(l10n.delete));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(l10n.trashMoveAction));
+    await tester.pumpAndSettle();
+
+    final snackBar = find.byType(SnackBar);
+    expect(snackBar, findsOneWidget);
+    // 气泡本体 = SnackBar 内部 elevation 6 的 Material（主题里配的）。
+    final bubble = find.descendant(
+      of: snackBar,
+      matching: find.byWidgetPredicate(
+        (widget) => widget is Material && widget.elevation == 6,
+      ),
+    );
+    expect(bubble, findsOneWidget, reason: '气泡本体（Material elevation 6）');
+    expect(
+      tester.getBottomLeft(bubble).dy,
+      closeTo(minWindow.height - 8, 1),
+      reason: '气泡必须贴底（主题 insetPadding.bottom = 8），而不是浮在 FAB 上方',
+    );
   });
 
   testWidgets('最小窗口尺寸下无溢出；侧边栏固定 248 且没有生成器入口', (tester) async {

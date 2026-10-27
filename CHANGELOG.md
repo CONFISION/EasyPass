@@ -65,11 +65,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
   并在 5 秒后自动收起。
 - **智能体活动页面**从设置移到侧边栏（回收站上方），未启用智能体访问时隐藏；
   并改为推送驱动，新记录会实时出现。
-- **条目列表支持右键 / ⋮ 菜单**（编辑 / 删除）：不必先打开详情页；删除进回收站并给撤销提示。
+- **条目列表支持右键 / ⋮ 菜单**（编辑 / 删除）：在**鼠标位置弹出浮窗**（`showMenu`，
+  不是底部弹窗）；删除进回收站并给撤销提示，不必先打开详情页。
 - 回收站里的「恢复」与「彻底删除」**统一为图标按钮**（之前恢复是文字、删除是图标，视觉不齐）。
 - 「智能体活动」入口与页面标题补上图标（统一用 `smart_toy`；`Icons.history` 字形在该构建中
-  未渲染，用户实测确认）。
-- 底部提示气泡的贴底间距收紧到 8px（之前 20px，用户觉得"飘"）。
+  未渲染，用户实测确认——根因见下）。
+- 底部提示气泡的贴底间距收紧到 8px，并把 FAB 移出 `Scaffold.floatingActionButton`：
+  floating SnackBar 原本会被 FAB 抬高约 80px（`snackBarYOffsetBase = FAB.top`），
+  现在真正贴住窗口底边。
+- **图标字体子集修复**：Flutter 增量构建不会因 Dart 代码变化重新生成
+  `MaterialIcons-Regular.otf`（`CopyAssets` 输入缺 `app.dill`），导致后加的图标
+  （`edit_outlined` / `restore` / `history`）在真机上空白。构建前删 `build\flutter_assets`
+  即可（已写入 `AGENTS.md` 的构建须知）。
 
 ### Security
 

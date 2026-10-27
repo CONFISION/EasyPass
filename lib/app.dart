@@ -153,14 +153,14 @@ class _ActivityTouchHostState extends ConsumerState<_ActivityTouchHost> {
 class EasyPassApp extends ConsumerWidget {
   const EasyPassApp({super.key});
 
-  /// 全局提示气泡样式。
+  /// 全局提示气泡样式（public：测试据此断言"贴底"的配置）。
   ///
   /// 为什么改：默认的底部横条会**盖住侧边栏底部的回收站入口**；这台 Flutter
   /// 里带 action 的 `SnackBar` 还默认 `persist: true`（撤销条永不消失）。
-  /// 这里统一做成"浮起的圆角泡泡"：只有 380 宽、水平居中、贴底 20，
+  /// 这里统一做成"浮起的圆角泡泡"：只有 380 宽、水平居中、贴底仅 8px，
   /// 在最小窗口（900）下也碰不到 248px 的侧边栏；配合各调用点的 duration，
   /// 消息会自己收回去，不再挡操作。
-  static const SnackBarThemeData _snackBarTheme = SnackBarThemeData(
+  static const SnackBarThemeData snackBarTheme = SnackBarThemeData(
     behavior: SnackBarBehavior.floating,
     width: 380,
     // 只留一点点贴底间距：用户嫌 20 太"飘"，气泡要压在底边上方一点点。
@@ -190,7 +190,7 @@ class EasyPassApp extends ConsumerWidget {
         ),
         useMaterial3: true,
         fontFamily: fontFamily,
-        snackBarTheme: _snackBarTheme,
+        snackBarTheme: snackBarTheme,
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -199,7 +199,7 @@ class EasyPassApp extends ConsumerWidget {
         ),
         useMaterial3: true,
         fontFamily: fontFamily,
-        snackBarTheme: _snackBarTheme,
+        snackBarTheme: snackBarTheme,
       ),
       themeMode: themeMode,
       locale: locale,
@@ -230,3 +230,4 @@ class EasyPassApp extends ConsumerWidget {
     return setting;
   }
 }
+

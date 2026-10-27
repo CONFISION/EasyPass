@@ -85,41 +85,57 @@ class VaultScreen extends ConsumerWidget {
       // brand and stretches from the very top to the very bottom of the window,
       // while the right column carries its own toolbar (context title + the five
       // global actions).
-      body: SafeArea(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(width: _sidebarWidth, child: _buildSidebar(context, ref)),
-            const VerticalDivider(width: 1, thickness: 1),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildToolbar(context, ref, l10n, title),
-                  const Divider(height: 1, key: ValueKey('toolbarDivider')),
-                  _buildTypeFilterBar(context, ref, l10n),
-                  const Divider(height: 1, key: ValueKey('typeFilterDivider')),
-                  Expanded(
-                    child: _buildEntriesArea(
-                      context,
-                      ref,
-                      entriesAsync,
-                      selectedType,
-                    ),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                    width: _sidebarWidth, child: _buildSidebar(context, ref)),
+                const VerticalDivider(width: 1, thickness: 1),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildToolbar(context, ref, l10n, title),
+                      const Divider(height: 1, key: ValueKey('toolbarDivider')),
+                      _buildTypeFilterBar(context, ref, l10n),
+                      const Divider(height: 1, key: ValueKey('typeFilterDivider')),
+                      Expanded(
+                        child: _buildEntriesArea(
+                          context,
+                          ref,
+                          entriesAsync,
+                          selectedType,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
-      // Icon-only on purpose (the user asked for a minimal UI): the tooltip
-      // stays so the button keeps an accessible name on hover / for screen
-      // readers without taking up visual space.
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.push('/vault/add'),
-        tooltip: l10n.add,
-        child: const Icon(Icons.add),
+          ),
+          // FAB 放在 body 里而不是 `Scaffold.floatingActionButton`：
+          // Flutter 的 floating SnackBar 会坐在 **FAB 顶部**（scaffold.dart
+          // 的 `snackBarYOffsetBase = floatingActionButtonRect.top`），
+          // 结果底部提示气泡被抬高 ~80px，用户看到的"不贴底"就是它。
+          // 放到 body 的 Stack 里视觉位置不变，但 Scaffold 不再给它让位，
+          // 气泡就能贴到底边（宽 380 居中，与右下角 FAB 不重叠）。
+          //
+          // Icon-only on purpose (the user asked for a minimal UI): the tooltip
+          // stays so the button keeps an accessible name on hover / for screen
+          // readers without taking up visual space.
+          Positioned(
+            right: 16,
+            bottom: 16,
+            child: FloatingActionButton(
+              onPressed: () => context.push('/vault/add'),
+              tooltip: l10n.add,
+              child: const Icon(Icons.add),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -322,10 +338,11 @@ class VaultScreen extends ConsumerWidget {
                 return EntryCard(
                   item: item,
                   onTap: () => context.push('/vault/entry/${item.id}'),
-                  // 右键 / ⋮ = 编辑 / 删除，不用先进详情页。
-                  onSecondaryTap: () =>
-                      _showEntryActions(context, ref, item),
-                  onMore: () => _showEntryActions(context, ref, item),
+                  // 右键 / ⋮ = 在鼠标位置弹出编辑 / 删除浮窗，不用先进详情页。
+                  onSecondaryTap: (position) =>
+                      _showEntryActions(context, ref, item, position),
+                  onMore: (position) =>
+                      _showEntryActions(context, ref, item, position),
                   // 只有登录条目给"复制密码"。
                   onCopyPassword: item.isAutofillable
                       ? () => _copyPassword(context, item)
@@ -711,72 +728,78 @@ class VaultScreen extends ConsumerWidget {
     );
   }
 
-  /// 条目的右键 / ⋮ 菜单：编辑 / 删除。
+  /// 条目的右键 / ⋮ 菜单：编辑 / 删除，**在鼠标位置弹浮窗**（不是底部弹窗）。
   ///
-  /// 与文件夹菜单同一套 bottom-sheet 风格（窄窗不溢出、条目定宽），
-  /// 这样桌面端"右键文件夹"和"右键条目"看到的是同一种东西。
-  void _showEntryActions(BuildContext context, WidgetRef ref, VaultItem item) {
+  /// 用 `showMenu` 而不是 `showModalBottomSheet`：桌面用户对右键的预期是
+  /// 光标旁的小菜单；底部弹窗还要把视线移到屏幕底部（用户明确否决）。
+  /// 菜单项带图标（与文件夹的 ⋮ 菜单同风格：图标 + 文字，危险项红色）。
+  Future<void> _showEntryActions(
+    BuildContext context,
+    WidgetRef ref,
+    VaultItem item,
+    Offset globalPosition,
+  ) async {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final accent = EntryTypeBits.color(item.type);
+    final overlay = Overlay.of(context).context.findRenderObject();
+    final overlaySize = overlay is RenderBox
+        ? overlay.size
+        : MediaQuery.sizeOf(context);
+    final localPosition = overlay is RenderBox
+        ? overlay.globalToLocal(globalPosition)
+        : globalPosition;
 
-    showModalBottomSheet<void>(
+    final action = await showMenu<String>(
       context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: accent.withValues(alpha: 0.14),
-                    child: Icon(
-                      EntryTypeBits.icon(item.type),
-                      size: 18,
-                      color: accent,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      item.name,
-                      style: theme.textTheme.titleMedium,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
+      // 点在哪里就从哪里向右下展开；靠右边时 Flutter 会自动翻转。
+      position: RelativeRect.fromLTRB(
+        localPosition.dx,
+        localPosition.dy,
+        overlaySize.width - localPosition.dx,
+        overlaySize.height - localPosition.dy,
+      ),
+      items: [
+        PopupMenuItem<String>(
+          value: 'edit',
+          child: Row(
+            children: [
+              Icon(
+                Icons.edit_outlined,
+                size: 20,
+                color: theme.colorScheme.onSurfaceVariant,
               ),
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: Text(l10n.entryActionEdit),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                context.push('/vault/edit/${item.id}');
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.delete_outline,
-                  color: theme.colorScheme.error),
-              title: Text(
+              const SizedBox(width: 12),
+              Text(l10n.entryActionEdit),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(
+                Icons.delete_outline,
+                size: 20,
+                color: theme.colorScheme.error,
+              ),
+              const SizedBox(width: 12),
+              Text(
                 l10n.delete,
                 style: TextStyle(color: theme.colorScheme.error),
               ),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _confirmDeleteEntry(context, ref, item);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
+            ],
+          ),
         ),
-      ),
+      ],
     );
+
+    if (!context.mounted) return;
+    switch (action) {
+      case 'edit':
+        context.push('/vault/edit/${item.id}');
+      case 'delete':
+        await _confirmDeleteEntry(context, ref, item);
+    }
   }
 
   /// 列表内删除：移入回收站，并给一次「撤销」机会（与详情页/编辑页语义一致）。

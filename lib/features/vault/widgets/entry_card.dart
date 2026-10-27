@@ -15,14 +15,14 @@ class EntryCard extends StatelessWidget {
   /// 复制密码；只有登录条目会真正渲染出按钮（见 [VaultItem.isAutofillable]）。
   final VoidCallback? onCopyPassword;
 
-  /// 右键菜单（编辑 / 删除）；null 时不接管右键。
-  final VoidCallback? onSecondaryTap;
+  /// 右键菜单（编辑 / 删除）；参数是鼠标的全局坐标，菜单就在点击处弹出。
+  final void Function(Offset globalPosition)? onSecondaryTap;
 
   /// 可见的"更多操作"按钮（右键菜单的鼠标等价入口）。
   ///
   /// 桌面端纪律：右键要能用；但纯右键功能不好发现，所以 `onMore != null` 时
-  /// 把 chevron 换成 ⋮，点它和右键弹同一个菜单。
-  final VoidCallback? onMore;
+  /// 把 chevron 换成 ⋮，点它和右键弹同一个菜单（参数是按钮的全局坐标）。
+  final void Function(Offset globalPosition)? onMore;
 
   const EntryCard({
     super.key,
@@ -105,14 +105,22 @@ class EntryCard extends StatelessWidget {
                 tooltip: l10n.copyPasswordTooltip,
               ),
             if (onMore != null)
-              IconButton(
-                icon: Icon(
-                  Icons.more_vert,
-                  size: 20,
-                  color: theme.colorScheme.onSurfaceVariant,
+              Builder(
+                builder: (buttonContext) => IconButton(
+                  icon: Icon(
+                    Icons.more_vert,
+                    size: 20,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  onPressed: () {
+                    final box = buttonContext.findRenderObject();
+                    final origin = box is RenderBox
+                        ? box.localToGlobal(box.size.center(Offset.zero))
+                        : Offset.zero;
+                    onMore!(origin);
+                  },
+                  tooltip: l10n.entryActions,
                 ),
-                onPressed: onMore,
-                tooltip: l10n.entryActions,
               )
             else
               Icon(
@@ -127,9 +135,10 @@ class EntryCard extends StatelessWidget {
 
     final secondaryTap = onSecondaryTap;
     if (secondaryTap == null) return card;
-    // 右键 = 同一个"编辑 / 删除"菜单（桌面用户的习惯路径）。
+    // 右键 = 在鼠标位置弹出"编辑 / 删除"浮窗（桌面用户的习惯路径）。
     return GestureDetector(
-      onSecondaryTapDown: (_) => secondaryTap(),
+      onSecondaryTapDown: (details) =>
+          secondaryTap(details.globalPosition),
       child: card,
     );
   }
