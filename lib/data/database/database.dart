@@ -65,6 +65,17 @@ class AppDatabase extends _$AppDatabase {
     return (delete(vaultMeta)..where((t) => t.metaKey.equals(metaKey))).go();
   }
 
+  /// 按前缀列出 `vault_meta`（智能体配对记录用 `agent.pairing.` 前缀）。
+  ///
+  /// 前缀由调用方保证**不含** SQL 通配符（`%` / `_`），这里不做转义：
+  /// 当前唯一的调用方用的是常量前缀 `agent.pairing.`。
+  Future<List<VaultMetaData>> getMetaByPrefix(String prefix) {
+    return (select(vaultMeta)
+          ..where((t) => t.metaKey.like('$prefix%'))
+          ..orderBy([(t) => OrderingTerm(expression: t.metaKey)]))
+        .get();
+  }
+
   // ─── Folders ───────────────────────────────────────────
 
   Future<List<Folder>> getAllFolders() => select(folders).get();

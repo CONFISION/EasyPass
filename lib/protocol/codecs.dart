@@ -1,10 +1,11 @@
 /// 协议层的**线格式编解码**。
 ///
-/// 两套条目 JSON，用途不同、**不要混用**：
+/// **三套**条目 JSON，用途不同、**不要混用**：
 /// - [entryToBridgeJson]：浏览器扩展用的受限形状（协议 v3 起冻结，只有
 ///   `hasTotp`、没有 TOTP 种子 / SSH 私钥），扩展与 C++ 桥都依赖它的字段名。
 /// - [itemToJson] / [itemFromJson]：UI 客户端用的完整明文形状（= `VaultItem.toJson()`），
 ///   因为它要显示、编辑密码与 TOTP 种子。
+/// - [entryToAgentJson]：智能体视角，**只有元数据、没有任何秘密**（见该函数的说明）。
 library;
 
 import 'package:easypass/data/models/vault_item.dart';
@@ -36,6 +37,40 @@ Map<String, dynamic> entryToBridgeJson(VaultItem item) {
 
 /// UI 客户端视角的条目 JSON（完整明文）。
 Map<String, dynamic> itemToJson(VaultItem item) => item.toJson();
+
+/// **智能体视角**的条目元数据：**没有任何秘密**。
+///
+/// 为什么必须另起一份而不是复用上面两套：
+/// - [entryToBridgeJson] 带 `password`（扩展要填充）；
+/// - [itemToJson] 是完整明文（UI 要显示 / 编辑）。
+/// 智能体是可被提示注入驱动的调用者，任何一次"顺手返回明文"都等于把秘密送进
+/// 模型上下文 —— 用远程模型时就等于离开本机。所以这里**只给**：
+/// id / name / type / folder / url / username / hasPassword / hasTotp /
+/// isFavorite / updatedAt。
+///
+/// **明确不给**：notes（可能是安全笔记正文）、password、TOTP 种子、SSH 私钥与
+/// 口令、自定义字段的**值**（连值也算秘密，只给"有几个字段"这种判断不需要的信息
+/// 也一律不给）。
+///
+/// [folderName] 由调用方传文件夹名做展示；缺省回退到 `folderId`。
+Map<String, dynamic> entryToAgentJson(VaultItem item, {String? folderName}) {
+  final login = item.loginOrEmpty;
+  return {
+    'id': item.id,
+    'name': item.name,
+    'type': item.type.wireName,
+    'folder': folderName ?? item.folderId,
+    'url': item.isLogin ? login.url : '',
+    'username': item.type == WireEntryType.identity
+        ? item.identityOrEmpty.username
+        : login.username,
+    // 布尔代替值：智能体需要"有没有密码 / 有没有验证码"来做决策，不需要值本身。
+    'hasPassword': item.isLogin && login.password.isNotEmpty,
+    'hasTotp': item.isLogin && login.hasTotp,
+    'isFavorite': item.isFavorite,
+    'updatedAt': item.updatedAt,
+  };
+}
 
 /// 从 UI 客户端发来的条目 JSON 还原模型（宽容解析，不抛异常）。
 VaultItem itemFromJson(Map<String, dynamic> json) => VaultItem.fromJson(json);
