@@ -679,6 +679,22 @@ version lives in the local `HANDOFF.md` (section 4, "踩过的坑").
   deleted" (2.3.2). Anything a desktop user must be able to do needs a *visible* affordance
   (a `more_vert` button) **and** the mouse-native gesture (`onSecondaryTap`); long-press stays
   as a third path, never the only one.
+- **Entry context menu is ONE shared menu.** `_showEntryContextMenu` (top-level in
+  `vault_screen.dart`, `showMenu` at the cursor) is used by the main list **and** the search
+  delegate (`_VaultSearchDelegate`); keep labels/icons/colors in that single place. In the
+  search route the delegate must `close(context, null)` before handing edit/delete to the page
+  (page context stays valid; the search route does not).
+- **Never ask for approval before checking the hard gates.** All single-entry agent tools run
+  `AgentAccessPolicy.precheck` **before** `_gate`: a closed / out-of-scope / revoked entry is
+  denied *without a dialog* (still audited as `denied`). Asking first and refusing afterwards
+  ("you approved nothing") trains users to click 同意 blindly — approval fatigue is a security
+  hole. `precheck` is not a replacement: after approval the full `evaluate` still runs.
+  Regression: `test/agent_access_policy_test.dart` (precheck group) + e2e "不弹审批".
+- **Identity / SSH-key entries are deliberately out of the agent surface.** Product decision
+  (2026-10-28): agents don't need them and should not reach them; `create_entry` /
+  `update_entry` reject those types. Do not "complete" the tool surface by adding them without
+  the user asking. `totp_code` is likewise **undecided** (user never uses TOTP; clipboard
+  `field:'totp'` covers it) — treat as TBD, not as a missing feature.
 - **Destructive actions state their blast radius.** Deleting a non-empty folder now counts the
   entries first (`countItemsInFolder`) and switches both the message ("it still contains N
   entries — they will NOT be deleted") and the confirm label ("Delete folder, keep entries").

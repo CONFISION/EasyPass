@@ -259,6 +259,36 @@ void main() {
     expect(find.text(l10n.undo), findsOneWidget);
   });
 
+  testWidgets('搜索结果也有右键菜单：删除后关闭搜索并进回收站', (tester) async {
+    await seedFourTypes();
+    final l10n = await pumpVaultScreen(tester);
+
+    await tester.tap(find.byTooltip(l10n.searchTooltip));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'github');
+    await tester.pumpAndSettle();
+
+    // 搜索路由在最上层：同名文本取最后一个。
+    await tester.tap(find.text('GitHub 登录').last,
+        buttons: kSecondaryMouseButton);
+    await tester.pumpAndSettle();
+
+    expect(find.text(l10n.entryActionEdit), findsOneWidget);
+    expect(find.text(l10n.delete), findsOneWidget);
+
+    await tester.tap(find.text(l10n.delete));
+    await tester.pumpAndSettle();
+    expect(find.text(l10n.deleteEntryTitle), findsOneWidget);
+    await tester.tap(find.text(l10n.trashMoveAction));
+    await tester.pumpAndSettle();
+
+    expect(api.calls, contains('deleteItem'));
+    expect(api.trash.containsKey('login-1'), isTrue,
+        reason: '删除 = 软删进回收站');
+    expect(find.byType(TextField), findsNothing,
+        reason: '删除后搜索路由应该已经关闭');
+  });
+
   testWidgets('删除后的提示气泡贴底（不被右下角 FAB 抬高）', (tester) async {
     await seedFourTypes();
     final l10n = await pumpVaultScreen(

@@ -175,4 +175,25 @@ class AgentAccessPolicy {
     }
     return const AgentAccessResult.deny(AgentDenyReason.notApproved);
   }
+
+  /// 审批前预检：只判定**与"用户点不点同意"无关**的硬条件。
+  ///
+  /// 返回 null 表示"值得弹审批"；非 null 表示调用方应直接拒绝、**不要弹窗**。
+  ///
+  /// 为什么需要它：`evaluate` 的步骤里"是否已获本次同意"在最后；如果对一条
+  /// 「永久拒绝」的条目先弹审批，用户点了同意之后才被告知"未开放"，等于让
+  /// 智能体诱导无意义弹窗 —— 审批疲劳正是社会工程学的入口。
+  ///
+  /// 纪律：**不替代** `evaluate`。审批期间用户可能改条目开关 / 配对，`_gate`
+  /// 之后仍要再走一次 `evaluate`（纵深防御）。
+  static AgentDenyReason? precheck(AgentAccessRequest r) {
+    if (!r.entryOpen) return AgentDenyReason.entryClosed;
+    if (r.revoked) return AgentDenyReason.pairingRevoked;
+    if (r.expired) return AgentDenyReason.pairingExpired;
+    if (!r.keyMatches) return AgentDenyReason.keyRejected;
+    if (!r.sessionUnlocked) return AgentDenyReason.sessionLocked;
+    if (!r.inScope) return AgentDenyReason.outOfScope;
+    if (!r.opAllowed) return AgentDenyReason.opNotAllowed;
+    return null;
+  }
 }

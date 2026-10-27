@@ -769,6 +769,53 @@ void main() {
       expect(await repository.getItems(), hasLength(3));
     });
 
+    test('方式 1：对「永久拒绝」条目的调用不弹审批，直接拒绝（硬闸预检）', () async {
+      final before = requests.length;
+
+      final read = await callToolPayload(
+        approvalKey,
+        'get_entry',
+        {'id': 'e-closed'},
+      );
+      expect(read['errorCode'], 'denied');
+
+      final updated = await callToolPayload(
+        approvalKey,
+        'update_entry',
+        {'id': 'e-closed', 'name': '改名尝试'},
+      );
+      expect(updated['errorCode'], 'denied');
+
+      final deleted = await callToolPayload(
+        approvalKey,
+        'delete_entry',
+        {'id': 'e-closed'},
+      );
+      expect(deleted['errorCode'], 'denied');
+
+      final copied = await callToolPayload(
+        approvalKey,
+        'copy_to_clipboard',
+        {'id': 'e-closed'},
+      );
+      expect(copied['errorCode'], 'denied');
+
+      expect(requests.length, before,
+          reason: '条目未开放是硬闸：不该先弹审批、点同意后才拒绝（审批疲劳）');
+
+      // 拒绝仍然留审计（一次调用一行），只是不打扰用户。
+      final audit = await db.recentAgentAudit(limit: 20);
+      final deniedTools = audit
+          .where((row) => row.decision == 'denied')
+          .map((row) => row.tool)
+          .toSet();
+      expect(
+        deniedTools,
+        containsAll(
+            ['get_entry', 'update_entry', 'delete_entry', 'copy_to_clipboard']),
+      );
+    });
+
     test('status.entryCount = 开放条目数（方式 1 下不再恒为 0）', () async {
       final status = await callToolPayload(approvalKey, 'status');
       expect(status['mode'], 'approval');

@@ -543,6 +543,14 @@ class AgentActions {
     final item = await _repository.getItem(id);
     if (item == null) throw McpToolException('notFound', '找不到该条目');
     _setAuditTarget(item);
+    // 硬闸预检：条目未开放 / 越界 / 配对失效时直接拒绝，不弹审批。
+    _precheckEntry(
+      pairing: pairing,
+      principal: principal,
+      tool: 'get_entry',
+      item: item,
+      op: AgentOp.read,
+    );
     // 审批弹窗要展示"哪个条目"，所以先取条目再闸门。
     await _gate(
       pairing,
@@ -852,6 +860,15 @@ class AgentActions {
       );
     }
 
+    // 硬闸预检：未开放的条目不应该先弹审批再被拒。
+    _precheckEntry(
+      pairing: pairing,
+      principal: principal,
+      tool: 'update_entry',
+      item: item,
+      op: AgentOp.write,
+    );
+
     // 先算出"要改成什么"（只做校验，不落库），审批弹窗才能列出字段名。
     final plan = await _planUpdate(item, args);
 
@@ -995,6 +1012,15 @@ class AgentActions {
       throw McpToolException('invalidRequest', '该条目已经在回收站里');
     }
 
+    // 硬闸预检：未开放的条目不应该先弹审批再被拒。
+    _precheckEntry(
+      pairing: pairing,
+      principal: principal,
+      tool: 'delete_entry',
+      item: item,
+      op: AgentOp.delete,
+    );
+
     await _gate(
       pairing,
       principal,
@@ -1087,6 +1113,15 @@ class AgentActions {
       throw McpToolException('invalidRequest', '该条目不在回收站里');
     }
 
+    // 硬闸预检：未开放的条目不应该先弹审批再被拒。
+    _precheckEntry(
+      pairing: pairing,
+      principal: principal,
+      tool: 'restore_entry',
+      item: item,
+      op: AgentOp.write,
+    );
+
     await _gate(
       pairing,
       principal,
@@ -1150,6 +1185,14 @@ class AgentActions {
     final item = await _repository.getItem(id);
     if (item == null) throw McpToolException('notFound', '找不到该条目');
     _setAuditTarget(item);
+    // 硬闸预检：条目未开放 / 越界 / 配对失效时直接拒绝，不弹审批。
+    _precheckEntry(
+      pairing: pairing,
+      principal: principal,
+      tool: 'copy_to_clipboard',
+      item: item,
+      op: AgentOp.sensitiveRead,
+    );
     // 敏感读：**不享受**本会话免询问，每次都要用户同意。
     await _gate(
       pairing,
@@ -1279,6 +1322,35 @@ class AgentActions {
     if (folders.isEmpty && types.isEmpty) return true;
     if (item.folderId != null && folders.contains(item.folderId)) return true;
     return types.contains(item.type.wireName);
+  }
+
+  /// 审批前的硬闸预检：条目未开放 / 越界 / 配对失效时**不弹审批、直接拒绝**。
+  ///
+  /// 与 `_gate` 的分工：`_gate` 负责"这次调用要不要问用户"；本方法负责
+  /// "问了也没用"的硬条件。没有它，智能体可以拿一条「永久拒绝」的条目反复
+  /// 触发审批弹窗（用户点了同意才发现被拒）—— 审批疲劳就是社会工程入口。
+  /// 拒绝同样写一条 `denied` 审计（一次调用一行，`_auditedThisCall` 兜底）。
+  void _precheckEntry({
+    required AgentPairing pairing,
+    required McpPrincipal principal,
+    required String tool,
+    required VaultItem item,
+    required AgentOp op,
+  }) {
+    final reason = AgentAccessPolicy.precheck(
+      _requestFor(pairing, item, op: op),
+    );
+    if (reason == null) return;
+    _auditAdd(
+      principal: principal,
+      mode: pairing.mode,
+      tool: tool,
+      op: op.name,
+      entryId: item.id,
+      entryName: item.name,
+      decision: 'denied',
+    );
+    throw McpToolException('denied', '条目未开放给智能体（${reason.name}）');
   }
 
   Future<Map<String?, String>> _folderNames() async {

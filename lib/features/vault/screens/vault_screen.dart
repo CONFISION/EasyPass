@@ -185,6 +185,12 @@ class VaultScreen extends ConsumerWidget {
                       // SearchDelegate 的 searchFieldLabel 是无 context 的
                       // getter，拿不到 AppLocalizations，所以文案从外面传。
                       searchHint: l10n.searchHint,
+                      // 搜索结果是独立 route：编辑 / 删除在关闭搜索后交给
+                      // 保险库页处理（菜单本身还是弹在搜索页上）。
+                      onEditEntry: (item) async =>
+                          context.push('/vault/edit/${item.id}'),
+                      onDeleteEntry: (item) =>
+                          _confirmDeleteEntry(context, ref, item),
                     ),
                   );
                 },
@@ -730,70 +736,15 @@ class VaultScreen extends ConsumerWidget {
 
   /// 条目的右键 / ⋮ 菜单：编辑 / 删除，**在鼠标位置弹浮窗**（不是底部弹窗）。
   ///
-  /// 用 `showMenu` 而不是 `showModalBottomSheet`：桌面用户对右键的预期是
-  /// 光标旁的小菜单；底部弹窗还要把视线移到屏幕底部（用户明确否决）。
-  /// 菜单项带图标（与文件夹的 ⋮ 菜单同风格：图标 + 文字，危险项红色）。
+  /// 浮窗本体在顶层 [_showEntryContextMenu]：搜索页（独立 route）也用同一份。
   Future<void> _showEntryActions(
     BuildContext context,
     WidgetRef ref,
     VaultItem item,
     Offset globalPosition,
   ) async {
-    final l10n = AppLocalizations.of(context);
-    final theme = Theme.of(context);
-    final overlay = Overlay.of(context).context.findRenderObject();
-    final overlaySize = overlay is RenderBox
-        ? overlay.size
-        : MediaQuery.sizeOf(context);
-    final localPosition = overlay is RenderBox
-        ? overlay.globalToLocal(globalPosition)
-        : globalPosition;
-
-    final action = await showMenu<String>(
-      context: context,
-      // 点在哪里就从哪里向右下展开；靠右边时 Flutter 会自动翻转。
-      position: RelativeRect.fromLTRB(
-        localPosition.dx,
-        localPosition.dy,
-        overlaySize.width - localPosition.dx,
-        overlaySize.height - localPosition.dy,
-      ),
-      items: [
-        PopupMenuItem<String>(
-          value: 'edit',
-          child: Row(
-            children: [
-              Icon(
-                Icons.edit_outlined,
-                size: 20,
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 12),
-              Text(l10n.entryActionEdit),
-            ],
-          ),
-        ),
-        PopupMenuItem<String>(
-          value: 'delete',
-          child: Row(
-            children: [
-              Icon(
-                Icons.delete_outline,
-                size: 20,
-                color: theme.colorScheme.error,
-              ),
-              const SizedBox(width: 12),
-              Text(
-                l10n.delete,
-                style: TextStyle(color: theme.colorScheme.error),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-
-    if (!context.mounted) return;
+    final action = await _showEntryContextMenu(context, globalPosition);
+    if (action == null || !context.mounted) return;
     switch (action) {
       case 'edit':
         context.push('/vault/edit/${item.id}');
@@ -1007,8 +958,17 @@ class _VaultSearchDelegate extends SearchDelegate<String?> {
   /// Hint of the search field (`l10n.searchHint`), forwarded to the base
   /// constructor: [SearchDelegate.searchFieldLabel] is a context-free field and
   /// cannot reach `AppLocalizations` on its own.
-  _VaultSearchDelegate({required String searchHint})
-      : super(searchFieldLabel: searchHint);
+  ///
+  /// [onEditEntry] / [onDeleteEntry] 由保险库页提供：搜索路由先关闭自己，
+  /// 再让页面处理（页面上下文在搜索关闭后依然有效）。
+  _VaultSearchDelegate({
+    required String searchHint,
+    this.onEditEntry,
+    this.onDeleteEntry,
+  }) : super(searchFieldLabel: searchHint);
+
+  final Future<void> Function(VaultItem item)? onEditEntry;
+  final Future<void> Function(VaultItem item)? onDeleteEntry;
 
   @override
   List<Widget>? buildActions(BuildContext context) {
@@ -1062,12 +1022,17 @@ class _VaultSearchDelegate extends SearchDelegate<String?> {
               itemCount: items.length,
               itemBuilder: (context, index) {
                 final item = items[index];
+                // 搜索结果的右键 / ⋮：与主列表同一个浮窗菜单。
+                void openMenu(Offset position) =>
+                    _showEntryActionsFor(context, item, position);
                 return EntryCard(
                   item: item,
                   onTap: () {
                     close(context, null);
                     context.push('/vault/entry/${item.id}');
                   },
+                  onSecondaryTap: openMenu,
+                  onMore: openMenu,
                 );
               },
             );
@@ -1075,6 +1040,25 @@ class _VaultSearchDelegate extends SearchDelegate<String?> {
         );
       },
     );
+  }
+
+  /// 搜索结果的右键 / ⋮ 菜单：先关搜索路由，再交给保险库页执行。
+  Future<void> _showEntryActionsFor(
+    BuildContext context,
+    VaultItem item,
+    Offset globalPosition,
+  ) async {
+    final action = await _showEntryContextMenu(context, globalPosition);
+    if (action == null || !context.mounted) return;
+    // 搜索是独立的 full-screen route：不关掉它，编辑页会压在搜索框下面，
+    // 删完回来也还停在搜索页。
+    close(context, null);
+    switch (action) {
+      case 'edit':
+        await onEditEntry?.call(item);
+      case 'delete':
+        await onDeleteEntry?.call(item);
+    }
   }
 
   /// 搜索框下方的前缀提示（空查询时显示）。
@@ -1108,4 +1092,70 @@ class _VaultSearchDelegate extends SearchDelegate<String?> {
       ),
     );
   }
+}
+
+// ─── 条目操作浮窗（列表 + 搜索共用）──────────────────────
+
+/// 条目右键 / ⋮ 的浮窗菜单（编辑 / 删除），返回 `'edit'` / `'delete'` / null。
+///
+/// 抽成顶层函数的原因：保险库列表与搜索页（`_VaultSearchDelegate`，独立的
+/// full-screen route）必须弹**同一个**菜单 —— 文案、图标、危险色不能分叉。
+/// 用 `showMenu` 而不是 `showModalBottomSheet`：桌面用户对右键的预期是光标旁
+/// 的小菜单，底部弹窗还要把视线移到屏幕底部（用户明确否决过）。
+Future<String?> _showEntryContextMenu(
+  BuildContext context,
+  Offset globalPosition,
+) async {
+  final l10n = AppLocalizations.of(context);
+  final theme = Theme.of(context);
+  final overlay = Overlay.of(context).context.findRenderObject();
+  final overlaySize =
+      overlay is RenderBox ? overlay.size : MediaQuery.sizeOf(context);
+  final localPosition = overlay is RenderBox
+      ? overlay.globalToLocal(globalPosition)
+      : globalPosition;
+
+  return showMenu<String>(
+    context: context,
+    // 点在哪里就从哪里向右下展开；靠右边时 Flutter 会自动翻转。
+    position: RelativeRect.fromLTRB(
+      localPosition.dx,
+      localPosition.dy,
+      overlaySize.width - localPosition.dx,
+      overlaySize.height - localPosition.dy,
+    ),
+    items: [
+      PopupMenuItem<String>(
+        value: 'edit',
+        child: Row(
+          children: [
+            Icon(
+              Icons.edit_outlined,
+              size: 20,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 12),
+            Text(l10n.entryActionEdit),
+          ],
+        ),
+      ),
+      PopupMenuItem<String>(
+        value: 'delete',
+        child: Row(
+          children: [
+            Icon(
+              Icons.delete_outline,
+              size: 20,
+              color: theme.colorScheme.error,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              l10n.delete,
+              style: TextStyle(color: theme.colorScheme.error),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
 }

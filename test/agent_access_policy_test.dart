@@ -286,4 +286,42 @@ void main() {
       expect(encoded.contains('ssh-ed25519'), isFalse);
     });
   });
+
+  group('precheck：审批前的硬闸预检', () {
+    test('条目「永久拒绝」：任何方式都直接拒（连信任直通也一样）', () {
+      expect(
+        AgentAccessPolicy.precheck(req(entryOpen: false)),
+        AgentDenyReason.entryClosed,
+      );
+      expect(
+        AgentAccessPolicy.precheck(
+          req(entryOpen: false, mode: AgentMode.trusted, trusted: true),
+        ),
+        AgentDenyReason.entryClosed,
+      );
+    });
+
+    test('越界 / 配对失效 / 会话锁定：都该在弹审批之前拒绝', () {
+      expect(AgentAccessPolicy.precheck(req(inScope: false)),
+          AgentDenyReason.outOfScope);
+      expect(AgentAccessPolicy.precheck(req(revoked: true)),
+          AgentDenyReason.pairingRevoked);
+      expect(AgentAccessPolicy.precheck(req(expired: true)),
+          AgentDenyReason.pairingExpired);
+      expect(AgentAccessPolicy.precheck(req(sessionUnlocked: false)),
+          AgentDenyReason.sessionLocked);
+      expect(AgentAccessPolicy.precheck(req(opAllowed: false)),
+          AgentDenyReason.opNotAllowed);
+    });
+
+    test('开放且合规：返回 null（要不要弹审批交给 _gate）', () {
+      expect(AgentAccessPolicy.precheck(req()), isNull);
+      expect(
+        AgentAccessPolicy.precheck(
+          req(op: AgentOp.write, mode: AgentMode.trusted),
+        ),
+        isNull,
+      );
+    });
+  });
 }
