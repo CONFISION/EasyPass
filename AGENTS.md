@@ -19,23 +19,31 @@ app into a **core-service architecture**: a standalone, windowless, always-on
 `easypass_core` process owns the vault, the Flutter app is a pure client
 (`lib/client/**` → `VaultApi`), and the tray — which belongs to the UI only — offers
 `Exit UI Only` and `Exit UI and Stop Service`. **This branch supports Windows only**;
+**3.1.0** adds **agent access (MCP)**: a loopback-only Streamable-HTTP endpoint inside the
+core (port **47821**), per-agent pairings (`role: agent`), two access modes — ask-every-time
+approval vs. trusted pass-through — a per-entry **开放 / 永久拒绝** switch (default deny,
+stored inside the encrypted payload), secret delivery **only** through the system clipboard
+(`copy_to_clipboard`, never into the model context), zero-interaction unlock via a
+DPAPI-wrapped agent key, and an audit table (`agent_audit`, schema **4**). Design doc:
+local-only `docs/agent-mcp-spec.md`; user-facing summary: `docs/technical-spec.md` §12.
 Phase 3 (cloud sync, sharing,
 emergency access, mobile/macOS) is still planned.
 
-> **Local-only docs (NOT in a fresh clone — `.gitignore` excludes them):** the
-> roadmap `Plan.md`, the working agreement/pitfalls `HANDOFF.md`, the data model
-> spec `docs/data-model.md`, the acceptance checklist `docs/acceptance-3.0.0.md`,
-> the 3.0.0 design doc
-> `docs/core-service-refactor.md`, release notes under `docs/`, and the `dist/` audit /
-> phase evidence dumps. Never write a committed file that *depends* on them; this
-> file and the READMEs must stand alone.
+> **Doc tracking (`docs/*` is git-ignored by default, with 3 exceptions):** the three
+> long-lived specs **are tracked** — `docs/technical-spec.md`, `docs/protocol-api.md`,
+> `docs/data-model.md` (see the `!docs/...` lines in `.gitignore`); `docs/release-*.md`
+> is tracked too because CI reads it for release notes. **Local-only:** the roadmap
+> `Plan.md`, the working agreement/pitfalls `HANDOFF.md`, the acceptance checklist
+> `docs/acceptance-3.0.0.md`, the 3.0.0 design doc `docs/core-service-refactor.md`,
+> `docs/agent-mcp-spec*.md`, and the `dist/` audit / phase evidence dumps. Never write a
+> committed file that *depends* on the local ones; this file and the READMEs must stand alone.
 
 Security model: the master password is never stored. PBKDF2-HMAC-SHA256
 (100,000 iterations) derives an AES-256-CBC key. **3.0.0 起** salt + verifier live in
 the vault database itself (`vault_meta`, via `VaultMetaSecretStore`) — the old
 `flutter_secure_storage` copy is read **once** during upgrade and handed to the core
 (`adoptLegacyKeyMaterial`). The derived key exists only in the core process
-(`SessionDomains`: separate `ui` / `bridge` sessions) and is cleared on lock
+(`SessionDomains`: separate `ui` / `bridge` / `agent` sessions) and is cleared on lock
 (auto-lock is enforced by the core).
 
 ## Build / Test / Lint
@@ -140,16 +148,25 @@ lib/protocol/                  协议 5 的线格式（核心与客户端共用�
 │   ├── events.dart            推送事件与主题（changed / sessionLocked / …）
 │   ├── codecs.dart            bridge JSON（冻结）与 UI JSON（完整明文）+ WireFolder
 │   └── errors.dart            错误码（error 仍是字符串，errorCode 是结构化补充）
+lib/mcp/                       MCP 传输层（3.1.0，纯 Dart；只能 import core/core_service/protocol）
+│   ├── mcp_http_server.dart   回环 HttpServer，单端点 POST /mcp，R1–R9（Origin/Host/Bearer/body cap）
+│   ├── mcp_handler.dart       JSON-RPC 2.0 + 修订协商 + 错误映射（执行错误进 result.isError）
+│   └── mcp_tools.dart         6 个工具的静态 schema（status/begin_session/end_session/
+│                              list_entries/get_entry/copy_to_clipboard）
 lib/core_service/              核心服务实现（纯 Dart，**不得 import Flutter**，有测试守着）
 │   ├── core_service.dart      组装 + 监听 + 分发 + 事件广播 + shutdown
-│   ├── core_actions.dart      UI 域动作（会话/条目/文件夹/导出导入/迁移）
-│   ├── session_domains.dart   ui / bridge 两个会话域与锁定传播规则
+│   ├── core_actions.dart      UI 域动作（会话/条目/文件夹/导出导入/迁移/智能体管理）
+│   ├── session_domains.dart   ui / bridge / agent 三个会话域与锁定传播规则
+│   ├── vault_session.dart     会话（密钥 + 空闲过期）
+│   ├── agent_access_store.dart  总开关：DPAPI blob（agent.key.dpapi）+ vault_meta.agent.wrap
+│   ├── agent_pairing_store.dart 配对记录（只存密钥 SHA-256，明文只在创建时回一次）
+│   ├── agent_access_policy.dart 纯函数判定（条目「永久拒绝」永远是第一条闸）
+│   ├── agent_actions.dart     MCP 工具实现 + 审批闸门（_gate）+ 审计落库（旁路）
 │   ├── core_singleton.dart    固定端口单实例闸门
 │   ├── core_info.dart         daemon.json 读写与清理
 │   ├── core_client.dart       客户端连接 + 握手 + --shutdown 实现
 │   ├── bridge_forwarder.dart  --bridge：stdio ↔ 回环 TCP（核心的转发模式，由宿主进程调用）
 │   ├── native_messaging_service.dart  bridge 域动作（协议 3 起形状冻结）
-│   ├── vault_session.dart     会话（密钥 + 空闲过期）
 │   └── url_matcher.dart       URL↔条目匹配
 ├── core/
 │   ├── constants/app_constants.dart    PBKDF2/AES 参数、钥匙串键名、bridgeProtocolVersion、
@@ -164,7 +181,7 @@ lib/core_service/              核心服务实现（纯 Dart，**不得 import F
 lib/adapters/flutter_secret_store.dart  唯一允许 import flutter_secure_storage 的"保险库路径"
 ├── data/
 │   ├── database/
-│   │   ├── tables.drift                Schema: folders, password_entries, vault_meta (schemaVersion 3)
+│   │   ├── tables.drift                Schema: folders, password_entries, vault_meta, agent_audit (schemaVersion 4)
 │   │   ├── database.dart               AppDatabase: DAO queries + streams + migrations
 │   │   └── database.g.dart             GENERATED — do not edit
 │   ├── models/                         Entry types + payload models (2.3.0)
@@ -184,6 +201,7 @@ lib/adapters/flutter_secret_store.dart  唯一允许 import flutter_secure_stora
     ├── health/   health_service.dart（纯函数 + HealthReport.fromJson；核心也在用同一套 analyze）
     │             health_provider.dart（走核心的 healthReport 动作，密码不过 IPC）
     ├── settings/ settings_screen.dart（导出/导入/清库全走 VaultApi）, providers/{font_settings,theme}_provider.dart
+    │             screens/{agent_access_screen,agent_audit_screen}.dart, widgets/agent_approval_host.dart
     ├── desktop_integration/  desktop_integration.dart（桌面项 / 图标 / --desktop-status）
     │                         + other_desktop_integration.dart（非 Windows 的 no-op）
     ├── desktop_tray/    desktop_tray.dart (facade) + windows_desktop_tray.dart
@@ -212,8 +230,11 @@ windows/                                Flutter Windows runner (CMake) + the tra
                                                               加密 SQLite（easypass.db）
 ```
 
-- 会话域：`ui` 与 `bridge` 各自一份密钥副本与空闲计时器。**UI 锁定会同时锁
-  bridge 域；UI 解锁不会解锁扩展，扩展解锁也不影响 UI**（刻意如此）。
+- 会话域：`ui` / `bridge` / `agent` 各一份密钥副本与空闲计时器。**UI 锁定会同时锁 bridge 域，
+  但不锁 `agent` 域**（3.1.0：智能体访问要"零介入"，用户确认过"锁的范围止于自己的域"）；
+  UI 解锁不会解锁扩展，扩展解锁也不影响 UI（刻意如此）。`agent` 域由「智能体访问」总开关 +
+  DPAPI 包裹的专属密钥在核心启动时自动解封，方式 1 的每次审批则从 `ui` 域**复制**一把钥匙、
+  调用结束立刻锁回（`VaultSession._wipe()` 是原地清零，不能共享同一个 `Uint8List`）。
 - 空闲自动锁定在**核心**（`SessionDomains`），UI 只上报活动（`touchActivity`，
   节流 20s）并订阅 `sessionLocked/sessionUnlocked` 事件。
 - 明文边界：核心把**明文 `VaultItem`** 发给 UI（`ui` 域动作）；扩展拿到的是
@@ -399,11 +420,12 @@ prose. The version comes from `pubspec.yaml` only. Runbook: `installer/release/R
   and **writes nothing** (while `--delete-conflicting-outputs` has already deleted the old
   file, leaving the repo uncompilable). If that happens, bump `drift`/`drift_dev`/
   `build_runner` together (see `pubspec.yaml`) before touching the schema.
-- **Schema changes need a migration, not just a column.** `schemaVersion` is **3** and
-  `AppDatabase.migration.onUpgrade` implements 1→2 and 2→3 for real; every new column/table
+- **Schema changes need a migration, not just a column.** `schemaVersion` is **4** and
+  `AppDatabase.migration.onUpgrade` implements 1→2, 2→3 and 3→4 for real; every new column/table
   must be added there too, or existing installs fail to open with "no such column" / "no such
-  table". `test/migration_test.dart` hand-builds v1 and v2 databases and asserts both upgrade
-  paths — extend it whenever you add a column or a table.
+  table". 3→4 added the `agent_audit` table (智能体访问审计). `test/migration_test.dart`
+  hand-builds old-version databases and asserts every upgrade path — extend it whenever you add
+  a column or a table.
   Also: drift does **not** enable SQLite foreign keys, so `ON DELETE SET NULL` never fires —
   `deleteFolderAndUnassign()` clears `folder_id` explicitly.
 - **Master-password rotation is atomic via a journal, and that is load-bearing.** The target

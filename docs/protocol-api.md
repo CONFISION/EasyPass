@@ -161,15 +161,15 @@ s2cEnc  = okm[64..96)    s2cMac = okm[96..128)
 
 | 角色 | 白名单 | 说明 |
 | --- | --- | --- |
-| `ui` | **27 个动作**（见 §5） | 完整客户端面；连接一定是加密的 |
+| `ui` | **39 个动作**（见 §5） | 完整客户端面；连接一定是加密的 |
 | `bridge` | **10 个动作**（见 §6） | 形状冻结；可能是明文（x86 桥） |
-| `agent` | 预留 | 目前与 `bridge` 同档，未来 MCP 用 |
+| `agent` | **0 个动作**（空集合） | 独立会话域；智能体走核心自己的 HTTP MCP 端点（`127.0.0.1:47821`，见 §5.7 与 `technical-spec.md` §12），**不从本协议发帧动作** |
 
 角色不在白名单里 ⇒ `{"error":"Unsupported action for role ...","errorCode":"unsupported"}`。
 
 ---
 
-## 5. UI 域动作（27 个）
+## 5. UI 域动作（39 个）
 
 ### 5.1 会话 / 认证
 
@@ -253,6 +253,29 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 }
 ```
 
+### 5.7 智能体访问（12 个，3.1.0）
+
+这些动作**只对 `ui` 角色开放**。智能体自己不用本协议（它走核心的 HTTP MCP 端点，
+见 `technical-spec.md` §12），UI 用这组动作管理开关、配对、访问方式与审批回话。
+
+| 动作 | 参数 | 返回 |
+| --- | --- | --- |
+| `getAgentAccessState` | — | `{enabled, agentUnlocked}` |
+| `enableAgentAccess` | — | `{ok, enabled: true, agentUnlocked: true}`；需 `ui` 域已解锁 |
+| `disableAgentAccess` | — | `{ok, enabled: false, agentUnlocked: false}`；同时停 MCP 监听 |
+| `resetAgentKey` | — | `{ok, enabled, agentUnlocked}`；换一把专属密钥重新包裹，库密文一个字节不动 |
+| `unlockAgentDomain` | `password` | `{ok, agentUnlocked}` |
+| `lockAgentDomain` | — | `{ok, agentUnlocked: false}` |
+| `listAgentPairings` | — | `{pairings: [{id, nickname, mode, trusted, createdAt, lastUsedAt, calls}], agentUnlocked}`；**不返回密钥哈希** |
+| `createAgentPairing` | `nickname`（唯一）、`mode`（`approval`/`trusted`）、`password`（`trusted` 时必填） | `{id, key, nickname, mode, trusted}` —— `key` **只在这里出现一次** |
+| `revokeAgentPairing` | `id` | `{ok, agentUnlocked, remaining}`；配对记录被**彻底删除** |
+| `setAgentAccessMode` | `id`、`mode`、`password`（切 `trusted` 时必填） | `{ok, agentUnlocked}`；切回 `approval` 会**立刻锁 agent 域** |
+| `respondAgentApproval` | `approvalId`、`allow`、`allowStandingRead?` | `{ok}`；`ok:false` = 该审批已超时/已被处理 |
+| `listAgentAudit` | `limit?`（1–500，默认 100） | `{entries: [{at, nickname, mode, tool, op, entryId, entryName, decision}], total}` |
+
+> 配对密钥（`key`）库里只存 SHA-256；UI 只在创建那一次展示/复制它。
+> 审计的 `decision` 目前取 `allowed` / `denied` / `timeout`（见 `data-model.md` §2.2 的待补项）。
+
 ---
 
 ## 6. Bridge 域动作（10 个，形状冻结）
@@ -299,10 +322,17 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 ```jsonc
 { "event": "changed",         "topic": "items", "revision": 42 }
 { "event": "changed",         "topic": "item",  "revision": 43, "id": "<entryId>" }
-{ "event": "sessionLocked",   "domain": "ui" }        // domain: ui | bridge
+{ "event": "sessionLocked",   "domain": "ui" }        // domain: ui | bridge | agent
 { "event": "sessionUnlocked", "domain": "bridge" }
+{ "event": "agentApprovalRequested",
+  "approvalId": "a_...", "nickname": "DSH", "tool": "list_entries",
+  "op": "read", "entryId": null, "entryName": null, "allowStanding": true }
 { "event": "coreShuttingDown" }
 ```
+
+- `agentApprovalRequested`（3.1.0，方式 1 专用）：智能体的调用被挂起，核心在等 UI 回话
+  （最长 45 秒，**超时按拒绝**）。UI 用 `respondAgentApproval` 回应；
+  只有 `ui` 客户端需要处理它，其它客户端应忽略。
 
 | 主题 | 何时推 | 客户端动作 |
 | --- | --- | --- |
@@ -312,6 +342,8 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 | `search` | 任何可能影响搜索结果的写入 | 用当前查询词重取 `searchItems` |
 
 - `revision` 是**进程内**单调递增计数，不跨重启持久化；重连后客户端应全量重取。
+- `sessionLocked` / `sessionUnlocked` 带 `domain`：**UI 只跟随 `ui` 域**，`bridge` / `agent`
+  的域事件必须忽略 —— 否则"浏览器扩展解锁"会让桌面端误显示成解锁态（D4：解锁必须是显式动作）。
 - 客户端建议 50ms 去抖合并同一主题的连续事件。
 - 未解锁时收到的 `changed` 可以忽略（解锁后全量重取）。
 - **没有 `subscribe` 动作**：广播是无条件的，服务端不维护"订阅状态"。
@@ -351,6 +383,9 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 | 删除或改名动作 | ✅ 需要 |
 | 改变某动作的语义或响应形状 | ✅ 需要 |
 | 改变握手/加密方式 | ✅ 需要 |
+
+**3.1.0 的 12 个智能体动作**（§5.7）与 `agentApprovalRequested` 事件属于"新增动作 / 新增事件"，
+**协议版本仍是 5**，旧客户端不认就忽略；不用改 `EXPECTED_PROTOCOL_VERSION`。
 
 **协议 5 的破坏点**（相对 4）：握手改为 nonce + 双向 HMAC 证明（令牌不再上线）、
 握手末帧起全帧加密、`role: ui|agent` 禁止明文连接。v5 核心对旧客户端回 `unsupported`。

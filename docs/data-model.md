@@ -97,11 +97,16 @@ import drift / 数据库 / 仓储。所以：
 | `mode` | `trusted` / `approval` |
 | `tool` / `op` | 工具名 + 读 / 写 / 删 / 剪贴板 |
 | `entry_id` / `entry_name` | 被操作的条目（可空，例如 `status`） |
-| `decision` | `allowed` / `allowed_standing` / `denied` / `timeout` / `error` |
+| `decision` | 当前实现写入：`allowed` / `denied` / `timeout`。设计里还预留了 `error` 与 `allowed_standing`（免询问放行），**代码尚未写入**，见 §2.2 末的待补项 |
 
 **绝不写入**：配对密钥、真实客户端标识、明文参数、条目字段值。
 写入是**旁路**（`AgentActions.auditSink`）：落库失败不影响工具调用，只在内存环形缓冲里保底。
-表按 `id` 保留最近 5000 条（`pruneAgentAudit`）。
+表按 `id` 保留最近 **1000** 条（`pruneAgentAudit({int keep = 1000})`，
+启动时执行一次；早期草案写的是 5000，已收紧）。
+
+**待补（文档别当现状读）**：`allowed_standing` 与 `error` 两个 `decision` 取值目前**没有写入点** ——
+方式 1 里靠「本会话内允许读取」放行的那次访问，审计仍记成 `allowed`，与"本次点了同意"不可区分。
+补的时候连带 UI 文案（`agentAuditDecision*`）和策略单测一起加。
 
 ---
 

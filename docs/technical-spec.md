@@ -477,7 +477,7 @@ claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
 - 配对密钥只是 MCP 的**身份凭据**，不参与任何解包 —— 泄露它不能解密数据库；
 - 但**同用户的恶意进程**既读得到 DPAPI blob 也读得到库文件，这是本项目的既有边界；
 - 明文只在"核心 → 系统剪贴板"之间移动，**永远不进模型上下文**；
-- 审计落库在 `agent_audit` 表（schema 4）：只记昵称/工具/条目/结果，**不记密钥、不记明文参数**；表保留最近 5000 条。
+- 审计落库在 `agent_audit` 表（schema 4）：只记昵称/工具/条目/结果，**不记密钥、不记明文参数**；表保留最近 **1000** 条（核心启动时裁剪）。
 
 ### 12.8 常见排障
 
@@ -502,28 +502,24 @@ claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
 
 ---
 
-## 13. 如何让本文档入库 + 一致性检查
+## 14. 如何让本文档入库 + 一致性检查
 
-**入库**：`docs/` 在 `.gitignore:14` 里被整体忽略。若要把技术规范/API 规范纳入版本控制，
-二选一：
-
-- 逐文件强制：`git add -f docs/technical-spec.md docs/protocol-api.md`
-- 改忽略规则（**需要你确认**）：在 `.gitignore` 里改成
-  `docs/*` + 用 `!docs/technical-spec.md` / `!docs/protocol-api.md` 反向放行，
-  同时保留 `Plan.md` / `HANDOFF.md` / `release-*.md` 的本地属性。
-
-> ⚠️ 按你的既定偏好（"项目知识写进仓库文档"），**这两份规范建议入库**；
-> 发布说明与验收清单按仓库既有惯例保持本地。
+**入库现状**：`docs/*` 在 `.gitignore` 里被整体忽略，但**三份长期规范已用反向规则入库**
+（`.gitignore` 的 `!docs/technical-spec.md` / `!docs/protocol-api.md` / `!docs/data-model.md`），
+`docs/release-*.md` 也在库内（CI 发布任务要读它）。其余（验收清单、设计记录、`Plan.md`、
+`HANDOFF.md`）保持本地。**新增 docs 文件要么加一条 `!` 例外，要么用 `git add -f`**；
+不要为图省事改掉整条忽略规则（会把本地文档一起放出来，需要先确认）。
 
 **一致性检查**（改代码后跑一遍，把结果与本文对照）：
 
 ```powershell
 # 常量
 Select-String lib\core\constants\app_constants.dart -Pattern 'pbkdf2|aesIv|bridgeProtocolVersion|coreVersion|coreFixedPort'
-# 动作规模（应为 ui=27 / bridge=10）
+# 动作规模（应为 ui=39 / bridge=10 / agent=0）
 $t = Get-Content -Raw lib\protocol\actions.dart
 [regex]::Matches($t,'(?s)bridgeAllowed = \{(.*?)\};')[0].Groups[1].Value.Split(',').Where({$_.Trim()}).Count
 [regex]::Matches($t,'(?s)uiAllowed = \{(.*?)\};')[0].Groups[1].Value.Split(',').Where({$_.Trim()}).Count
+[regex]::Matches($t,'(?s)agentAllowed = <String>\{(.*?)\};')[0].Groups[1].Value.Split(',').Where({$_.Trim()}).Count
 # 事件与主题
 Select-String lib\protocol\events.dart -Pattern "static const String \w+ = '"
 ```
