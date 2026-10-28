@@ -514,25 +514,30 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
           const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            // 用 Wrap 而不是 Row：徽标文案随语言/端口变化，窄窗口（900×600
-            // 最小窗口、150% DPI）下硬排一行会 RenderFlex overflow。换行比
-            // 省略更可读，也不靠 padding 硬凑。
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                _badge(
-                  label: _serviceLabel(l10n),
-                  color: _serviceColor(scheme),
-                ),
-                _badge(
-                  label: _unlocked
-                      ? l10n.agentDomainUnlocked
-                      : l10n.agentDomainLocked,
-                  color: _unlocked ? scheme.tertiary : scheme.outline,
-                ),
-              ],
+            // 左对齐 + 可换行：Column 的默认 crossAxisAlignment 是 center，
+            // Wrap 只占内容宽度会被居中；外面包一层 Align 才能保持和原来
+            // Row 一样的靠左视觉。窄窗口（900×600 最小窗口、150% DPI）下
+            // 仍然换行而不是 overflow，也不靠 padding 硬凑。
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.start,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  _badge(
+                    label: _serviceLabel(l10n),
+                    color: _serviceColor(scheme),
+                  ),
+                  _badge(
+                    label: _unlocked
+                        ? l10n.agentDomainUnlocked
+                        : l10n.agentDomainLocked,
+                    color: _unlocked ? scheme.tertiary : scheme.outline,
+                  ),
+                ],
+              ),
             ),
           ),
           // 开关开着但端点没起来：必须把核心给出的真实原因显示出来，

@@ -135,6 +135,13 @@ void main() {
     // 徽标读真实运行态：有监听端口就显示端口。
     expect(find.text(l10n.agentServiceRunning('47821')), findsOneWidget);
     expect(find.text(l10n.agentDomainUnlocked), findsOneWidget);
+    // 徽标必须左对齐（与旧版 Row 视觉一致）：Column 默认居中会把 Wrap 居中，
+    // 表现为两个徽标漂在卡片中间。用文本左边界 < 150 兜住回归。
+    // 注意要在向下滚动之前取位置：ListView 懒构建会把徽标滚出视口。
+    final badgeLeft =
+        tester.getTopLeft(find.text(l10n.agentServiceRunning('47821'))).dx;
+    expect(badgeLeft, lessThan(150),
+        reason: '状态徽标应靠左（原来那样），不能被 Column 居中');
     expect(find.text('DSH'), findsOneWidget);
     // 高级区（会话锁 + 重置密钥）只在开启时出现（列表懒构建：先滚到它）。
     await scrollTo(tester, find.text(l10n.agentLock));
