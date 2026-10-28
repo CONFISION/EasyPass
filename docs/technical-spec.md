@@ -256,6 +256,12 @@ build hook）。产物布局：`<OutDir>/core/easypass_core[.exe]` + `<OutDir>/l
 | ISCC 找不到 `sqlite3.dll` | `.iss` 的 `Source` 路径少一层 `Release`（已修，现用 `{#ReleaseDir}`） | 见 §9.2 |
 | ISCC `Syntax error` | `[Code]` 段里用 `{ }` 当注释（Inno 的 `{` 是常量展开符） | 用 `(* *)` 或 `//` |
 
+- **打包字体是子集**：`assets/fonts/MapleMono-NF-CN-*.ttf` 已裁成 GB2312 全量 + App UI 文案字符 +
+  基础拉丁/标点（单字重 **5.17MB**，两字重合计 **10.3MB**；完整原版每字重 19.7MB，在 git 历史里）。
+  GB2312 之外的生僻字/繁体由系统字体**逐字回退**（可读，字形不同）。重新生成：
+  `python tool/subset_fonts.py --source-dir <含完整字体的目录>`（需 `pip install fonttools`；
+  脚本会校验字族名与"原字体本应覆盖"的字符）。
+
 ### 7.4 打包
 
 ```powershell

@@ -42,6 +42,11 @@ flutter build windows                                       # 完整构建（含
 - **Windows 原生构建由用户执行**（`flutter build windows` / `flutter run -d windows` / 安装包 / 签名 /
   上传）。agent 负责到构建前的一切（改代码、analyze/test、lint、语法检查、文档），然后交出确切命令与
   验收要点。`cmd /c windows\runner\check_syntax.bat` 可在 agent 侧验证 C++ 改动（不调 MSBuild）。
+- **打包字体是子集（不是原版）**：`assets/fonts/` 里两个 Maple Mono 各 **~5.17MB**（GB2312 全量 +
+  App UI 文案字符 + 基础拉丁/标点）；完整原版每字重 ~19.7MB，只在 git 历史里。GB2312 之外的生僻字/繁体
+  由系统字体**逐字回退**（可读，字形不同）。重新生成：`python -m pip install fonttools` →
+  `python tool/subset_fonts.py --source-dir <含完整字体的目录>`（脚本会校验字族名与覆盖率）。
+  **不要拿子集字体再当 source 裁**（会继续丢字）。
 - **加了新 Material 图标后，必须先删 `build\flutter_assets` 再 build。** Flutter 的 `CopyAssets`
   目标（图标字体裁剪）inputs 里没有 `app.dill`，只改 Dart 代码不会重建字体子集 → 新图标在真机空白。
   判断：`build\flutter_assets\fonts\MaterialIcons-Regular.otf` 的 mtime 早于 `Release\data\app.so`。
