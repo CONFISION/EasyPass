@@ -219,15 +219,24 @@ class CoreService {
         );
 
     await actions.refreshAuthMaterial();
-    // 审计表自愈：只保留最近若干条，避免长期运行后无限增长。
-    // 失败不影响启动（审计是旁路，不是核心功能的前提）。
+    await service._listen();
+    // 审计表自愈是**旁路维护**：放到监听启动之后、后台执行。
+    // 之前在 _listen 之前 await：500k 行实测 prune ≈570ms，会直接推迟
+    // daemon.json 写出 —— UI 等核心就绪的时间被它拖长。晚几秒裁剪没有副作用。
+    unawaited(_pruneAgentAuditInBackground(db));
+    return service;
+  }
+
+  /// 审计表自愈（旁路）：只保留最近 [keep] 条。
+  ///
+  /// 必须保持"后台、失败静默"：审计是事后可查，不是核心功能的前提；
+  /// 也不能挡在 `_listen()` 之前（否则大表会拖慢 UI 就绪）。
+  static Future<void> _pruneAgentAuditInBackground(AppDatabase db) async {
     try {
       await db.pruneAgentAudit();
     } catch (_) {
       // 老库还没迁移完 / 只读介质：忽略。
     }
-    await service._listen();
-    return service;
   }
 
   Future<void> _listen() async {

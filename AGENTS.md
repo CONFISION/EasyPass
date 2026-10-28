@@ -185,6 +185,10 @@ agent 交付前仍需本地跑：`flutter analyze --no-pub`、`flutter test --no
 - **主密码校验只有一份实现 `MasterPasswordVerifier`**（只在核心跑）；UI 走 `verifyMasterPassword` 动作，
   任何地方不许手比 salt/hash。改完主密码必须回到锁定态（强制用新密码再进一次）。
 - **SQLite 只由核心打开**；UI 无数据库句柄。测试用 `AppDatabase.forTesting()` + `InMemorySecretStore`。
+- **核心启动关键路径上不能有慢活**：`CoreService.start()` 的顺序是
+  `refreshAuthMaterial` → `_listen()`（写 daemon.json）→ 后台 `pruneAgentAudit`。
+  审计裁剪必须保持 `unawaited`（500k 行实测 prune ≈570ms；放在 `_listen` 之前会直接推迟
+  UI 就绪——实测 daemon 728ms → 168ms）。新增启动期维护任务照此办理：监听先就绪，维护后置。
 - **删除是软删**：只写 `deleted_at`；列表/搜索/计数/健康/导出默认排除回收站；`getAllEntries()` 覆盖回收站
   （`reencryptAll` 必须用它，否则恢复后永久解不开）；"彻底删除/清空"只在 UI 动作面，**永不进 MCP**。
 - **写路径必须广播**：`CoreActions`/`AgentActions` 写完条目要推 `items/item/folders/search`；每写一条审计
