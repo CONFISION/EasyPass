@@ -42,16 +42,25 @@ class SystemClipboard {
   /// 退出码。用 `Get-Clipboard -Raw` 读回；不一致退 3，调用方拿到 false。
   /// 行尾做 CRLF→LF 归一化并对末尾换行宽容：Windows 剪贴板按 CRLF 存文本，
   /// `Set-Clipboard`/`Get-Clipboard` 往返会改写行尾，不能按字节比较。
+  ///
+  /// **读回最多重试 5 次（每次 60ms）**：剪贴板是系统级共享资源，写入与立即读回
+  /// 之间可能被其他进程的复制/剪贴板历史服务打断，一次不一致不代表写入失败；
+  /// 全量测试并发时曾实测到这种假失败。重试仍不一致才判失败。
   static const String _script = r'''
 $ErrorActionPreference = 'Stop'
 $reader = New-Object IO.StreamReader([Console]::OpenStandardInput(), [Text.Encoding]::UTF8)
 $text = $reader.ReadToEnd()
 Set-Clipboard -Value $text
-$back = Get-Clipboard -Raw
-if ($null -eq $back) { $back = '' }
 $expected = $text.Replace("`r`n", "`n").TrimEnd([char[]]"`r`n")
-$actual = $back.Replace("`r`n", "`n").TrimEnd([char[]]"`r`n")
-if ($actual -ne $expected) { exit 3 }
+$ok = $false
+for ($i = 0; $i -lt 5; $i++) {
+  $back = Get-Clipboard -Raw
+  if ($null -eq $back) { $back = '' }
+  $actual = $back.Replace("`r`n", "`n").TrimEnd([char[]]"`r`n")
+  if ($actual -eq $expected) { $ok = $true; break }
+  Start-Sleep -Milliseconds 60
+}
+if (-not $ok) { exit 3 }
 ''';
 
   /// 由 `%SystemRoot%` 构造 PowerShell 的绝对路径；不可用时返回 null。
@@ -76,7 +85,7 @@ if ($actual -ne $expected) { exit 3 }
     if (!isSupported) return Future.value(false);
     final executable = powershellPathFor(Platform.environment['SystemRoot']);
     if (executable == null) return Future.value(false);
-    return _writeText(executable, text);
+    return _writeTextWithRetry(executable, text);
   }
 
   /// 测试入口：给定可执行文件路径直接走写入流程。
@@ -91,7 +100,18 @@ if ($actual -ne $expected) { exit 3 }
     if (!isSupported || executable == null || !File(executable).existsSync()) {
       return Future.value(false);
     }
-    return _writeText(executable, text);
+    return _writeTextWithRetry(executable, text);
+  }
+
+  /// 整次写入最多重试 3 次：系统负载高时 PowerShell 冷启动/剪贴板服务可能
+  /// 短暂不可用，失败一次不代表这次复制真的坏了（调用方是智能体，重试一次
+  /// 比让它把"复制失败"转述给用户更划算）。只有连续失败才返回 false。
+  static Future<bool> _writeTextWithRetry(String executable, String text) async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (await _writeText(executable, text)) return true;
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+    return false;
   }
 
   static Future<bool> _writeText(String executable, String text) async {

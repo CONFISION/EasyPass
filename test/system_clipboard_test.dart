@@ -20,6 +20,12 @@ void main() {
   final onWindows = Platform.isWindows;
   final skipReason = onWindows ? null : '剪贴板实现仅 Windows';
 
+  /// 真实系统剪贴板用例依赖交互桌面会话；CI（windows-latest）没有可靠的
+  /// 剪贴板窗口站，跑这些用例只会得到环境性假失败。CI 上跳过；本地（以及
+  /// 真机验收工具 tool/ui_probe）仍会真实覆盖写→读回。
+  final realClipboardSkip =
+      skipReason ?? (Platform.environment['CI'] == 'true' ? 'CI 无交互剪贴板' : null);
+
   Future<String> readClipboard() async {
     final result = await Process.run('powershell', [
       '-NoProfile',
@@ -79,13 +85,13 @@ void main() {
     const text = 'easypass-clipboard-测试-42';
     expect(await SystemClipboard.writeText(text), isTrue);
     expect(await readClipboard(), text);
-  }, skip: skipReason);
+  }, skip: realClipboardSkip);
 
   test('第二次写入会覆盖第一次', () async {
     expect(await SystemClipboard.writeText('first'), isTrue);
     expect(await SystemClipboard.writeText('second'), isTrue);
     expect(await readClipboard(), 'second');
-  }, skip: skipReason);
+  }, skip: realClipboardSkip);
 
   test('包含引号与换行的文本也能原样写入', () async {
     const text = 'line1\nline2 "quoted" \\backslash';
@@ -93,7 +99,7 @@ void main() {
     // Get-Clipboard -Raw 会保留内部换行；末端换行由 PowerShell 追加，忽略。
     expect((await readClipboard()).replaceAll(RegExp(r'\r?\n$'), ''),
         text.replaceAll('\r\n', '\n'));
-  }, skip: skipReason);
+  }, skip: realClipboardSkip);
 
   test('isSupported 在 Windows 上为 true', () {
     expect(SystemClipboard.isSupported, isTrue);
