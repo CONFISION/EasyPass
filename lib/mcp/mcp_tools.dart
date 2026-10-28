@@ -40,7 +40,8 @@ class McpTool {
 ///
 /// 写操作的形状刻意保持"窄"：
 /// - `create_entry` 只开放 login / secure_note（identity / ssh_key 字段太多，
-///   用 UI 建更不容易出错）；新建条目**默认对智能体永久拒绝**，需用户在 UI 打开；
+///   用 UI 建更不容易出错）；新建条目**默认对智能体开放**（否则它建完就用不了），
+///   用户可随时在条目里改成「永久拒绝」收回 —— 开关只能用户改；
 /// - `delete_entry` 只做软删（进回收站），**永远不能彻底删除** —— 彻底删除是
 ///   用户独占的决定，不在工具面里；
 /// - 所有返回值都不含秘密（密码/验证码/私钥只在剪贴板里落地）。
@@ -54,7 +55,8 @@ const List<McpTool> agentTools = <McpTool>[
   McpTool(
     name: 'begin_session',
     description:
-        '为批量操作开一个显式窗口（purpose 必填，写入审计）。窗口内不会被空闲锁定打断。',
+        '为批量操作开一个显式窗口（purpose 必填，记入窗口元信息，status 可见；'
+        '窗口内不会被空闲锁定打断）。',
     inputSchema: {
       'type': 'object',
       'properties': {

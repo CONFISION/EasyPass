@@ -117,7 +117,8 @@ Flutter UI → `VaultApi`（`lib/client`）→ 回环 TCP → 核心。核心独
 - 授权：`AgentAccessPolicy.evaluate` 是唯一判定；条目「永久拒绝」永远第一条闸。所有单条目工具在弹审批**之前**
   先跑 `AgentAccessPolicy.precheck`（未开放/越界/配对失效直接拒绝、不弹窗，仍写 denied 审计）。
 - 硬口径：写/删/恢复永远逐次审批（"本会话内允许读取"只覆盖普通读）；写工具只支持 login / secure_note
-  （identity / SSH 有意不开放）；`create_entry` 建的条目默认开放；智能体不能改条目开关、不能彻底删除；
+  （identity / SSH 有意不开放；secure_note 传 url/username/password 会 `invalidRequest`，不静默忽略）；
+  `create_entry` 建的条目默认开放；智能体不能改条目开关、不能彻底删除；
   秘密只进系统剪贴板（`copy_to_clipboard`，无 `reveal_secret`）；审计保留最近 1000 条，decision 区分
   `allowed` / `allowed_standing` / `denied` / `timeout` / `error`。
 - 窗口：`begin_session` 的 TTL 默认 300s、范围 30–1800s；审批超时 45s（超时按拒绝），窗口不参与授权判定。
