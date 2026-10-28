@@ -26,19 +26,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 - **智能体访问（MCP）**：核心内新增一个只监听 `127.0.0.1` 的 Streamable-HTTP 端点
   （固定端口 **47821**，单端点 `POST /mcp`）。设置 → **智能体访问** 打开总开关后：
   - **配对**：每个智能体一把 256-bit 密钥（库里只存 SHA-256，明文只显示一次）；
-  - **两种访问方式**：`信任直通`（每次访问都写审计）与 `逐次审批`（每次调用弹窗，
-    可勾「本会话内允许读取」，仅对普通读生效）；
+  - **两种访问方式**：`可信直通`（不逐次弹窗，每次访问都写审计）与 `逐次审批`（读/写/删/敏感读
+    按规则弹窗，可勾「本会话内允许读取」，仅对普通读生效且可见、可撤销）；
   - **条目级开关**：「允许智能体访问：开放 / 永久拒绝」，默认**永久拒绝**，
-    落在加密载荷里；编辑页 / 详情页 / 列表三处可见；
+    落在加密载荷里；仅 `login` / `secure_note` 可开放（identity / SSH 由代码硬拒）；
+    编辑页 / 详情页 / 列表三处可见；
   - **11 个工具**：`status` / `begin_session` / `end_session` / `list_entries` /
     `get_entry` / `create_entry` / `update_entry` / `delete_entry` / `list_trash` /
-    `restore_entry` / `copy_to_clipboard`；
-  - **秘密不进模型上下文**：字段值只写进系统剪贴板（只回 `ok` + 长度），
+    `restore_entry` / `copy_to_clipboard`（工具面 surface v3）；
+  - **秘密不进模型上下文**：字段值只写进系统剪贴板（只回 `ok`，不回明文/长度），
     没有 `reveal_secret`；
   - **零介入解锁**：专属密钥由 Windows DPAPI 保护，核心启动时自动解封 `agent` 会话域
-    （与 `ui` / `bridge` 域独立）；改主密码时自动重新包裹；
-  - **审计**：`agent_audit` 表（schema 4，保留最近 1000 条）；侧边栏 → **智能体活动**
-    （回收站上方，**未开启总开关时入口隐藏**）可查，页面实时刷新；
+    （与 `ui` / `bridge` 域独立；校验 `vault.keyId`，失败 fail closed 不启 MCP）；
+    agent 域**没有空闲自动锁**，改主密码时重包裹与轮换同事务；
+  - **审计**：`agent_audit` 表（schema 4，保留最近 1000 条；启动后台裁剪 + 运行期每 100 条裁剪）；
+    侧边栏 → **智能体活动**（回收站上方，**未开启总开关时入口隐藏**）可查，页面实时刷新；
     decision 区分 `allowed` / `allowed_standing` / `denied` / `timeout` / `error`。
 - **回收站**（schema **5**，`password_entries.deleted_at`）：删除 = 移到回收站（软删，
   密文不动、可恢复）；侧边栏新增「回收站」页面，可恢复 / 彻底删除 / 清空；
@@ -49,14 +51,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 - **智能体写 / 删**：新增新建、修改、删除（软删）、回收站列表与恢复。写/删/恢复在方式 1 下
   **永远逐次审批**；智能体**自己新建的条目默认对它自己开放**（它建完要能继续管理；
   用户可随时改成「永久拒绝」收回，开关本身智能体改不了）；智能体**不能彻底删除**条目。
-- **审批弹窗**：写/删会多一行「详细」（只列字段名与动作，**不显示任何值**）；
-  弹窗加宽、三个动作一排横放（同意 / 本会话内允许读取 / 拒绝），拒绝为红色实心。
+- **审批弹窗**：写/删/敏感读会多一行「详细」——非秘密字段显示 `old → new`（标题/URL/用户名/
+  文件夹/收藏/自定义标签）、复制字段名、窗口 purpose+TTL、列表筛选条件；密码/备注只显示"已修改"，
+  **不显示任何秘密值**。弹窗加宽、三个动作一排横放（同意 / 本会话内允许读取 / 拒绝），拒绝为红色实心。
 - **`status.entryCount`** 改为"开放条目数"（方式 1 下不再恒为 0）。
 - `deleteItem` 的语义从硬删改为**移入回收站**。
 - **启动提速（核心）**：审计裁剪 `pruneAgentAudit` 从启动关键路径移除 —— 监听/写
   `daemon.json` 就绪后再后台执行；500k 行实测核心就绪 **728ms → 168ms**（后台仍在 2s 内裁到 1000 行）。
-- **字体子集化**：打包字体从 **39.3MB 降到 10.3MB**（GB2312 全量 + App UI 文案字符 + 基础拉丁/标点；
-  完整原版每字重 19.7MB 留在 git 历史）。冷启动更快；GB2312 之外的生僻字/繁体逐字回退系统字体（可读）。
+- **字体子集化**：打包字体从 **39.3MB 降到 10.3MB**（GB2312 汉字全量 + App UI 文案字符 + 基础拉丁/标点；
+  完整原版每字重 19.7MB 留在 git 历史）。冷启动更快；GB2312 之外的字/繁体逐字回退系统字体（可读）。
   重新生成脚本：`tool/subset_fonts.py`。
 - **底部提示统一改为浮起泡泡**：圆角、380 宽、水平居中、自动收起（可左右滑掉），
   不再用横贯底部的长条挡住侧边栏入口。
@@ -96,7 +99,50 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
   其他机器的文件，同用户恶意进程仍是既有边界（见 `SECURITY.md`）。
 - MCP 监听拒绝带 `Origin` 的请求、校验 `Host`、只接受 `POST`、Bearer 只放 header、
   不接受 query 凭据、不发 CORS 头、限制请求体大小。
-- 智能体只能读到"对智能体开放"的条目；「永久拒绝」是硬闸，写/删同样受它约束。
+- 智能体只能读到"对智能体开放"的条目；「永久拒绝」是硬闸，写/删同样受它约束；
+  identity / SSH 条目由代码硬拒（`typeExposed` 硬闸），复制私钥/口令的字段已从工具面移除。
+
+### Fixed（2026-10-28 安全评审修复；3.1.0 发布前）
+
+> 一轮独立安全评审（9 High / 14 Medium）后的修复，全部为**发布前阻塞项**。实现细节：
+> `SECURITY.md` 的 Agent access 小节、`docs/technical-spec.md` §4/§12、`docs/agent-mcp-spec.md` §25。
+
+- **审批窗口内授权状态不刷新（H1）**：审批通过后重读 pairing / item / 总开关并复跑完整策略；
+  更新改用 `updated_at` CAS，删除/恢复用条件语句；`saveItem` 更新分支不再覆盖 `deleted_at`。
+  修复"审批期间关开关/撤销配对/删条目/用户改密码被旧快照覆盖"（含凭据回滚与条目复活）。
+- **agent 会话域 5 分钟空闲后永久失效（H2/H3）**：agent 域改为**没有空闲自动锁**（只随总开关/
+  显式锁定/核心退出）；切方式不再锁域；设置页加「锁定 / 解锁智能体会话」；单条目工具在域锁定时
+  返回明确 `locked`（不读库、不弹审批，旧实现报 notFound）。
+- **「本会话内允许读取」永不清理（H4）**：切方式/关开总开关/改密/锁域/重置密钥/撤销配对时清空；
+  新增 `clearStandingRead` 动作；`listAgentPairings` 返回 `standingRead`；UI 加侧边栏常驻指示 +
+  配对卡片撤销按钮。
+- **identity / SSH 未被代码强制不暴露（H5）**：策略增加 `typeExposed` 硬闸（仅 login/secure_note）；
+  工具面移除 `private_key`/`passphrase`；编辑页开关仅对两类显示、切类型/导入强制关闭；工具面版本升 v3。
+- **改密重包裹在轮换事务之外（H6）**：`agent.wrap` + 新 `vault.keyId` 与整库重加密写进**同一事务**；
+  启动自动解封校验 `vault.keyId`（旧库回退真实解密探测；空库 fail closed 不启 MCP）；
+  重包裹失败 ⇒ 自动关闭智能体访问，绝不留旧包裹。
+- **schema 迁移非原子/非幂等（H7）**：`onUpgrade` 事务化 + `PRAGMA table_info`/`IF NOT EXISTS`
+  幂等 + 库版本高于程序时抛 `UnsupportedSchemaDowngradeException` 拒绝（不写库）；补迁移测试。
+- **审批 UI 无防抖、详细可截断（H8/H9）**：按钮回话期间禁用、下一条 350ms 后才可点、队列上限 20、
+  锁屏不渲染且只允许拒绝；详细展示非秘密 old→new/字段/TTL/筛选（不截断、清洗控制字符）；
+  审批限流 3/配对、8/全局；审批结束广播 `agentApprovalResolved`。
+- **MCP 传输反滥用（M1/M2）**：先做 Origin/Host/方法/Bearer 校验与认证、再读 body；body 15s 超时（408）、
+  整请求 90s（504）、并发 16（503）；HTTP 层拒绝写审计。
+- **MCP 固定端口被占用时静默退化（M3/M6）**：去掉临时端口回退，bind 失败即不启动、开开关回滚并报错；
+  `getAgentAccessState` 暴露真实 `mcpRunning/mcpPort/mcpError`；开关转换串行化。
+- **审计保真（M4/M8）**：运行期每 100 条写入裁剪（保留 1000）；HTTP 层拒绝落"未认证"审计；
+  剪贴板审计记 `op=clipboard:<field>`；一次调用一行（超时/取消/拒绝不重复）。
+- **「删除所有数据」不清智能体数据（M8）**：现在同时停 MCP、清 `agent_audit`、删全部配对、
+  wipe wrap + DPAPI blob，并在同一事务里删条目/文件夹。
+- **剪贴板链路硬化（M10）**：PowerShell 用绝对 `SystemRoot` 路径、写后回读校验；返回不再带 `length`；
+  `SECURITY.md` 如实披露"同会话进程 / Win+V / 云剪贴板可读"。
+- **`daemon.json` 非原子写/读失败当无核心（M12）**：temp+rename 原子写；读损坏抛
+  `CoreDiscoveryException`；`--lock`/`--shutdown` fail closed（退非零）；UI 报"核心不可用"不删除/拉起。
+- **导入可预置权限/隐藏条目（M9）**：导入强制 `deletedAt=null`，identity/SSH 强制 `agentOpen=false`
+  （login/secure_note 保留备份语义）；导出不携带 Bitwarden 权限位。
+- **其他**：`begin_session` TTL 越界改为报错（不再静默 clamp）；工具面 surface v3 并在
+  `initialize.serverInfo.surfaceVersion` 暴露；`end_session` 描述改为"不锁会话域"；
+  `McpHandler.serverVersion` 统一取 `AppConstants.coreVersion`。
 
 ---
 

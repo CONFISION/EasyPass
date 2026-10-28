@@ -33,7 +33,9 @@ import drift / 数据库 / 仓储。所以：
   idNumber/passportNumber/licenseNumber/address1/address2/city/state/postalCode/
   country/birthday/sex`，全 `String`，JSON 用 snake_case。
 - **`SshKeyData`**：`publicKey/privateKey/passphrase/fingerprint/keyType/bits(int?)/comment`。
-- **`EntryPayload`**：进 `data_encrypted` 的载荷 = `customFields + identity? + sshKey?`（带 `v:1`）。
+- **`EntryPayload`**：进 `data_encrypted` 的载荷 = `customFields + identity? + sshKey? + agentAccess?`（带 `v:1`）。
+  `agentAccess`（模型里是 `agentOpen`）是"允许智能体访问"开关，**参与 `isEmpty` 判定**——
+  只设了开关的载荷必须写进 `data_encrypted`，否则开关会被静默丢弃。
 - **`VaultItem`**：**内存态明文模型**，四种类型共用：
   `id / folderId? / type / name / notes / isFavorite / deletedAt? / login? / identity? /
   sshKey? / customFields / createdAt / updatedAt`。
@@ -101,9 +103,11 @@ import drift / 数据库 / 仓储。所以：
 | `agent.pairing.<id>` | 智能体配对记录（昵称 / 方式 / **密钥的 SHA-256** / 撤销时间） | `AgentPairingStore` |
 | `agent.enabled` | 智能体访问总开关（`'1'` = 开） | `AgentAccessStore` |
 | `agent.wrap` | 用专属密钥**包裹后**的保险库密钥（base64，见 `AgentKeyMaterial`） | `AgentAccessStore` |
+| `vault.keyId` | 当前 vaultKey 的 SHA-256 指纹；启动自动解封 agent 域时校验它，拒绝旧包裹 | `CoreActions`（设密/改密/开总开关/重置） |
 
-**轮换的原子性不变量**：目标 salt/验签子与整库重加密在**同一个 SQLite 事务**里写入。
+**轮换的原子性不变量**：目标 salt/验签子（写进 `rotation.*` 日志行）与整库重加密在**同一个 SQLite 事务**里写入。
 "没有日志 ⇒ 库还是旧钥匙；有日志 ⇒ 库已经是新钥匙"，日志的存在就是"哪个密码有效"的权威。
+智能体访问开着时，`agent.wrap` 与新 `vault.keyId` 也在这个事务里一起更新（改密失败/崩溃 ⇒ 一起回滚）。
 `test/master_password_rotation_atomicity_test.dart` 与 `change_password_then_lock_test.dart` 守着这条。
 
 ### 2.2 `agent_audit`
@@ -115,13 +119,17 @@ import drift / 数据库 / 仓储。所以：
 | `at` | 毫秒时间戳 |
 | `pairing_id` / `nickname` | 哪个配对、用户给它起的名字（**只进库，不进模型上下文**） |
 | `mode` | `trusted` / `approval` |
-| `tool` / `op` | 工具名 + 读 / 写 / 删 / 剪贴板 |
+| `tool` / `op` | 工具名 + 读 / 敏感读 / 写 / 删；剪贴板成功记 `clipboard:<field>`；HTTP 层拒绝行 `tool=http` |
 | `entry_id` / `entry_name` | 被操作的条目（可空，例如 `status`） |
 | `decision` | 实际写入：`allowed` / `allowed_standing`（靠「本会话内允许读取」放行）/ `denied` / `timeout` / `error`（执行失败兜底；一次调用只写一行） |
 
 **绝不写入**：配对密钥、真实客户端标识、明文参数、条目字段值。
 写入是**旁路**（`AgentActions.auditSink`）：落库失败不影响工具调用，只在内存环形缓冲里保底。
-表按 `id` 保留最近 **1000** 条（`pruneAgentAudit({int keep = 1000})`，启动时执行一次）。
+表按 `id` 保留最近 **1000** 条（`pruneAgentAudit({int keep = 1000})`）：启动后**后台**裁剪一次，
+运行期**每写 100 条**再触发一次（长跑进程不会无限增长）。
+一次调用最多一行；剪贴板审计的 `op` 记 `clipboard:<field>`；HTTP 层拒绝（401/403/405/413/408/504）
+也会写一行 `nickname=未认证 / mode=unknown / tool=http / op=read / decision=denied`。
+超时/取消/拒绝各只写一行（decision = `timeout` / `denied`）。
 
 `allowed_standing` 与 `error` 两个取值的含义：`_gate` 记住这次是否靠免询问放行
 （审计要能区分"用户点了同意"与"被免询问绕过"）；`callTool` 的异常兜底在"本次还没写过审计"时
@@ -141,6 +149,9 @@ Future<List<VaultItem>> getItems({String? folderId, EntryType? type, bool favori
 Future<VaultItem?> getItem(String id, {bool includeDeleted = false}); // 未解锁 / 不存在 / 在回收站 → null
 Stream<VaultItem?> watchItem(String id, {bool includeDeleted = false});
 Future<void> saveItem(VaultItem item);          // 按 id upsert；createdAt 保留、updatedAt 刷新
+Future<bool> updateItemIfUnchanged(VaultItem item, {required int expectedUpdatedAt});
+                                                // CAS：updated_at 不匹配或已进回收站 ⇒ false（智能体写路径用）
+Future<bool> encryptionProbeWorks(Uint8List key); // 用给定钥匙真解一行（自动解封 agent 域的旧库回退探测）
 Future<List<VaultItem>> searchItems(String query);   // 见下
 Future<int> countItems();
 Future<int> countItemsByType(EntryType type);
@@ -195,6 +206,8 @@ Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
 | ssh_key | 名称* · 公钥 · 私钥（多行、可显示/隐藏） · 私钥口令（隐藏） · 指纹/类型/长度/注释（可由公钥自动推导，允许手改） · 文件夹 · 备注 · 收藏 · 自定义字段 |
 
 - `*` = 必填。登录条目沿用"密码必填"；SSH 条目要求**公钥或私钥至少填一个**。
+- **「允许智能体访问」开关只对 login / secure_note 显示**；类型切换到 identity / SSH 时强制
+  `agentOpen=false`（保存时再兜一次），导入时非暴露类型也强制关闭（见 §5）。
 - 类型选择器只在**新建**时可改；编辑既有条目时切换类型要弹确认框
   （`entryTypeSwitchTitle` / `entryTypeSwitchMessage` / `entryTypeSwitchConfirm`），
   确认后调 `withoutTypeData()` 再保存。
@@ -234,6 +247,7 @@ Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
   "id": "...", "folder_id": null, "type": "login",
   "name": "...", "notes": "...", "is_favorite": false,
   "created_at": 0, "updated_at": 0,
+  "agent_access": "open",          // 仅当条目对智能体开放时出现；缺省 = 永久拒绝
   "login":     { "url": "...", "username": "...", "password": "...", "totp_secret": "..." },
   "identity":  { ... } | 省略,
   "ssh_key":   { ... } | 省略,
@@ -245,6 +259,10 @@ Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
   `url/username/password/totp_secret` 也要能读（`VaultItem.fromJson` 已处理）。
 - 导入的登录字段要用**核心的会话密钥**重新加密后落地（`VaultApi.importVault` →
   核心读写文件；UI 只传路径）。
+- **导入必须清洗本机权限/状态位**（`ExportImportService._parseEntry`）：
+  - `deleted_at` **一律丢弃**（备份里的条目不会因导入而静默进回收站）；
+  - `agent_access` 只对 login / secure_note 保留（用户自己备份的恢复语义），identity / SSH 强制关闭。
+- 导出：EasyPass 自身 JSON 携带 `agent_access`；Bitwarden 兼容导出不携带（它没有这个概念）。
 - 加密备份（`format:'encrypted'`）里**不得出现明文**密码 / 私钥 / 证件号。
 - 另有 Bitwarden JSON / CSV 导入（`lib/data/services/bitwarden_importer.dart`）：
   结果里会额外回 `skippedDetails[]`、`extraUris`、`cardsAsNotes` 三个字段。
@@ -253,16 +271,25 @@ Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
 
 ## 6. 迁移规则（改 schema 必读）
 
-- **`schemaVersion` 当前是 4**，`AppDatabase.migration.onUpgrade` 真实实现了 1→2、2→3、3→4；
+- **`schemaVersion` 当前是 5**，`AppDatabase.migration.onUpgrade` 真实实现了 1→2、2→3、3→4、4→5；
   每个新列 / 新表**都**要加进去，否则老库打开时报 "no such column" / "no such table"。
-  - 3 → 4 新增 `agent_audit`（智能体访问审计，见 §2.2）；
+  - 1 → 2：`type` + `data_encrypted`（2.3.0 多类型）
+  - 2 → 3：`vault_meta`（轮换日志）
+  - 3 → 4：`agent_audit`（智能体访问审计，见 §2.2）
+  - 4 → 5：`password_entries.deleted_at`（回收站，见 §2.0）
+- **迁移必须原子 + 幂等 + 拒绝降级**（`database.dart` 的 `onUpgrade`）：
+  - 整段 `onUpgrade` 包在 `transaction()` 里（drift 的迁移回调本身不在事务中；中途失败会留下
+    "列已加、user_version 没变"的半迁移库，重跑 `ADD COLUMN` 就 duplicate column、库永久打不开）；
+  - 每步先 `PRAGMA table_info` 判断列是否已存在，索引用 `CREATE INDEX IF NOT EXISTS`（可重复执行）；
+  - 库版本高于程序（`from > to`，用户装回旧版）抛 `UnsupportedSchemaDowngradeException`，
+    **不写库**，让用户装回 3.1.0+。
 - **改 `tables.drift` 必须跑**
   `dart run build_runner build --delete-conflicting-outputs`。
   先读 `pubspec.yaml` 里那段注释：analyzer 版本必须跟得上 Dart SDK，
   否则 `drift_dev` 会以 `Missing implementation of visitDotShorthandPropertyAccess` 崩，
   而且**什么都不写**（`--delete-conflicting-outputs` 已经把旧文件删了 ⇒ 仓库直接编不过）。
 - `test/migration_test.dart` 手工构造 v1 / v2 / v3 / v4 库并断言 1→2、2→3、3→4、4→5
-  四条升级路径 —— 新增列 / 表时扩展它。
+  四条升级路径、v1→最新、重复执行（幂等）与降级拒绝 —— 新增列 / 表时扩展它。
 - drift **不启用** SQLite 外键，所以 `ON DELETE SET NULL` 永远不会触发：
   `deleteFolderAndUnassign()` 显式清 `folder_id`。
 - **迁移没有退路**：升级必须能在老库上补出新列，且不破坏旧密文。
@@ -285,6 +312,8 @@ Future<void> removeFolder(String id);           // 先把条目 folder_id 清空
    不可用于回写。
 6. **UI 不得自己比对 salt/hash**：校验只有 `MasterPasswordVerifier` 一个实现，
    且只跑在核心里（`technical-spec.md` §5.2）。
+7. **写路径的授权/状态位只能由核心改**：`agent_access`、`deleted_at` 不接受来自导入/客户端的
+   任意值（导入强制清洗）；智能体只能"删进回收站"，不能改开关、不能彻底删除。
 
 ---
 

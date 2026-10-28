@@ -161,7 +161,7 @@ s2cEnc  = okm[64..96)    s2cMac = okm[96..128)
 
 | 角色 | 白名单 | 说明 |
 | --- | --- | --- |
-| `ui` | **43 个动作**（见 §5） | 完整客户端面；连接一定是加密的 |
+| `ui` | **44 个动作**（见 §5） | 完整客户端面；连接一定是加密的 |
 | `bridge` | **10 个动作**（见 §6） | 形状冻结；可能是明文（x86 桥） |
 | `agent` | **0 个动作**（空集合） | 独立会话域；智能体走核心自己的 HTTP MCP 端点（`127.0.0.1:47821`，见 §5.7 与 `technical-spec.md` §12），**不从本协议发帧动作** |
 
@@ -169,7 +169,7 @@ s2cEnc  = okm[64..96)    s2cMac = okm[96..128)
 
 ---
 
-## 5. UI 域动作（43 个）
+## 5. UI 域动作（44 个）
 
 ### 5.1 会话 / 认证
 
@@ -178,12 +178,12 @@ s2cEnc  = okm[64..96)    s2cMac = okm[96..128)
 | `getStatus` | — | `connected`、`locked`、`entryCount`、`idleTimeoutSeconds`、`autoLockRemainingSeconds`、`protocolVersion`、`coreVersion`、`hasAuthMaterial`、`autoLockMinutes` |
 | `getAuthState` | — | `status`（`firstRun`/`locked`/`unlocked`）、`autoLockMinutes`、`remainingSeconds`、`hasAuthMaterial` |
 | `unlock` | `password` | `{success: true}`。密码错 ⇒ `errorCode: unauthorized`；无校验材料 ⇒ `needsKeyMigration` |
-| `lock` | — | `{success: true}`。**锁 `ui` 域的同时锁 `bridge` 域** |
-| `setMasterPassword` | `password`、`confirmPassword` | `{success: true}`（首设；成功后 `ui` 域即解锁） |
-| `changeMasterPassword` | `currentPassword`、`newPassword`、`confirmPassword` | `{success, reencrypted, keyMaterialPersisted}`；成功后**两个域都锁定** |
+| `lock` | — | `{success: true}`。**锁 `ui` 域的同时锁 `bridge` 域，不锁 `agent` 域** |
+| `setMasterPassword` | `password`、`confirmPassword` | `{success: true}`（首设；成功后 `ui` 域即解锁，并写入 `vault.keyId`） |
+| `changeMasterPassword` | `currentPassword`、`newPassword`、`confirmPassword` | `{success, reencrypted, keyMaterialPersisted, agentAccessEnabled}`；成功后 `ui`+`bridge` **锁定**；agent 域先冻结，智能体访问开着则用新钥匙解锁（重包裹与轮换同事务），否则关闭智能体访问 |
 | `verifyMasterPassword` | `password` | `{ok: bool}`（只校验，不建会话；连续失败会 `rateLimited`） |
 | `adoptLegacyKeyMaterial` | `salt`、`passwordHash` | `{ok: true}`。**仅当核心还没有校验材料时**接受，重复调用 ⇒ `invalidRequest` |
-| `setAutoLockMinutes` | `minutes`（1–60，核心会 clamp） | `{ok: true, autoLockMinutes}` |
+| `setAutoLockMinutes` | `minutes`（1–60，核心会 clamp） | `{ok: true, autoLockMinutes}`；**只影响 `ui`/`bridge`**，`agent` 域没有空闲锁 |
 | `touchActivity` | — | `{ok: true}`。只续期 `ui` 域（**不**动 `bridge`） |
 
 ### 5.2 读
@@ -208,7 +208,7 @@ s2cEnc  = okm[64..96)    s2cMac = okm[96..128)
 | `addFolder` | `name`、`icon?`（默认 `folder`） | `{id}` |
 | `updateFolder` | `id`、`name?`、`icon?` | `{ok: true}` |
 | `removeFolder` | `id` | `{ok: true, unassigned}`（条目**保留**并解绑） |
-| `deleteAllData` | `confirm: true`（缺失 ⇒ `invalidRequest`） | `{ok, entries, folders}`（核心内单事务） |
+| `deleteAllData` | `confirm: true`（缺失 ⇒ `invalidRequest`） | `{ok, entries, folders, agentDataCleared}`（核心内单事务；**同时**停 MCP、清 `agent_audit`、删全部配对与 wrap/DPAPI blob） |
 
 ### 5.4 导出 / 导入（核心直接读写文件）
 
@@ -253,29 +253,32 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 }
 ```
 
-### 5.7 智能体访问（12 个）
+### 5.7 智能体访问（13 个）
 
 这些动作**只对 `ui` 角色开放**。智能体自己不用本协议（它走核心的 HTTP MCP 端点，
-见 `technical-spec.md` §12），UI 用这组动作管理开关、配对、访问方式与审批回话。
+见 `technical-spec.md` §12），UI 用这组动作管理开关、配对、访问方式、免询问撤销与审批回话。
 
 | 动作 | 参数 | 返回 |
 | --- | --- | --- |
-| `getAgentAccessState` | — | `{enabled, agentUnlocked}` |
-| `enableAgentAccess` | — | `{ok, enabled: true, agentUnlocked: true}`；需 `ui` 域已解锁 |
+| `getAgentAccessState` | — | `{enabled, agentUnlocked, mcpRunning, mcpPort?, mcpError?}` —— **真实运行态**，不是 DB 开关标记 |
+| `enableAgentAccess` | — | `{ok, enabled: true, agentUnlocked: true}`；需 `ui` 域已解锁；固定端口 47821 启动失败 ⇒ 回滚并抛错 |
 | `disableAgentAccess` | — | `{ok, enabled: false, agentUnlocked: false}`；同时停 MCP 监听 |
-| `resetAgentKey` | — | `{ok, enabled, agentUnlocked}`；换一把专属密钥重新包裹，库密文一个字节不动 |
-| `unlockAgentDomain` | `password` | `{ok, agentUnlocked}` |
-| `lockAgentDomain` | — | `{ok, agentUnlocked: false}` |
-| `listAgentPairings` | — | `{pairings: [{id, nickname, mode, trusted, createdAt, lastUsedAt, calls}], agentUnlocked}`；**不返回密钥哈希** |
+| `resetAgentKey` | — | `{ok, enabled, agentUnlocked, mcpRunning}`；换一把专属密钥重新包裹，库密文一个字节不动 |
+| `unlockAgentDomain` | `password` | `{ok, agentUnlocked}`；用户显式解锁智能体会话 |
+| `lockAgentDomain` | — | `{ok, agentUnlocked: false}`；清免询问、取消挂起审批 |
+| `listAgentPairings` | — | `{pairings: [{id, nickname, mode, trusted, createdAt, lastUsedAt, calls, revoked, standingRead}], agentUnlocked}`；**不返回密钥哈希** |
 | `createAgentPairing` | `nickname`（唯一）、`mode`（`approval`/`trusted`）、`password`（`trusted` 时必填） | `{id, key, nickname, mode, trusted}` —— `key` **只在这里出现一次** |
-| `revokeAgentPairing` | `id` | `{ok, agentUnlocked, remaining}`；配对记录被**彻底删除** |
-| `setAgentAccessMode` | `id`、`mode`、`password`（切 `trusted` 时必填） | `{ok, agentUnlocked}`；切回 `approval` 会**立刻锁 agent 域** |
-| `respondAgentApproval` | `approvalId`、`allow`、`allowStandingRead?` | `{ok}`；`ok:false` = 该审批已超时/已被处理 |
+| `revokeAgentPairing` | `id` | `{ok, agentUnlocked, remaining}`；配对记录被**彻底删除**，同时清该配对免询问、取消挂起审批 |
+| `setAgentAccessMode` | `id`、`mode`、`password`（切 `trusted` 时必填） | `{ok, agentUnlocked}`；切回 `approval` **不锁** agent 域，但清空免询问并取消挂起审批；切 `trusted` 需主密码 |
+| `respondAgentApproval` | `approvalId`、`allow`、`allowStandingRead?` | `{ok}`；`ok:false` = 该审批已超时/已被处理；`ui` 域锁定时**只接受拒绝**（`allow=true` ⇒ `locked`） |
 | `listAgentAudit` | `limit?`（1–500，默认 100） | `{entries: [{at, nickname, mode, tool, op, entryId, entryName, decision}], total}` |
+| `clearStandingRead` | `id`（配对 id） | `{ok}`；撤销该配对的「本会话内允许读取」（UI 的撤销按钮走这里） |
 
 > 配对密钥（`key`）库里只存 SHA-256；UI 只在创建那一次展示/复制它。
 > 审计的 `decision` 取 `allowed` / `allowed_standing`（「本会话内允许读取」放行）/
-> `denied` / `timeout` / `error`（执行失败兜底；一次调用只写一行）。
+> `denied` / `timeout` / `error`（执行失败兜底；一次调用只写一行）；剪贴板审计 `op=clipboard:<field>`；
+> HTTP 层拒绝会写 `nickname=未认证 / tool=http` 行。
+> 配对用量统计（`calls` / `lastUsedAt`）字段存在但**没有更新方**，恒为 0/null；以审计为准。
 
 ### 5.8 回收站（4 个，schema 5）
 
@@ -340,14 +343,20 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 { "event": "sessionLocked",   "domain": "ui" }        // domain: ui | bridge | agent
 { "event": "sessionUnlocked", "domain": "bridge" }
 { "event": "agentApprovalRequested",
-  "approvalId": "a_...", "nickname": "DSH", "tool": "list_entries",
-  "op": "read", "entryId": null, "entryName": null, "allowStanding": true }
+  "approvalId": "a_...", "nickname": "DSH", "tool": "update_entry",
+  "op": "write", "entryId": "<id>", "entryName": "GitHub",
+  "allowStanding": false, "detail": "修改字段：URL「old」→「new」" }
+{ "event": "agentApprovalResolved",
+  "approvalId": "a_...", "decision": "allowed" }   // allowed|denied|timeout|cancelled
 { "event": "coreShuttingDown" }
 ```
 
 - `agentApprovalRequested`（3.1.0，方式 1 专用）：智能体的调用被挂起，核心在等 UI 回话
   （最长 45 秒，**超时按拒绝**）。UI 用 `respondAgentApproval` 回应；
-  只有 `ui` 客户端需要处理它，其它客户端应忽略。
+  只有 `ui` 客户端需要处理它，其它客户端应忽略。`detail` 只含非秘密信息
+  （非秘密字段 old→new / 剪贴板 field / purpose+TTL / 筛选条件），秘密只显示"已修改"。
+- `agentApprovalResolved`（3.1.0）：审批结束（同意/拒绝/超时/取消）时广播，UI 必须据此**移除陈旧弹窗**；
+  `cancelled` 出现在锁域/关开关/切方式/撤销配对等边界（挂起审批被取消）。
 
 | 主题 | 何时推 | 客户端动作 |
 | --- | --- | --- |
@@ -365,6 +374,7 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 - `revision` 是**进程内**单调递增计数，不跨重启持久化；重连后客户端应全量重取。
 - `sessionLocked` / `sessionUnlocked` 带 `domain`：**UI 只跟随 `ui` 域**，`bridge` / `agent`
   的域事件必须忽略 —— 否则"浏览器扩展解锁"会让桌面端误显示成解锁态（D4：解锁必须是显式动作）。
+  `agent` 域事件仍会被广播（用于 UI 状态展示），但它没有空闲锁，只在总开关/显式锁定/核心退出时翻转。
 - 客户端建议 50ms 去抖合并同一主题的连续事件。
 - 未解锁时收到的 `changed` 可以忽略（解锁后全量重取）。
 - **没有 `subscribe` 动作**：广播是无条件的，服务端不维护"订阅状态"。
@@ -405,8 +415,11 @@ UI 拿的是**完整明文**（要显示/编辑密码与 TOTP 种子）：
 | 改变某动作的语义或响应形状 | ✅ 需要 |
 | 改变握手/加密方式 | ✅ 需要 |
 
-**3.1.0 的智能体动作**（§5.7）**、回收站动作**（§5.8）与 `agentApprovalRequested` 事件属于
-"新增动作 / 新增事件"，**协议版本仍是 5**，旧客户端不认就忽略；不用改 `EXPECTED_PROTOCOL_VERSION`。
+**3.1.0 的智能体动作**（§5.7，含评审修复新增的 `clearStandingRead`）**、回收站动作**（§5.8）、
+`agentApprovalRequested` / `agentApprovalResolved` 事件属于"新增动作 / 新增事件"，**协议版本仍是 5**，
+旧客户端不认就忽略；不用改 `EXPECTED_PROTOCOL_VERSION`。
+**注意**：`changeMasterPassword` 的返回增加了 `agentAccessEnabled` 字段、`deleteAllData` 增加了
+`agentDataCleared`，都属"新增响应字段"（旧客户端忽略），不升协议版本。
 
 **协议 5 的破坏点**（相对 4）：握手改为 nonce + 双向 HMAC 证明（令牌不再上线）、
 握手末帧起全帧加密、`role: ui|agent` 禁止明文连接。v5 核心对旧客户端回 `unsupported`。

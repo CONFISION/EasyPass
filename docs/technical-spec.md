@@ -42,14 +42,15 @@ EasyPass 由**四个可执行形态**与一个数据库组成。核心设计：*
 ┌──────────────────────────────── Windows ─────────────────────────────────┐
 │  easypass_core --serve     唯一、常驻、无窗口、无托盘                     │
 │   ├ 独占 easypass.db（唯一密钥副本）                                      │
-│   ├ 会话两域：ui / bridge（+ 预留 agent）                                 │
+│   ├ 会话三域：ui / bridge（有空闲锁）+ agent（无空闲锁）                   │
 │   ├ 监听 127.0.0.1:47820（固定端口，兼作单实例闸门）                      │
-│   ├ 写 daemon.json（port/token/protocolVersion/pid/coreVersion/exe）      │
+│   ├ 监听 127.0.0.1:47821（MCP，仅总开关打开时；固定端口，失败即不启动）    │
+│   ├ 写 daemon.json（port/token/protocolVersion/pid/coreVersion/exe/mcpPort）│
 │   └ 协议 5：握手双向证明 + 全帧加密                                       │
 │         ▲                          ▲                        ▲             │
 │   ┌─────┴──────┐          ┌────────┴────────┐      ┌────────┴────────┐    │
-│   │ easypass   │          │ easypass_       │      │ (未来) MCP      │    │
-│   │ .exe (UI)  │          │ native_host.exe │      │ 客户端          │    │
+│   │ easypass   │          │ easypass_       │      │ MCP 客户端      │    │
+│   │ .exe (UI)  │          │ native_host.exe │      │ (HTTP /mcp)     │    │
 │   │ 托盘三项    │          │ (x86, 字节转发) │      └─────────────────┘    │
 │   └────────────┘          └─────────────────┘                             │
 │        │                          ▲                                       │
@@ -79,6 +80,7 @@ EasyPass 由**四个可执行形态**与一个数据库组成。核心设计：*
 
 ```
 读 daemon.json
+ ├ 存在但读不出 / 不是合法 JSON（CoreDiscoveryException）→ **报错，不删文件、不拉起新核心**
  ├ 存在且 protocolVersion < 当前(5) → 判为陈旧核心：删发现文件（不盲杀进程，见 §8.3），继续往下
  ├ 存在且协议够 → 连接 + 握手 → 成功则复用
  └ 缺失 / 连不上 / 握手失败 → 删发现文件 → 拉起 <UI目录>/core/easypass_core.exe --serve
@@ -86,6 +88,8 @@ EasyPass 由**四个可执行形态**与一个数据库组成。核心设计：*
 ```
 
 UI 冷启动时若没有核心，会**自动拉起**——用户先点扩展还是先开 UI，最终都是同一个核心。
+`daemon.json` 由核心**原子写**（同目录临时文件 + rename），读方不会看到半截 JSON；文件损坏按 fail closed
+处理（UI 报"核心不可用"，`--lock` / `--shutdown` 打失败信息并退非零），不再静默删除/拉起。
 
 ### 3.3 退出路径
 
@@ -99,6 +103,9 @@ UI 冷启动时若没有核心，会**自动拉起**——用户先点扩展还�
 | 强制杀 UI | 系统 | 保持运行（空闲超时后锁） | 继续运行 | 不受影响 |
 | 核心被杀 | 系统 | — | — | 下次请求由桥重新拉起 |
 
+> 关窗/托盘"仅退出 UI"的「立即锁定」依赖 `easypass_core --lock` 成功；如果 `daemon.json` 损坏，
+> `--lock` 会 fail closed（打印失败原因、退非零），桌面端报"核心不可用"而不是假装已锁。
+
 
 
 > **验证状态**：本表描述的是当前代码的实际行为；2026-10-28 已在 Windows 真机确认
@@ -108,10 +115,10 @@ UI 冷启动时若没有核心，会**自动拉起**——用户先点扩展还�
 ### 3.4 核心自身
 
 - **无空闲自退**：常驻直到显式停机。
-- **启动顺序（UI 就绪相关）**：`refreshAuthMaterial()` → `_listen()`（绑定端口并写
-  `daemon.json`）→ **后台** `pruneAgentAudit()`。审计裁剪是旁路维护，必须 `unawaited`；
-  实测 500k 行 prune ≈570ms，若挡在 `_listen` 之前会把核心就绪拖到 728ms（后置后 168ms）。
-  新增启动期维护任务一律后置，不能挡 daemon.json 写出。
+- **启动顺序（UI 就绪相关）**：`refreshAuthMaterial()` → `_listen()`（启动 MCP：若总开关开着则自动解封
+  agent 域并 bind 固定端口 47821；然后绑定核心端口并写 `daemon.json`）→ **后台** `pruneAgentAudit()`。
+  审计裁剪是旁路维护，必须 `unawaited`；实测 500k 行 prune ≈570ms，若挡在 `_listen` 之前会把核心就绪
+  拖到 728ms（后置后 168ms）。新增启动期维护任务一律后置，不能挡 daemon.json 写出。
 - **单实例**：`CoreSingleton.bind()` 独占固定端口 `47820`；抢不到且端口有人应答 ⇒
   以**退出码 2** 退出（调用方据此改连已有核心）。端口被别的程序占用时退化为临时端口。
 - **停机顺序**：广播 `coreShuttingDown` → 关所有连接 → 关监听 → 删自己写的
@@ -121,30 +128,37 @@ UI 冷启动时若没有核心，会**自动拉起**——用户先点扩展还�
 
 ## 4. 会话模型
 
-核心内有两个**独立会话域**（`lib/core_service/session_domains.dart`），各持一份密钥副本与
-独立空闲计时器。
+核心内有三个**独立会话域**（`lib/core_service/session_domains.dart`），各持一份密钥副本。
+`ui` / `bridge` 有空闲计时；`agent` **没有空闲自动锁定**（见 §12.4）。
 
-| 事件 | `ui` 域 | `bridge` 域 |
-| --- | --- | --- |
-| UI 解锁 | 解锁 | 不变 |
-| UI 锁定 / 关窗 / 空闲超时 | 锁定 | **同时锁定** |
-| 扩展解锁 | 不变 | 解锁 |
-| 扩展锁定 | 不变 | 锁定 |
-| 核心退出 | 清零 | 清零 |
+| 事件 | `ui` 域 | `bridge` 域 | `agent` 域 |
+| --- | --- | --- | --- |
+| UI 解锁 | 解锁 | 不变 | 不变 |
+| UI 锁定 / 关窗 / 空闲超时 | 锁定 | **同时锁定** | **不变**（零介入） |
+| 扩展解锁 | 不变 | 解锁 | 不变 |
+| 扩展锁定 | 不变 | 锁定 | 不变 |
+| 总开关开 | — | — | 解锁（DPAPI 自动解封） |
+| 总开关关 / 显式锁定 / 核心退出 | — | — | 锁定 |
+| 核心退出 | 清零 | 清零 | 清零 |
 
 规则要点：
 
-- **UI 锁 ⇒ 全锁**（`SessionDomains.lockAll()`）：用户在桌面端点锁定或关窗，
-  不能留下一个仍可自动填充的浏览器会话。
-- **UI 解锁 ⇏ 扩展解锁**（D4 决策）：解锁必须是一次显式动作，不能因为桌面端解锁就
-  静默扩大浏览器的访问面。
-- **空闲锁定归核心**：默认 5 分钟（`AppConstants.autoLockTimeoutMinutes`），
-  用户可在设置里调 1–60 分钟；核心用固定节拍（5s）检查并广播
+- **UI 锁 ⇒ 只锁 ui + bridge**（`SessionDomains.lockAll()`）：用户在桌面端点锁定或关窗，
+  不能留下一个仍可自动填充的浏览器会话。**agent 域刻意不在此列**——智能体访问一旦授权就是
+  "零介入"，只随总开关 / 显式「锁定智能体会话」/ 核心退出变化。
+- **UI 解锁 ⇏ 扩展解锁 / agent 解锁**（D4 决策）：解锁必须是一次显式动作，不能因为桌面端解锁就
+  静默扩大其它域的访问面。`agent` 域由总开关打开时用 DPAPI 包裹的密钥自动解封，并校验
+  `vault.keyId`（见 §12）。
+- **空闲锁定归核心**：`ui`/`bridge` 默认 5 分钟（`AppConstants.autoLockTimeoutMinutes`），
+  用户可在设置里调 1–60 分钟；`agent` 不受该设置影响。核心用固定节拍（5s）检查并广播
   `sessionLocked`/`sessionUnlocked`。
 - **活动续期**：只有"读写数据的动作"会 `touch()`；UI 额外通过 `touchActivity`
   动作节流上报用户指针活动（`lib/app.dart` 的 `_ActivityTouchHost`，20s 一次），
   否则用户停在生成器/设置页时会被自动锁定。
 - 过期判定是**惰性**的（读 `isUnlocked`/`key`/`remaining` 才判定）+ 节拍器负责推送。
+- **方式 1 的单条目调用若遇到 agent 域被显式锁定**：先报明确的 `locked`（不读库、不弹审批）；
+  用户在 UI 解锁后再调用。审批通过后的调用会从 `ui` 域复制一次性密钥（并发安全），
+  全部调用结束后锁回。
 
 ---
 
@@ -175,6 +189,10 @@ Flutter 插件，且校验材料与轮换日志同处一个 SQLite 事务域。
 （`easypass_master_key_salt` / `easypass_master_pw_hash`），调 `adoptLegacyKeyMaterial`
 一次性交给核心；核心**仅在 `auth.*` 不存在时**接受。**旧钥匙串值不删除**（便于回退旧版本）。
 只跑扩展、从不开 UI 的升级用户会收到 `needsKeyMigration` → 提示"请先打开一次桌面应用"。
+
+**`vault.keyId`**：当前 vaultKey 的 SHA-256 指纹，首次设主密码 / 改密成功 / 打开智能体访问 / 重置专属密钥时
+写入 `vault_meta`。它不参与解密，只用于**拒绝"改密中断留下的旧包裹"**：核心启动自动解封智能体域时会拿
+解出的 keyId 与它比较（旧库没有该字段时回退一次真实解密探测，空库按 fail closed 处理，见 §12.2）。
 
 ### 5.3 通道加密（协议 5）
 
@@ -256,11 +274,11 @@ build hook）。产物布局：`<OutDir>/core/easypass_core[.exe]` + `<OutDir>/l
 | ISCC 找不到 `sqlite3.dll` | `.iss` 的 `Source` 路径少一层 `Release`（已修，现用 `{#ReleaseDir}`） | 见 §9.2 |
 | ISCC `Syntax error` | `[Code]` 段里用 `{ }` 当注释（Inno 的 `{` 是常量展开符） | 用 `(* *)` 或 `//` |
 
-- **打包字体是子集**：`assets/fonts/MapleMono-NF-CN-*.ttf` 已裁成 GB2312 全量 + App UI 文案字符 +
+- **打包字体是子集**：`assets/fonts/MapleMono-NF-CN-*.ttf` 已裁成 GB2312 **汉字**全量 + App UI 文案字符 +
   基础拉丁/标点（单字重 **5.17MB**，两字重合计 **10.3MB**；完整原版每字重 19.7MB，在 git 历史里）。
-  GB2312 之外的生僻字/繁体由系统字体**逐字回退**（可读，字形不同）。重新生成：
-  `python tool/subset_fonts.py --source-dir <含完整字体的目录>`（需 `pip install fonttools`；
-  脚本会校验字族名与"原字体本应覆盖"的字符）。
+  原字体本身缺的少量 GB2312 符号不覆盖；GB2312 之外的字/繁体由系统字体**逐字回退**（可读，字形不同）。
+  重新生成：`python tool/subset_fonts.py --source-dir <含完整字体的目录>`（需 `pip install fonttools`；
+  脚本会校验字族名与"原字体本应覆盖"的字符，SIL OFL 1.1 许可/版权记录保留在字体 name 表里）。
 
 ### 7.4 打包
 
@@ -282,14 +300,19 @@ build hook）。产物布局：`<OutDir>/core/easypass_core[.exe]` + `<OutDir>/l
 - **篡改会被拒**：encrypt-then-MAC，逐字节改动都会被拒（`test/secure_channel_test.dart`
   对前 40 字节逐个翻转验证）。
 - **旧协议不降级**：v5 核心对 v4 及更旧客户端回 `unsupported`，绝不退回明文。
+- **MCP 端点（3.1.0）**：只绑回环固定端口；带 `Origin`/伪造 `Host`/非 POST/query 密钥一律拒绝；
+  Bearer 只认 header、库里只存 SHA-256、trim 后常量时间比较；头校验与认证在**读 body 之前**完成，
+  body/请求有大小、超时、并发上限；**固定端口占用即不启动**（不把凭据投递给占位进程）。
 
 ### 8.2 不能防什么（必须如实告知用户）
 
 - **同用户的恶意进程**。它能读 `daemon.json` 拿到令牌，从而连上核心；而且 UI 本来就要
   显示明文密码。**真正的安全边界是"同一用户账户"**，不是密码学。
-- **内存取证 / 调试器**附加到核心或 UI 进程。
+- **内存取证 / 调试器**附加到核心或 UI 进程。开启智能体访问时，DPAPI 包裹的库钥匙也在同用户可解范围内。
 - **x86 桥 ↔ 核心这一段仍是明文 + 令牌**（32 位 stdio 限制，见 §1）。它与核心之间是
   本机回环 + 令牌认证，属于**已知的、有意的**信任边界；扩展侧拿到的本来就是明文密码。
+- **剪贴板可被同用户读取**：`copy_to_clipboard` 写入系统剪贴板后，同会话进程、`Win+V` 历史、
+  云剪贴板同步都可能读到；没有自动清除。
 
 ### 8.3 陈旧核心为什么"只删文件不盲杀"
 
@@ -311,7 +334,7 @@ build hook）。产物布局：`<OutDir>/core/easypass_core[.exe]` + `<OutDir>/l
 
 ```powershell
 flutter analyze --no-pub                 # 目标 0 issue
-flutter test --no-pub                    # 578 通过 / 3 跳过（Windows）
+flutter test --no-pub                    # 全量用例数以实跑输出为准（不要手抄旧数字）
 cmd /c windows\runner\check_syntax.bat   # 改过 windows/runner/** 必跑
 cmd /c windows\runner\check_integrity.bat
 node browser_extension/tools/check_extension.mjs
@@ -341,14 +364,15 @@ node browser_extension/tools/build_extension_zip.mjs --dry-run   # 扩展包到�
 
 ## 10. 架构守卫（不可违反的依赖方向）
 
-`test/architecture_boundary_test.dart` 强制三条：
+`test/architecture_boundary_test.dart` 强制四条：
 
 1. `lib/features/**` **不得** import `package:drift/`、`package:sqlite3`、`data/database/`、
    `data/repositories/`、`data/state/session_key.dart`；
    且 `features/{vault,auth,health,generator}/**` **不得** import `flutter_secure_storage`。
 2. `lib/client/**` 不得 import `data/database/`、`data/repositories/`（客户端只能经协议说话）。
-3. `lib/core_service/**` **不得** import 任何 `package:flutter/`、`flutter_riverpod`、
+3. `lib/core_service/**` 与 `lib/mcp/**` **不得** import 任何 `package:flutter/`、`flutter_riverpod`、
    `flutter_secure_storage` —— 这是"核心能脱离 Flutter 编译"的前提，破了 `dart build cli` 立刻失败。
+4. `lib/core/**` 同样**不得** import Flutter（核心侧纯 Dart）。
 
 依赖方向：`features` → `client` → `protocol`；`core_service` → `data`/`core`/`protocol`；
 `data`/`core` 不得 import `features`。
@@ -362,10 +386,11 @@ node browser_extension/tools/build_extension_zip.mjs --dry-run   # 扩展包到�
 | **核心 / core** | `easypass_core` 进程，唯一持有库与密钥 |
 | **UI / 客户端** | `easypass.exe`，纯客户端 |
 | **桥 / bridge** | 浏览器 native messaging 宿主（Windows 上的独立 x86 exe） |
-| **会话域** | 核心内的 `ui` / `bridge` 两套独立会话（+ 预留 `agent`） |
-| **发现文件** | `daemon.json`，告诉客户端核心在哪、用哪个令牌 |
+| **会话域** | 核心内的 `ui` / `bridge` / `agent` 三套独立会话；`ui`/`bridge` 有空闲锁，`agent` 没有 |
+| **发现文件** | `daemon.json`，告诉客户端核心在哪、用哪个令牌、MCP 端口是多少；原子写 |
 | **布局/凭证** | 令牌只在 `daemon.json` 与两端内存中，不上线 |
-| **锁定（lock）** | 清除会话密钥；`ui` 域调用会连带锁 `bridge` 域 |
+| **锁定（lock）** | 清除会话密钥；`ui` 域调用会连带锁 `bridge` 域，**不锁** `agent` 域 |
+| **MCP / 配对 / 审批** | 智能体 HTTP 端点 / 每配对一把密钥（库只存 SHA-256）/ 方式 1 的逐次用户同意（45s 超时） |
 | **陈旧核心** | `protocolVersion` 低于当前的核心（升级前的旧 daemon） |
 
 ---
@@ -377,10 +402,11 @@ node browser_extension/tools/build_extension_zip.mjs --dry-run   # 扩展包到�
 
 ### 12.1 一句话
 
-核心进程内跑一个只监听 `127.0.0.1` 的 MCP 端点（Streamable HTTP）。默认**关闭**；
-打开后，被配对过的智能体可以**零介入**读"开放"条目的**元数据**、把字段值直接
-送进**系统剪贴板**（明文不进模型上下文），也可以**新建 / 修改 / 删除条目** ——
-其中"删除"只是移入**回收站**，且敏感操作在方式 1 下都要用户逐次同意。
+核心进程内跑一个只监听 `127.0.0.1` 的 MCP 端点（Streamable HTTP，**固定端口 47821**）。默认**关闭**；
+打开后，被配对过的智能体可以在**零介入**下读"开放"条目的**元数据**、把字段值直接
+送进**系统剪贴板**（明文/长度都不进模型上下文），也可以**新建 / 修改 / 删除条目** ——
+其中"删除"只是移入**回收站**；"逐次审批"方式下的敏感操作都要用户逐次同意，"可信直通"方式不弹窗但
+每次访问都写审计。identity / SSH 条目**由代码硬拒**，任何方式都读不到、写不了、复制不了。
 
 ### 12.2 打开总开关
 
@@ -389,13 +415,20 @@ node browser_extension/tools/build_extension_zip.mjs --dry-run   # 扩展包到�
 3. 打开时核心会：
    - 生成一把 256-bit **专属密钥**，用 Windows DPAPI 加密存到
      `<数据目录>\agent.key.dpapi`；
-   - 用它**包裹**一份保险库密钥，存进库的 `vault_meta.agent.wrap`；
+   - 用它**包裹**一份保险库密钥，存进库的 `vault_meta.agent.wrap`，并写入当前钥匙指纹
+     `vault_meta.vault.keyId`；
    - 解锁 **agent 会话域**（与 ui / bridge 三个域互相独立）；
-   - 启动 MCP 端点，端口写进 `daemon.json` 的 `mcpPort`（默认固定 **47821**）。
-4. 关掉开关 = 删 DPAPI blob + 删 wrap + 锁 agent 域 + **停掉监听**（端口释放）。
+   - 启动 MCP 端点，bind **固定端口 47821**，端口写进 `daemon.json` 的 `mcpPort`。
+4. **端口被占用 / 监听失败 ⇒ 打开失败并回滚**：清掉刚写入的三处材料、锁 agent 域、恢复总开关为关，
+   UI 报错。绝不退化为临时端口（否则客户端会把 Bearer 密钥投递给占用端口的进程）。
+5. 关掉开关 = 删 DPAPI blob + 删 wrap + 锁 agent 域 + **停掉监听**（端口释放）；设置页另有
+   **「锁定 / 解锁智能体会话」**：锁定只清内存会话（密钥材料保留），解锁需要主密码。
+6. 设置页显示**真实运行态**：开关状态、agent 域是否解锁、MCP 是否在监听/实际端口/失败原因
+   （`getAgentAccessState` 返回 `enabled / agentUnlocked / mcpRunning / mcpPort? / mcpError?`）。
 
 > ⚠️ 开关打开期间，**保险库可以被 EasyPass 自己解锁**（这正是"零介入"的含义），
-> 任何以你这个 Windows 账户运行的程序都可能受益。关掉开关即可立刻收回。
+> 任何以你这个 Windows 账户运行的程序都可能受益。关掉开关即可立刻收回。agent 域**没有空闲自动锁**：
+> 桌面锁定 / 关窗都不会锁它，只有关开关、显式锁定、核心退出才锁。
 
 ### 12.3 配对（生成密钥）
 
@@ -405,28 +438,45 @@ node browser_extension/tools/build_extension_zip.mjs --dry-run   # 扩展包到�
 2. 用主密码确认（核心据此把该配对标记为 `trusted`）；
 3. 弹出**只显示一次**的密钥卡片（已自动复制）。核心库里只存它的 SHA-256。
 
-**撤销** = 立刻删除该配对记录，那把密钥立即失效（其它配对不受影响）。
+**撤销** = 立刻删除该配对记录，那把密钥立即失效（其它配对不受影响）；同时清掉该配对的免询问授权、
+取消所有挂起审批（审批窗口内撤销也立刻生效）。
 
 **访问方式**（配对卡片右侧菜单可切换）：
 
 | 方式 | 行为 | 切换代价 |
 | --- | --- | --- |
 | `trusted`（可信直通，配对时默认） | 不弹窗，每次访问都写审计 | 需要主密码确认 |
-| `approval`（每次询问） | **每次调用都弹窗**，写明昵称/操作/条目；可勾「本会话内允许读取」 | 不需要，但会立刻锁掉 agent 会话域 |
+| `approval`（每次询问） | 读（普通元数据）会弹窗，可勾「本会话内允许读取」；写/删/恢复/剪贴板逐次弹窗 | 不需要；**不锁** agent 域 |
 
 - 方式 1 的「本会话内允许读取」**只对普通读生效**；敏感读（复制到剪贴板）、写、删
-  永远每次都要同意 —— 否则它就是绕过审批的后门；
-- 写 / 删的弹窗多一行**「详细」**（例如"修改字段：url、password"、"移到回收站（可恢复）"），
-  **只列字段名与动作，绝不显示值**（密码不会出现在屏幕上）；
-- 审批弹窗挂在应用外壳上，跳到任何页面都会弹出；**关掉弹窗 = 拒绝**；
-- 审批超时 45 秒（短于客户端的 `tools/call` 超时）按拒绝处理；
-- 核心在没有 UI 可问时直接拒绝（fail closed）。
+  永远每次都要同意 —— 否则它就是绕过审批的后门。它有**常驻可见指示**（侧边栏全局指示 +
+  配对卡片「免询问中」标签）和**撤销按钮**（单配对 / 一键全部）；在切方式、关开总开关、改主密码、
+  显式锁 agent 域、重置专属密钥、撤销配对时**全部清空**；
+- **审批通过后核心会重读 pairing / item / 总开关并复跑完整策略**再执行：审批期间用户关掉条目开关、
+  撤销配对、删/移入回收站、切换方式、改密码都不会被旧快照覆盖（更新用 `updated_at` CAS，
+  删/恢复用条件语句）。挂起审批在锁域/关开关/切方式/撤销时取消；
+- 写 / 删的弹窗多一行**「详细」**：非秘密字段显示 `old → new`（标题/URL/用户名/文件夹/收藏/自定义字段标签），
+  密码、备注只显示"已修改（值不显示）"；`copy_to_clipboard` 显示要复制的 field；`begin_session` 显示
+  purpose + TTL；`list_entries` 显示筛选条件。**绝不显示任何秘密值**；
+- 审批弹窗挂在应用外壳上，跳到任何页面都会弹出；**关掉弹窗 = 拒绝**；锁屏时**不渲染审批**且只允许拒绝
+  （核心侧也会拒绝锁屏状态下的"同意"）；
+- 审批超时 45 秒（短于客户端的 `tools/call` 超时）按拒绝处理，超时/取消/拒绝**只写一行审计**；
+- **限流**：每配对最多 3 个挂起审批、全局最多 8 个，超限直接 `denied` 不弹窗；UI 队列上限 20，
+  回话期间按钮禁用、下一条延迟 ≥350ms 才可点（防双击批错）；核心在没有 UI 可问时直接拒绝（fail closed）。
 
-### 12.4 客户端配置
+### 12.4 传输规则与客户端配置
 
 端点：`http://127.0.0.1:47821/mcp`，认证方式都是 `Authorization: Bearer <密钥>`。
-四条硬性要求：只支持 `POST`、**不能带 `Origin` 头**、`Host` 必须是回环地址、
-密钥只能放 header（不能放 query）。
+**固定端口**：端口被占用时端点不启动、打开开关失败回滚，**不退化临时端口**（fail closed）。
+
+硬性要求（全部在**读 body 之前**完成；未认证请求不读 256KB、不占连接）：
+
+- 只支持 `POST`（`GET` → 405）；路径只接受 `/mcp`；
+- **不能带 `Origin` 头**（浏览器跨源必带）→ 403；`Host` 必须是 `127.0.0.1:47821` / `localhost:47821` → 否则 403；
+- Bearer 只能放 header（**不接受 query 凭据**）→ 否则 401；密钥只存 SHA-256、先 trim、常量时间比较；
+- body ≤ **256 KB**（413）；body 读取超时 **15s**（408）；整请求超时 **90s**（504，覆盖一次完整的 45s 审批）；
+- 并发上限 **16**，超出直接 503（不排队）；
+- 永不发送 CORS / Server 头；HTTP 层拒绝（401/403/405/413/408/504）也会写一条"未认证"审计。
 
 **DeepSeek Harness**（`~/.dsh/profiles/desktop/cordis.patch.yml`）：
 
@@ -456,41 +506,48 @@ claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
 > Claude Desktop **连不上**：它的远程连接器由 Anthropic 云端发起，到不了 `127.0.0.1`；
 > 本地配置又只支持 stdio。这是客户端限制，不是 EasyPass 的问题。
 
-### 12.5 工具清单（11 个，静态）
+### 12.5 工具清单（11 个，静态，surface v3）
+
+工具面版本 `agentToolSurfaceVersion = '3'`，`initialize` 的 `serverInfo.surfaceVersion` 返回它；
+`begin_session` / `end_session` 标为 `readOnly: false`（开/关窗口是状态变更），`delete_entry`
+`destructive: true`，其余按实际读写标注。
 
 | 工具 | 作用 |
 | --- | --- |
-| `status` | 配对状态、是否解锁、**开放条目数**、活动窗口 |
-| `begin_session` | 开一个批量窗口（`purpose` 必填，**只记入窗口元信息** —— `status.window` 可见，审计表无该列；TTL 30–1800 秒），窗口内不因空闲被打断 |
-| `end_session` | 关闭窗口（**不锁** agent 域，零介入语义） |
-| `list_entries` | 条目**元数据**（名称/类型/文件夹/URL/用户名/有无密码/有无 TOTP） |
+| `status` | 配对状态、是否解锁、**开放条目数**、活动窗口（不走审批） |
+| `begin_session` | 开一个批量窗口（`purpose` 必填，**只记入窗口元信息** —— `status.window` 可见，审计表无该列；TTL 默认 300 秒、范围 30–1800 秒，**越界直接报错**）。窗口只做元信息/提示，不参与授权判定、也不阻止任何锁定 |
+| `end_session` | 关闭窗口，**不锁** agent 域（没有窗口时是空操作） |
+| `list_entries` | 条目**元数据**（名称/类型/文件夹/URL/用户名/有无密码/有无 TOTP），支持 `type/folder/query/limit/cursor` 筛选与分页 |
 | `get_entry` | 单条元数据 |
-| `create_entry` | 新建 login / secure_note；`password: {"generate": true}` 让核心生成并加密入库，**明文不回传**；secure_note 没有 url / username / password 字段（传了返回 `invalidRequest`，不静默忽略） |
-| `update_entry` | 局部更新（没传的字段不动）；只改 login / secure_note 的字段 |
+| `create_entry` | 新建 login / secure_note；`password: {"generate": true, length?, useUpper?, useLower?, useNumbers?, useSymbols?}` 让核心生成并加密入库，**明文不回传**；secure_note 没有 url / username / password 字段（传了返回 `invalidRequest`，不静默忽略） |
+| `update_entry` | 局部更新（没传的字段不动）；只改 login / secure_note 的字段；审批后按最新快照重算并 CAS 落库 |
 | `delete_entry` | **移入回收站**（软删，可恢复）；智能体**永远不能彻底删除** |
 | `list_trash` | 回收站里**对智能体开放**的元数据（带删除时间） |
 | `restore_entry` | 从回收站恢复 |
-| `copy_to_clipboard` | 把字段值写进**系统剪贴板**，只回 `ok` + 长度，**不返回明文** |
+| `copy_to_clipboard` | 把字段值写进**系统剪贴板**，只回 `ok`，**不返回明文，也不返回长度** |
 
 几条硬口径：
 
-- **写 / 删 / 恢复永远逐次审批**（方式 1 下），「本会话内允许读取」只覆盖普通读；
+- **方式 1（逐次审批）下**写 / 删 / 恢复 / 剪贴板**永远每次审批**；「本会话内允许读取」只覆盖普通读，
+  且可见、可撤销、按 §12.3 的边界清空。**方式 2（可信直通）不逐次弹窗**（创建/切换配对时用主密码确认，
+  设置页常驻警示），但每次访问都写审计；
+- **类型硬闸**：只有 login / secure_note 可对智能体开放；identity / SSH 即使 `agent_open=true`
+  也读不到、写不了、复制不了（`typeExposed` 在策略里紧随条目开关判定）。写工具也只支持这两类；
 - 智能体新建的条目**默认对智能体开放**（否则它建完就读不到/改不了/删不掉）；
   用户可随时在条目里改成「永久拒绝」收回 —— **开关本身只能由用户改**；
 - 写 / 删 / 恢复成功后核心会广播变更主题，**UI 列表实时刷新**（不需要用户手动刷新）；
-- **审批前先过硬闸预检**（`AgentAccessPolicy.precheck`）：条目「永久拒绝」/ 越界 / 配对
-  失效时**直接拒绝、不弹审批**，同样写一条 `denied` 审计 —— 避免智能体诱导无意义弹窗
-  （审批疲劳是社会工程入口）。预检不替代最终判定：审批期间条目开关可能被用户改掉，
-  `_gate` 之后仍会再走一次完整 `evaluate`；
-- 审批弹窗对写 / 删会多一行「详细」（**只列字段名与动作**，不含任何值）；
+- **审批前先过硬闸预检**（`AgentAccessPolicy.precheck`）：条目「永久拒绝」/ 类型不暴露 / 越界 /
+  配对失效时**直接拒绝、不弹审批**，同样写一条 `denied` 审计 —— 避免智能体诱导无意义弹窗
+  （审批疲劳是社会工程入口）。预检不替代审批后的完整判定（见 §12.3）；
+- **审计**：一次调用一行，decision `allowed` / `allowed_standing` / `denied` / `timeout` / `error`；
+  剪贴板审计的 `op` 记 `clipboard:<field>`；HTTP 层拒绝记 `nickname=未认证 / tool=http`；
+  表保留最近 **1000** 条（启动后后台裁剪 + 运行期每 100 条写入触发裁剪）；
 - 智能体没有"彻底删除 / 清空回收站"的能力：`delete_entry` 只做软删，
-  彻底删除只由用户在 回收站 界面操作；
-- **身份信息 / SSH 密钥条目有意不对智能体开放**（产品决定，不是技术限制）：写工具只支持
-  login / secure_note，且这两类在条目级开关上默认/建议保持「永久拒绝」；
+  彻底删除只由用户在 回收站 界面操作；"删除所有数据"会同时清 agent 审计 / 配对 / wrap+DPAPI blob 并停 MCP；
 - TOTP 工具（`totp_code`）**待定**：当前用 `copy_to_clipboard` 的 `field:'totp'` 覆盖；
   用户暂未使用 TOTP，是否单独开工具等有真实需求再定；
-- 业务上限：名称 ≤200 字符、备注 ≤100000 字符、单字段 ≤5000 字符、自定义字段 ≤50 个
-  （防止一次调用把库撑爆）。
+- 业务上限：名称 ≤200 字符、备注 ≤100000 字符、单字段 ≤5000 字符、自定义字段 ≤50 个、
+  purpose ≤500 字符（防止一次调用把库撑爆）。
 
 侧边栏 → **智能体活动**（回收站上方；**未开启总开关时该入口隐藏**）：
 按时间倒序列出每次访问（昵称 / 工具 / 操作 / 条目 / 结果）。页面是**实时**的
@@ -498,16 +555,20 @@ claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
 数据来自 `agent_audit` 表；结果分 `allowed` / `allowed_standing`（本会话免询问放行）×
 `denied` / `timeout` / `error`；**界面同样不显示密钥与明文**（表里也没有）。
 
-字段侧：`password` / `totp` / `notes` / `private_key` / `passphrase` / `custom`（配 `customLabel`）。
+剪贴板字段侧：`password` / `totp` / `notes` / `custom`（配 `customLabel`）—— identity / SSH 专属字段
+（`private_key` / `passphrase`）**已从工具面移除**。
 
 ### 12.6 条目级开关
 
 每个条目有「允许智能体访问：**开放 / 永久拒绝**」，默认**永久拒绝**（存量条目无需迁移）。
 开关落在**加密载荷** `EntryPayload.agentAccess` 里，不出现在明文列。
+菜单**只对 login / secure_note 显示**；编辑页对 identity / SSH 隐藏该开关，类型切换到 identity / SSH 时
+强制关掉它；导入时非暴露类型强制 `agentOpen=false`（见 `data-model.md` §5）。
 可见位置：条目编辑页（可改）、条目详情页（只读展示）、条目列表（机器人图标标识）。
 
 - 「永久拒绝」是**硬闸**：任何方式、任何 scope 都读不到、复制不了、**也改不了、删不掉**；
-- `copy_to_clipboard`、`update_entry`、`delete_entry`、`restore_entry` 同样受它约束。
+- **类型硬闸**：identity / SSH 根本不进智能体可见集合（即使载荷里残留 `agent_open=true`）；
+- `copy_to_clipboard`、`update_entry`、`delete_entry`、`restore_entry` 同样受这两道闸约束。
 - 例外仅一条：**智能体自己新建的条目默认开放**（见 §12.5），否则它无法继续管理自己建的东西；
   用户改为「永久拒绝」后立即生效。
 
@@ -520,30 +581,42 @@ claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
 - 回收站里的条目**仍会被主密码轮换重新加密**（否则恢复后永久解不开）；
 - 彻底删除与清空只存在于 UI 动作面（智能体做不到）；
 - 删除时会给一个 SnackBar「已移到回收站 / 撤销」——"删了就没了"是本地密码管理器
-  最不该让用户踩的坑。
+  最不该让用户踩的坑；
+- **"删除所有数据"连智能体数据一起清**：停 MCP、清 `agent_audit`、删全部 `agent.pairing.*`、
+  wipe wrap + DPAPI blob，然后事务内删 entries/folders；返回 `agentDataCleared`。
 
 ### 12.8 安全边界（不要过度承诺）
 
-- 专属密钥由 DPAPI 保护：**别的 Windows 用户、拷贝到别的机器都解不开**；
+- 专属密钥由 DPAPI 保护：**别的 Windows 用户、拷贝到别的机器都解不开**；启动自动解封还会校验
+  `vault.keyId`（改密中断留下的旧包裹会被拒绝，fail closed 不启 MCP）；
+- 改密的**整库重加密 + 轮换日志（目标 salt/verifier）+ `agent.wrap` + 新 `vault.keyId` 在同一个
+  SQLite 事务里**提交；校验材料随后由 `completeRotation` 写盘，失败时保留日志、下次解锁重试
+  （"有日志 ⇒ 只有日志里的目标密码有效"）。不存在"旧包裹配新库"的窗口；
 - 配对密钥只是 MCP 的**身份凭据**，不参与任何解包 —— 泄露它不能解密数据库；
 - 但**同用户的恶意进程**既读得到 DPAPI blob 也读得到库文件，这是本项目的既有边界；
-- 明文只在"核心 → 系统剪贴板"之间移动，**永远不进模型上下文**；
+- **剪贴板是"明文不出核"的唯一例外**：值会进系统剪贴板，同用户进程 / `Win+V` 历史 /
+  云剪贴板同步都可能读到；没有自动清除。剪贴板写入用绝对路径的 PowerShell 子进程 + 写后回读校验
+  （这是"零新增进程"目标的一处已知例外）；
 - 写/删只是改了 `deleted_at` 或密文内容，**恢复语义不扩大攻击面**：能写的前提仍是
-  "条目开放 + 本次用户同意（或可信配对）"；
+  "条目开放 + 类型暴露 + 本次用户同意（或可信配对）"；
 - 审计落库在 `agent_audit` 表（schema 5）：只记昵称/工具/条目/结果，**不记密钥、不记明文参数**；
-  表保留最近 **1000** 条（核心启动后**后台**裁剪，不阻塞 UI 就绪）。
+  表保留最近 **1000** 条（启动后**后台**裁剪 + 运行期每 100 条裁剪一次，不阻塞 UI 就绪）；
+- **配对用量统计未实现**：配对记录里的 `calls` / `lastUsedAt` 字段没有更新方，恒为 0/null；
+  以 `agent_audit` 为准。
 
 ### 12.9 常见排障
 
 | 现象 | 原因 |
 | --- | --- |
 | `denied (notTrusted)` | 配对不是 trusted：撤销后重新配对（配对时会要主密码） |
-| `locked` | agent 域没解锁：确认总开关是开的，或重启核心让它自动解封 |
-| 连不上 / 401 | `daemon.json` 里没有 `mcpPort`（没开开关），或密钥被撤销 |
-| 工具里只有部分条目 | 其余条目是「永久拒绝」 |
-| `denied (entryClosed)`（写/删时） | 该条目没有对智能体开放；先去条目编辑页打开开关 |
+| `locked` | agent 域被显式锁定/没解封：设置 → 智能体访问 → **解锁智能体会话**（需主密码）；或关开一次总开关 |
+| 连不上 / 401 | `daemon.json` 里没有 `mcpPort`（没开开关/MCP 启动失败），或密钥被撤销 |
+| 设置页显示"MCP 未运行" / `mcpError` | 固定端口 47821 被占用或监听失败：释放端口后关开开关/重置专属密钥重试（不会退化临时端口） |
+| 工具里只有部分条目 | 其余条目是「永久拒绝」或 identity/SSH 类型（类型硬闸） |
+| `denied (entryClosed)` / `typeNotExposed` | 条目没开放 / 类型不对智能体暴露 |
 | `invalidRequest: 在回收站里` | 改 / 删回收站条目；先 `restore_entry` 或者让用户恢复 |
-| 端口不是 47821 | 固定端口被占用，退化为临时端口；以 `daemon.json` 为准 |
+| `denied` + "审批请求过多" | 触发审批限流（3/配对、8/全局）：等挂起审批结束再重试 |
+| 审批弹窗消失/返回 denied | 45s 超时、用户拒绝、锁屏、或配对被撤销/切方式（挂起审批会被取消） |
 
 ---
 
@@ -559,17 +632,24 @@ claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
 
 ```powershell
 # 常量
-Select-String lib\core\constants\app_constants.dart -Pattern 'pbkdf2|aesIv|bridgeProtocolVersion|coreVersion|coreFixedPort'
+Select-String lib\core\constants\app_constants.dart -Pattern 'pbkdf2|aesIv|bridgeProtocolVersion|coreVersion|coreFixedPort|coreMcpFixedPort'
 # schema（应为 5）
 Select-String lib\data\database\database.dart -Pattern 'schemaVersion => \d'
-# 动作规模（应为 ui=43 / bridge=10 / agent=0）
+# 动作规模（应为 ui=44 / bridge=10 / agent=0）
 $t = Get-Content -Raw lib\protocol\actions.dart
 [regex]::Matches($t,'(?s)bridgeAllowed = \{(.*?)\};')[0].Groups[1].Value.Split(',').Where({$_.Trim()}).Count
 [regex]::Matches($t,'(?s)uiAllowed = \{(.*?)\};')[0].Groups[1].Value.Split(',').Where({$_.Trim()}).Count
 [regex]::Matches($t,'(?s)agentAllowed = <String>\{(.*?)\};')[0].Groups[1].Value.Split(',').Where({$_.Trim()}).Count
-# MCP 工具面（应为 11；工具面版本 2）
+# MCP 工具面（应为 11；工具面版本 3）
 Select-String lib\mcp\mcp_tools.dart -Pattern "name: '|agentToolSurfaceVersion ="
 # 事件与主题
 Select-String lib\protocol\events.dart -Pattern "static const String \w+ = '"
+# 测试文件 / 用例：文件数可静态数；用例数以 flutter test 实跑输出为准
+(Get-ChildItem test -Filter *_test.dart).Count      # 测试文件数（不含 helper）
+flutter test --no-pub                                # 全量用例数/通过数以此为准
 ```
+
+> 版本号四处（pubspec / 设置页 / manifest / .iss）由
+> `node browser_extension/tools/check_extension.mjs` 校验。**文档里的数字（动作数/工具数/schema/端口/
+> 超时/测试数）一律用上面的命令重新生成，不手抄。**
 
