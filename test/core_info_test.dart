@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:easypass/core/constants/app_constants.dart';
 import 'package:easypass/core_service/core_info.dart';
 import 'package:easypass/protocol/protocol.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 
 /// `daemon.json`（发现文件）的解析与"陈旧核心"判定。
 ///
@@ -81,6 +83,102 @@ void main() {
       expect(CoreInfo.tryParse('{not json'), isNull);
       expect(CoreInfo.tryParse('[]'), isNull);
       expect(CoreInfo.tryParse('null'), isNull);
+    });
+  });
+
+  group('CoreDiscovery（daemon.json 原子读写 / fail closed）', () {
+    late Directory tempDir;
+    late File infoFile;
+
+    CoreInfo withPort(int port, {int? mcpPort}) => CoreInfo(
+          port: port,
+          token: 'a' * 64,
+          pid: 4242,
+          coreVersion: '3.1.0',
+          exe: r'C:\app\core\easypass_core.exe',
+          mcpPort: mcpPort,
+        );
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('easypass_daemon_info_');
+      infoFile = File(p.join(tempDir.path, 'daemon.json'));
+      CoreDiscovery.debugSetInfoFileForTesting(infoFile);
+    });
+
+    tearDown(() {
+      CoreDiscovery.debugSetInfoFileForTesting(null);
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {
+        // 清理尽力而为。
+      }
+    });
+
+    test('文件不存在 ⇒ 返回 null（可以安全拉起核心）', () async {
+      expect(await CoreDiscovery.read(), isNull);
+    });
+
+    test('写入后能原样读回，且不残留 .tmp 临时文件', () async {
+      await CoreDiscovery.write(withPort(47820, mcpPort: 47821));
+
+      final readBack = await CoreDiscovery.read();
+      expect(readBack, isNotNull);
+      expect(readBack!.port, 47820);
+      expect(readBack.token, 'a' * 64);
+      expect(readBack.pid, 4242);
+      expect(readBack.mcpPort, 47821);
+      expect(File('${infoFile.path}.tmp').existsSync(), isFalse,
+          reason: '原子写完成后不应留下临时文件');
+    });
+
+    test('再次写入会替换旧内容（覆盖已有目标文件）', () async {
+      await CoreDiscovery.write(withPort(1));
+      await CoreDiscovery.write(withPort(2));
+
+      final readBack = await CoreDiscovery.read();
+      expect(readBack!.port, 2);
+      expect(File('${infoFile.path}.tmp').existsSync(), isFalse);
+    });
+
+    test('写出的内容是完整合法 JSON（可被 CoreInfo.tryParse 解析）', () async {
+      await CoreDiscovery.write(withPort(7));
+      expect(CoreInfo.tryParse(await infoFile.readAsString()), isNotNull);
+    });
+
+    test('文件被截断 / 不是合法 JSON ⇒ 抛 CoreDiscoveryException', () async {
+      await infoFile.writeAsString('{"port": 47820, "token": "abc"');
+      await expectLater(
+        CoreDiscovery.read(),
+        throwsA(isA<CoreDiscoveryException>()),
+        reason: '文件存在但读不懂时不能当成"没有核心"（否则 --lock 会 fail-open）',
+      );
+    });
+
+    test('合法 JSON 但缺必需字段 ⇒ 抛 CoreDiscoveryException', () async {
+      await infoFile.writeAsString('{}');
+      await expectLater(
+        CoreDiscovery.read(),
+        throwsA(isA<CoreDiscoveryException>()),
+      );
+    });
+
+    test('内容不是合法 UTF-8 ⇒ 抛 CoreDiscoveryException', () async {
+      await infoFile.writeAsBytes([0xff, 0xfe, 0x00, 0x01]);
+      await expectLater(
+        CoreDiscovery.read(),
+        throwsA(isA<CoreDiscoveryException>()),
+      );
+    });
+
+    test('异常带文件路径，便于用户定位要删哪个文件', () async {
+      await infoFile.writeAsString('not json');
+      try {
+        await CoreDiscovery.read();
+        fail('应当抛出 CoreDiscoveryException');
+      } on CoreDiscoveryException catch (error) {
+        expect(error.path, infoFile.path);
+        expect(error.message, contains('daemon.json'));
+      }
     });
   });
 }

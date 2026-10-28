@@ -175,6 +175,14 @@ abstract class VaultApi {
   /// 智能体审批请求流（方式 1）：UI 收到后弹窗，再用 [respondAgentApproval] 回话。
   Stream<Map<String, dynamic>> get agentApprovalRequests;
 
+  /// 审批请求结束流（响应/超时/取消）：UI 据此关掉陈旧弹窗。
+  ///
+  /// 载荷：`{approvalId, decision}`。
+  Stream<Map<String, dynamic>> get agentApprovalResolved;
+
+  /// 撤销某个配对的「本会话内允许读取」。返回 false = 配对不存在。
+  Future<bool> clearStandingRead(String pairingId);
+
   /// 回应一次审批请求；返回 false 表示该请求已过期/不存在。
   ///
   /// [allowStandingRead] 对应弹窗里的「本会话内允许读取」：**只对普通读生效**，

@@ -55,8 +55,8 @@ const List<McpTool> agentTools = <McpTool>[
   McpTool(
     name: 'begin_session',
     description:
-        '为批量操作开一个显式窗口（purpose 必填，记入窗口元信息，status 可见；'
-        '窗口内不会被空闲锁定打断）。',
+        '为批量操作开一个显式窗口（purpose 必填，记入窗口元信息，status 可见）。'
+        '窗口只用于元信息/提示，不参与授权判定。',
     inputSchema: {
       'type': 'object',
       'properties': {
@@ -71,11 +71,13 @@ const List<McpTool> agentTools = <McpTool>[
       'required': ['purpose'],
       'additionalProperties': false,
     },
+    readOnly: false,
   ),
   McpTool(
     name: 'end_session',
-    description: '结束窗口，并**立即锁定智能体会话域**。',
+    description: '结束窗口，**不锁定**会话域（没有窗口时是空操作）。',
     inputSchema: {'type': 'object', 'properties': {}, 'additionalProperties': false},
+    readOnly: false,
   ),
   McpTool(
     name: 'list_entries',
@@ -125,8 +127,23 @@ const List<McpTool> agentTools = <McpTool>[
         'url': {'type': 'string'},
         'username': {'type': 'string'},
         'password': {
-          'description': '字符串，或 {"generate": true, "length"?: int, '
-              '"useSymbols"?: bool} 让核心生成（明文不回传）',
+          'description': '字符串，或 {"generate": true, ...} 让核心生成（明文不回传）',
+          'oneOf': [
+            {'type': 'string'},
+            {
+              'type': 'object',
+              'properties': {
+                'generate': {'type': 'boolean', 'const': true},
+                'length': {'type': 'integer', 'minimum': 8, 'maximum': 128},
+                'useUpper': {'type': 'boolean'},
+                'useLower': {'type': 'boolean'},
+                'useNumbers': {'type': 'boolean'},
+                'useSymbols': {'type': 'boolean'},
+              },
+              'required': ['generate'],
+              'additionalProperties': false,
+            },
+          ],
         },
         'notes': {'type': 'string'},
         'customFields': {
@@ -169,7 +186,23 @@ const List<McpTool> agentTools = <McpTool>[
         'url': {'type': 'string'},
         'username': {'type': 'string'},
         'password': {
-          'description': '字符串，或 {"generate": true} 让核心生成',
+          'description': '字符串，或 {"generate": true, ...} 让核心生成',
+          'oneOf': [
+            {'type': 'string'},
+            {
+              'type': 'object',
+              'properties': {
+                'generate': {'type': 'boolean', 'const': true},
+                'length': {'type': 'integer', 'minimum': 8, 'maximum': 128},
+                'useUpper': {'type': 'boolean'},
+                'useLower': {'type': 'boolean'},
+                'useNumbers': {'type': 'boolean'},
+                'useSymbols': {'type': 'boolean'},
+              },
+              'required': ['generate'],
+              'additionalProperties': false,
+            },
+          ],
         },
         'isFavorite': {'type': 'boolean'},
         'customFields': {
@@ -237,8 +270,6 @@ const List<McpTool> agentTools = <McpTool>[
             'password',
             'totp',
             'notes',
-            'private_key',
-            'passphrase',
             'custom',
           ],
           'description': '要复制的字段，默认 password',
@@ -265,7 +296,10 @@ final Set<String> agentToolNames = {
 ///
 /// 1 → 2（3.1.0 阶段 2）：新增 create / update / delete / list_trash / restore，
 /// `status.entryCount` 的语义也从"此刻可读条数"改成"开放条数"。
-const String agentToolSurfaceVersion = '2';
+/// 2 → 3（评审修复）：begin/end_session 显式标为写工具（开/关窗口是状态变更）、
+/// password 生成参数进 schema、从工具面移除 identity/SSH 专属字段
+/// （`private_key` / `passphrase`；identity/SSH 条目本来就不会对智能体开放）。
+const String agentToolSurfaceVersion = '3';
 
 /// 引用了协议层的错误码，避免 MCP 层另造一套字符串。
 class McpErrorCodes {

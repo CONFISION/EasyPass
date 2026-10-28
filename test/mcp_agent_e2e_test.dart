@@ -46,6 +46,7 @@ void main() {
   late int port;
   late File tempBlob;
   late List<String> clipboardWrites;
+  late AgentAccessStore accessStore;
 
   setUp(() async {
     db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -55,6 +56,10 @@ void main() {
     sessions.agent.unlock(key);
     tempBlob = File('${Directory.systemTemp.path}'
         '\\easypass-e2e-agent-${DateTime.now().microsecondsSinceEpoch}.dpapi');
+    accessStore = AgentAccessStore(db, blobFile: tempBlob);
+    // 生产环境 MCP 只在总开关打开时监听；审批后的复核会读这个开关，
+    // 所以集成测试必须把它打开（"总开关关闭"的用例自己再关掉）。
+    await accessStore.setEnabled(true);
 
     repository = VaultRepository(
       db: db,
@@ -116,7 +121,7 @@ void main() {
       repository: repository,
       sessions: sessions,
       pairingStore: pairingStore,
-      agentAccess: AgentAccessStore(db, blobFile: tempBlob),
+      agentAccess: accessStore,
       totpService: TotpService(),
       // 注入假剪贴板：并行跑测试时不要真的去抢系统剪贴板。
       clipboardWriter: (text) async {
@@ -241,7 +246,7 @@ void main() {
     expect(closed['errorCode'], 'denied');
   });
 
-  test('copy_to_clipboard：只回 ok 与长度，绝不回传明文', () async {
+  test('copy_to_clipboard：只回 ok 与字段名，绝不回传明文（也不回长度）', () async {
     final payload = await callToolPayload(
       trustedKey,
       'copy_to_clipboard',
@@ -250,7 +255,8 @@ void main() {
 
     expect(payload['ok'], isTrue);
     expect(payload['field'], 'password');
-    expect(payload['length'], password.length);
+    // 长度也是可被用来缩小密码搜索空间的旁路（D10）：不回。
+    expect(payload.containsKey('length'), isFalse);
     // 整个响应里不能出现密码本身。
     expect(jsonEncode(payload).contains(password), isFalse);
     // 值确实走到了剪贴板写入器（但不在响应里）。
@@ -425,6 +431,7 @@ void main() {
   });
 
   test('总开关关闭时：end_session 兜底锁掉 agent 域', () async {
+    await accessStore.setEnabled(false);
     await callToolPayload(trustedKey, 'end_session');
     expect(sessions.agent.isUnlocked, isFalse);
   });
@@ -478,6 +485,11 @@ void main() {
         containsAll(['list_entries', 'get_entry', 'copy_to_clipboard']));
     expect(rows.every((r) => r.nickname == 'DSH（工作机）'), isTrue);
     expect(rows.every((r) => r.decision == 'allowed'), isTrue);
+    // 剪贴板审计必须带字段名（M4：文档承诺"按条目与字段名审计"，但不记值）。
+    expect(
+      rows.firstWhere((r) => r.tool == 'copy_to_clipboard').op,
+      'clipboard:password',
+    );
     expect(await db.countAgentAudit(), greaterThanOrEqualTo(3));
 
     // 库里不能出现密钥或明文密码。
@@ -774,7 +786,7 @@ void main() {
       );
       expect(updated['updatedFields'], ['name']);
       expect(requests.last['op'], 'write');
-      expect(requests.last['detail'], contains('name'));
+      expect(requests.last['detail'], contains('标题'));
 
       final deleted = await callToolPayload(
         approvalKey,
@@ -910,5 +922,95 @@ void main() {
       expect(rows.where((r) => r.tool == 'restore_entry').single.decision,
           'allowed');
     });
+  });
+
+  // ─── 评审修复回归（H3 / H5 / H9 的 HTTP 链路）────────────
+
+  test('H3：agent 域锁定时单条目工具报 locked，不报 notFound、不弹审批', () async {
+    var approvals = 0;
+    actions.onApprovalRequested = (request) {
+      approvals++;
+      scheduleMicrotask(() {
+        actions.respondApproval(request['approvalId'] as String, true);
+      });
+    };
+    addTearDown(() => actions.onApprovalRequested = null);
+
+    // 模拟「用户显式锁定智能体会话」：ui 可用、agent 域锁。
+    final uiKey = Uint8List.fromList(List<int>.filled(32, 9));
+    sessions.ui.unlock(Uint8List.fromList(uiKey));
+    sessions.agent.lock();
+
+    final locked =
+        await callToolPayload(approvalKey, 'get_entry', {'id': 'e-open'});
+    expect(locked['errorCode'], 'locked');
+    expect(approvals, 0, reason: '锁定态弹审批也借不到钥匙，不该打扰用户');
+
+    // 对照：list_entries 仍走审批 + 借 ui 钥匙（这是窗口期内的合法路径）。
+    final listed = await callToolPayload(approvalKey, 'list_entries');
+    expect(approvals, 1);
+    expect((listed['entries'] as List), isNotEmpty);
+    expect(sessions.agent.isUnlocked, isFalse, reason: '借来的钥匙用后必须锁回');
+  });
+
+  test('H5：identity / SSH 条目即使 agentOpen 也不能被读 / 复制 / 写', () async {
+    await repository.saveItem(VaultItem(
+      id: 'e-ssh',
+      type: EntryType.sshKey,
+      name: 'prod-key',
+      agentOpen: true,
+      sshKey: const SshKeyData(
+        privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nSECRET\n',
+        passphrase: 'ssh-pass',
+      ),
+      createdAt: 1,
+      updatedAt: 2,
+    ));
+
+    final read = await callToolPayload(trustedKey, 'get_entry', {'id': 'e-ssh'});
+    expect(read['errorCode'], 'denied');
+
+    final list = await callToolPayload(trustedKey, 'list_entries');
+    expect((list['entries'] as List).any((e) => e['id'] == 'e-ssh'), isFalse);
+
+    // 工具面已移除 private_key，服务端仍拒绝（纵深防御）。
+    final copied = await callToolPayload(
+      trustedKey,
+      'copy_to_clipboard',
+      {'id': 'e-ssh', 'field': 'private_key'},
+    );
+    expect(copied['errorCode'], 'invalidRequest');
+    expect(clipboardWrites, isEmpty);
+
+    final updated = await callToolPayload(
+      trustedKey,
+      'update_entry',
+      {'id': 'e-ssh', 'name': '改名'},
+    );
+    expect(updated['errorCode'], 'denied', reason: '类型硬闸：identity/SSH 不可写');
+  });
+
+  test('H9：update 审批详细展示非秘密字段 old→new，密码只显示"已修改"', () async {
+    late Map<String, Object?> captured;
+    actions.onApprovalRequested = (request) {
+      captured = request;
+      scheduleMicrotask(() {
+        actions.respondApproval(request['approvalId'] as String, false);
+      });
+    };
+    addTearDown(() => actions.onApprovalRequested = null);
+
+    final payload = await callToolPayload(approvalKey, 'update_entry', {
+      'id': 'e-open',
+      'url': 'https://evil.example',
+      'password': 'new-secret-value',
+    });
+    expect(payload['errorCode'], 'denied');
+    final detail = captured['detail'] as String;
+    expect(detail, contains('https://evil.example'), reason: '必须能看到新 URL');
+    expect(detail, contains('→'));
+    expect(detail, isNot(contains('new-secret-value')),
+        reason: '秘密值不能进审批弹窗');
+    expect(detail, contains('密码：已修改（值不显示）'));
   });
 }

@@ -15,13 +15,27 @@ import 'core_info.dart';
 /// 它自己不碰数据库、不持密钥 —— 这样"扩展每次连接都起一个新核心实例"
 /// 那个老问题从结构上消失。
 Future<int> runBridgeForwarder() async {
-  var info = await CoreDiscovery.read();
+  // daemon.json 存在但损坏属于"发现信息不可信"：拉起新核心会与仍在运行的
+  // 核心抢单实例/数据库，所以这里 fail closed（与 UI 侧同一口径）。
+  final CoreInfo? initial;
+  try {
+    initial = await CoreDiscovery.read();
+  } on CoreDiscoveryException catch (error) {
+    stderr.writeln('easypass_core: --bridge 发现文件损坏：$error');
+    return 1;
+  }
+  var info = initial;
   if (info == null) {
     if (!await launchCoreIfPresent()) {
       stderr.writeln('easypass_core: --bridge 找不到核心，也找不到核心可执行文件');
       return 1;
     }
-    info = await waitForCore();
+    try {
+      info = await waitForCore();
+    } on CoreDiscoveryException catch (error) {
+      stderr.writeln('easypass_core: --bridge 等待核心时发现文件损坏：$error');
+      return 1;
+    }
     if (info == null) {
       stderr.writeln('easypass_core: --bridge 等待核心就绪超时');
       return 1;
@@ -42,7 +56,12 @@ Future<int> runBridgeForwarder() async {
       stderr.writeln('easypass_core: --bridge 无法拉起核心');
       return 1;
     }
-    info = await waitForCore();
+    try {
+      info = await waitForCore();
+    } on CoreDiscoveryException catch (error) {
+      stderr.writeln('easypass_core: --bridge 等待核心时发现文件损坏：$error');
+      return 1;
+    }
     if (info == null) {
       stderr.writeln('easypass_core: --bridge 等待核心就绪超时');
       return 1;

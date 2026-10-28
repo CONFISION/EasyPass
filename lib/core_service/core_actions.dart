@@ -52,6 +52,11 @@ class CoreActions {
     required AgentPairingStore pairingStore,
     required AgentAccessStore agentAccess,
     this.onAgentAccessChanged,
+    this.onAgentMcpStatus,
+    this.onIsStandingRead,
+    this.onClearStandingRead,
+    this.onClearAllStandingRead,
+    this.onCancelPendingApprovals,
     required this.onDataChanged,
   })  : _db = db,
         _cryptoService = cryptoService,
@@ -75,9 +80,27 @@ class CoreActions {
 
   /// 总开关变化回调：核心用它启动 / 停止 MCP 监听。
   ///
+  /// **返回 MCP 端点是否真的启动/停止成功**：旧实现是 fire-and-forget 的
+  /// `void`，快速切换或启动失败时会留下"DB 说开着、端口没监听"的假状态。
   /// 非 final：测试要断言"开关切换时到底通知了什么"，而生产装配顺序是
   /// 先建 `CoreActions` 再建 `CoreService`（回调要指向后者）。
-  void Function(bool enabled)? onAgentAccessChanged;
+  Future<bool> Function(bool enabled)? onAgentAccessChanged;
+
+  /// 查询 MCP 端点真实运行态：`{mcpRunning, mcpPort?, mcpError?}`。
+  Map<String, Object?> Function()? onAgentMcpStatus;
+
+  /// 某配对是否处于「本会话内允许读取」（UI 指示/撤销用）。
+  bool Function(String pairingId)? onIsStandingRead;
+
+  /// 撤销某个配对的免询问读取；清空全部（锁域/切方式/关开开关/改密时调用）。
+  void Function(String pairingId)? onClearStandingRead;
+  void Function()? onClearAllStandingRead;
+
+  /// 取消所有挂起审批（锁域/切方式/关开关/改密/撤销配对时调用）。
+  void Function()? onCancelPendingApprovals;
+
+  void _clearAllStandingRead() => onClearAllStandingRead?.call();
+  void _cancelPendingApprovals() => onCancelPendingApprovals?.call();
 
   /// 智能体审批回应回调（方式 1）：`(approvalId, allow, allowStandingRead) -> ok`。
   bool Function(String approvalId, bool allow, bool allowStandingRead)?
@@ -202,6 +225,8 @@ class CoreActions {
         return _respondAgentApproval(params);
       case Actions.listAgentAudit:
         return _listAgentAudit(params);
+      case Actions.clearStandingRead:
+        return _clearStandingRead(params);
       default:
         throw CoreActionException(
           ErrorCodes.unsupported,
@@ -228,6 +253,9 @@ class CoreActions {
             'createdAt': p.createdAt,
             'lastUsedAt': p.lastUsedAt,
             'calls': p.calls,
+            // 免询问状态必须让用户看得见、可撤销（spec §6.3）：UI 用它渲染
+            // "本会话免询问中" 与撤销按钮；撤销动作见 `clearStandingRead`。
+            'standingRead': onIsStandingRead?.call(p.id) ?? false,
             // **不返回 keyHash**：UI 不需要它，少一处泄露面。
           },
       ],
@@ -302,6 +330,10 @@ class CoreActions {
       throw CoreActionException(ErrorCodes.notFound, '配对不存在');
     }
     await _pairingStore.delete(id);
+    // 撤销是不可逆的授权收回：该配对已挂起的审批必须立刻失效（否则用户
+    // 在审批窗口里撤销配对，agent 的那次调用仍会执行），免询问授权一并清掉。
+    onClearStandingRead?.call(id);
+    _cancelPendingApprovals();
     return {
       'ok': true,
       'agentUnlocked': _sessions.agent.isUnlocked,
@@ -322,9 +354,13 @@ class CoreActions {
       await _pairingStore.save(
         pairing.copyWith(mode: AgentMode.approval, trusted: false),
       );
-      // 切回逐次审批 ⇒ 立刻锁 agent 域（§6.5）。
-      _sessions.agent.lock();
-      return {'ok': true, 'agentUnlocked': false};
+      // 方式切换 = 授权模型变化：清空免询问授权、取消挂起审批。
+      // **不锁 agent 域**：3.1.0 修复后 agent 域只随总开关/显式锁定/核心退出
+      // 变化；在这里锁域会让方式 1 的单条目工具拿不到钥匙、审批弹窗都不出现
+      // （旧实现的真实 bug，见评审 H2/H3）。
+      _clearAllStandingRead();
+      _cancelPendingApprovals();
+      return {'ok': true, 'agentUnlocked': _sessions.agent.isUnlocked};
     }
     if (modeName != 'trusted') {
       throw CoreActionException(ErrorCodes.invalidRequest, '未知的访问方式');
@@ -334,6 +370,8 @@ class CoreActions {
     await _pairingStore.save(
       pairing.copyWith(mode: AgentMode.trusted, trusted: true),
     );
+    _clearAllStandingRead();
+    _cancelPendingApprovals();
     return {'ok': true, 'agentUnlocked': true};
   }
 
@@ -343,14 +381,36 @@ class CoreActions {
   }
 
   Future<Map<String, dynamic>> _lockAgentDomain() async {
+    _clearAllStandingRead();
+    _cancelPendingApprovals();
     _sessions.agent.lock();
     return {'ok': true, 'agentUnlocked': false};
   }
 
-  Future<Map<String, dynamic>> _getAgentAccessState() async => {
-        'agentUnlocked': _sessions.agent.isUnlocked,
-        'enabled': await _agentAccess.isEnabled(),
-      };
+  Future<Map<String, dynamic>> _getAgentAccessState() async {
+    final runtime = onAgentMcpStatus?.call() ?? const <String, Object?>{};
+    return {
+      'agentUnlocked': _sessions.agent.isUnlocked,
+      'enabled': await _agentAccess.isEnabled(),
+      // 真实端点状态（不是 DB 里的开关标记）。历史测试/假实现没有这个回调时
+      // 退化为 enabled：至少不比旧行为更差，生产装配一定有回调。
+      'mcpRunning': runtime['mcpRunning'] ?? await _agentAccess.isEnabled(),
+      'mcpPort': runtime['mcpPort'],
+      if (runtime['mcpError'] != null) 'mcpError': runtime['mcpError'],
+    };
+  }
+
+  /// 撤销某个配对的「本会话内允许读取」。
+  Future<Map<String, dynamic>> _clearStandingRead(
+    Map<String, dynamic> params,
+  ) async {
+    final id = params['id'] as String? ?? '';
+    if (id.isEmpty) {
+      throw CoreActionException(ErrorCodes.invalidRequest, 'id 必填');
+    }
+    onClearStandingRead?.call(id);
+    return {'ok': true};
+  }
 
   /// 方式 1 的审批回应：由 UI 弹窗调用（见 [onAgentApprovalResponse]）。
   Future<Map<String, dynamic>> _respondAgentApproval(
@@ -360,8 +420,18 @@ class CoreActions {
     if (approvalId.isEmpty) {
       throw CoreActionException(ErrorCodes.invalidRequest, 'approvalId 必填');
     }
+    // fail closed：UI 域锁着时**只允许拒绝**，不允许批准。锁屏弹窗已由 UI
+    // 直接拒绝；这是核心侧纵深防御（防伪造/竞态）。允许 deny 是为了让 UI
+    // 在锁屏时能主动把挂起请求清掉，而不是干等 45s 超时。
     final allow = params['allow'] == true;
+    final uiLocked = !_sessions.ui.isUnlocked;
+    if (uiLocked && allow) {
+      throw CoreActionException(ErrorCodes.locked, '保险库已锁定，无法批准智能体请求');
+    }
     final allowStanding = params['allowStandingRead'] == true;
+    // 审批点击本身算用户活动：否则用户停在审批弹窗上时会被自动锁定
+    // （弹窗在活动监听层之上，点击不会触发 touchActivity）。
+    _sessions.ui.touch();
     final handler = onAgentApprovalResponse;
     if (handler == null) {
       return {'ok': false};
@@ -408,11 +478,31 @@ class CoreActions {
     }
     final agentKey = AgentKeyMaterial.generateAgentKey();
     final wrapped = AgentKeyMaterial.wrap(vaultKey: vaultKey, agentKey: agentKey);
-    await _agentAccess.storeAgentKey(agentKey);
+    try {
+      await _agentAccess.storeAgentKey(agentKey);
+    } finally {
+      agentKey.fillRange(0, agentKey.length, 0);
+    }
     await _agentAccess.writeWrap(wrapped);
     await _agentAccess.setEnabled(true);
+    // 记录当前库钥匙的指纹：启动自动解封时用它拒绝"改密中断留下的旧包裹"。
+    await _db.setMeta('vault.keyId', AgentKeyMaterial.keyId(vaultKey));
     _sessions.agent.unlock(Uint8List.fromList(vaultKey));
-    onAgentAccessChanged?.call(true);
+    // 新开关 = 新授权模型：旧的免询问与挂起审批一概作废。
+    _clearAllStandingRead();
+    _cancelPendingApprovals();
+    // 端点启动失败必须 fail closed 并回滚开关，不能留下"DB 开着、端口没监听"。
+    final started = await onAgentAccessChanged?.call(true) ?? true;
+    if (!started) {
+      await _agentAccess.wipe();
+      _sessions.agent.lock();
+      onDataChanged({Topics.agentAccess});
+      throw CoreActionException(
+        ErrorCodes.internal,
+        'MCP 端点启动失败（固定端口 ${AppConstants.coreMcpFixedPort} 被占用或监听失败），'
+        '请释放端口后重试',
+      );
+    }
     // 侧边栏"智能体活动"入口显隐依赖总开关状态。
     onDataChanged({Topics.agentAccess});
     return {'ok': true, 'enabled': true, 'agentUnlocked': true};
@@ -421,8 +511,12 @@ class CoreActions {
   /// 关闭总开关：清 wrap、删 DPAPI blob、锁 agent 域、**停 MCP 服务**。
   Future<Map<String, dynamic>> _disableAgentAccess() async {
     await _agentAccess.wipe();
+    _clearAllStandingRead();
+    _cancelPendingApprovals();
     _sessions.agent.lock();
-    onAgentAccessChanged?.call(false);
+    // 等端点真的停下再返回：旧实现 fire-and-forget，UI 马上显示"已关闭"
+    // 但端口可能还在监听（评审 M6）。
+    await onAgentAccessChanged?.call(false);
     onDataChanged({Topics.agentAccess});
     return {'ok': true, 'enabled': false, 'agentUnlocked': false};
   }
@@ -438,11 +532,26 @@ class CoreActions {
     }
     final agentKey = AgentKeyMaterial.generateAgentKey();
     final wrapped = AgentKeyMaterial.wrap(vaultKey: vaultKey, agentKey: agentKey);
-    await _agentAccess.storeAgentKey(agentKey);
+    try {
+      await _agentAccess.storeAgentKey(agentKey);
+    } finally {
+      agentKey.fillRange(0, agentKey.length, 0);
+    }
     await _agentAccess.writeWrap(wrapped);
+    await _db.setMeta('vault.keyId', AgentKeyMaterial.keyId(vaultKey));
     _sessions.agent.unlock(Uint8List.fromList(vaultKey));
+    // 重置后旧钥匙立刻作废：挂起审批/免询问也一并清掉。
+    _clearAllStandingRead();
+    _cancelPendingApprovals();
+    // 如果之前因为端口占用等原因端点没起来，重置相当于一次重试。
+    final started = await onAgentAccessChanged?.call(true) ?? true;
     onDataChanged({Topics.agentAccess});
-    return {'ok': true, 'enabled': true, 'agentUnlocked': true};
+    return {
+      'ok': true,
+      'enabled': true,
+      'agentUnlocked': true,
+      'mcpRunning': started,
+    };
   }
 
   /// 用主密码解锁智能体域（用户"显式动作"的唯一落点）。
@@ -549,6 +658,9 @@ class CoreActions {
     final hash = _cryptoService.hashMasterPassword(password, salt);
     final key = _cryptoService.deriveKey(password, salt);
     await _cryptoService.storeKeyMaterial(salt, hash);
+    // 记录钥匙指纹：智能体自动解封时用它拒绝"改密中断留下的旧包裹"。
+    // 没有这一步，崩溃窗口后 agent 会拿着旧钥匙照常启动并写出永久坏行。
+    await _db.setMeta('vault.keyId', AgentKeyMaterial.keyId(key));
     _authMaterialPresent = true;
     _sessions.ui.unlock(key);
     return {'success': true};
@@ -596,51 +708,82 @@ class CoreActions {
     final newKey = _cryptoService.deriveKey(next, newSalt);
     final newHash = _cryptoService.hashMasterPassword(next, newSalt);
 
-    final reencrypted = await _rotation.startRotation(
-      oldKey: oldKey,
-      newSalt: newSalt,
-      newPasswordHash: newHash,
-      newKey: newKey,
-    );
-    final stored = await _rotation.completeRotation(
-      PendingRotation(salt: newSalt, passwordHash: newHash),
-    );
+    // ── 改密期间冻结智能体域 ─────────────────────────────────
+    // 轮换提交后、重包裹/重解锁完成前，agent 若仍持旧钥匙：读会解出乱码、
+    // 写会用旧钥匙加密新库（那些行以后两个密码都解不开）。所以先锁域、
+    // 取消挂起审批、清免询问，等新钥匙就位再恢复。
+    final wasAgentEnabled = await _agentAccess.isEnabled();
+    _clearAllStandingRead();
+    _cancelPendingApprovals();
+    _sessions.agent.lock();
 
-    // 改主密码会**换掉 vaultKey**：智能体访问若开着，必须同步重包裹。
-    // 不做这件事会有两个后果二选一：agent 手里还是旧钥匙（读不了新库），
-    // 或者包裹里还是旧钥匙（等于旧密文仍可解）。重包裹失败 ⇒ **自动关闭**
-    // 智能体访问（fail closed），绝不留下"旧钥匙还能解"的窗口。
-    var agentAccessEnabled = await _agentAccess.isEnabled();
-    if (agentAccessEnabled) {
+    // 预计算重包裹：必须在轮换事务前读完 DPAPI 里的 agentKey。失败 ⇒
+    // 按"重包裹失败"处理（先关掉智能体访问），绝不留旧包裹。
+    String? agentWrap;
+    var agentEnabledAfter = wasAgentEnabled;
+    if (wasAgentEnabled) {
+      Uint8List? agentKey;
       try {
-        final agentKey = await _agentAccess.loadAgentKey();
-        if (agentKey == null) {
-          await _agentAccess.wipe();
-          agentAccessEnabled = false;
-        } else {
-          try {
-            await _agentAccess.writeWrap(
-              AgentKeyMaterial.wrap(vaultKey: newKey, agentKey: agentKey),
-            );
-          } finally {
-            agentKey.fillRange(0, agentKey.length, 0);
-          }
-        }
+        agentKey = await _agentAccess.loadAgentKey();
       } catch (_) {
-        await _agentAccess.wipe();
-        agentAccessEnabled = false;
+        agentKey = null;
       }
+      if (agentKey == null) {
+        await _agentAccess.wipe();
+        agentEnabledAfter = false;
+      } else {
+        try {
+          agentWrap =
+              AgentKeyMaterial.wrap(vaultKey: newKey, agentKey: agentKey);
+        } catch (_) {
+          agentWrap = null;
+        } finally {
+          agentKey.fillRange(0, agentKey.length, 0);
+        }
+        if (agentWrap == null) {
+          await _agentAccess.wipe();
+          agentEnabledAfter = false;
+        }
+      }
+    }
+
+    final int reencrypted;
+    final bool stored;
+    try {
+      reencrypted = await _rotation.startRotation(
+        oldKey: oldKey,
+        newSalt: newSalt,
+        newPasswordHash: newHash,
+        newKey: newKey,
+        // wrap 与 keyId 和整库重加密写在**同一个事务**里：要么一起生效，
+        // 要么一起回滚，消灭"旧包裹配新库"的崩溃窗口。
+        agentWrap: agentWrap,
+        vaultKeyId: AgentKeyMaterial.keyId(newKey),
+      );
+      stored = await _rotation.completeRotation(
+        PendingRotation(salt: newSalt, passwordHash: newHash),
+      );
+    } catch (error) {
+      // 轮换事务没提交 ⇒ 库还在旧钥匙上。把 agent 域恢复成改密前的样子
+      // （若预计算阶段已经 wipe，则保持关闭）。
+      if (wasAgentEnabled && agentEnabledAfter) {
+        final restore = Uint8List.fromList(oldKey);
+        _sessions.agent.unlock(restore);
+      }
+      rethrow;
     }
 
     // 改完回到锁定态：强制用户用新密码重新进来（与桌面端既有语义一致）。
     _sessions.lockAll();
-    if (agentAccessEnabled) {
+    if (agentEnabledAfter) {
       // agent 域此刻还持着旧钥匙 → 换成新钥匙（**副本**，不与 ui 共享实例）。
       _sessions.agent.unlock(Uint8List.fromList(newKey));
-      onAgentAccessChanged?.call(true);
+      // 端点本来就在跑；再通知一次是为了刷新真实状态（并覆盖极端情况下
+      // 端口已失效但 DB enabled=true 的假状态）。
+      await onAgentAccessChanged?.call(true);
     } else {
       _sessions.agent.lock();
-      onAgentAccessChanged?.call(false);
+      if (wasAgentEnabled) await onAgentAccessChanged?.call(false);
     }
     onDataChanged({
       Topics.items,
@@ -653,7 +796,7 @@ class CoreActions {
       'success': true,
       'reencrypted': reencrypted,
       'keyMaterialPersisted': stored,
-      'agentAccessEnabled': agentAccessEnabled,
+      'agentAccessEnabled': agentEnabledAfter,
     };
   }
 
@@ -948,11 +1091,30 @@ class CoreActions {
   ///
   /// 走**一个事务**：半途失败不会留下"条目删了一半"的库。历史上这里是 UI
   /// 直连数据库的旁路，还绕过了文件夹解绑语义。
+  ///
+  /// **智能体数据也在"所有数据"里**（评审 M8）：审计表含昵称/条目名等元数据、
+  /// 配对记录是长期凭据、wrap + DPAPI blob 是免密解锁材料。只删 entries/folders
+  /// 会让 MCP 继续监听、旧配对继续有效、审计可被离线拷贝读出。
   Future<Map<String, dynamic>> _deleteAllData(bool confirmed) async {
     if (!confirmed) {
       throw CoreActionException(ErrorCodes.invalidRequest, '需要显式确认');
     }
     _requireUnlocked();
+
+    final agentWasEnabled = await _agentAccess.isEnabled();
+    _clearAllStandingRead();
+    _cancelPendingApprovals();
+    _sessions.agent.lock();
+    if (agentWasEnabled) {
+      await _agentAccess.wipe();
+      await onAgentAccessChanged?.call(false);
+    }
+    final pairingRows = await _db.getMetaByPrefix(AgentPairingStore.keyPrefix);
+    for (final row in pairingRows) {
+      await _db.deleteMeta(row.metaKey);
+    }
+    await _db.clearAgentAudit();
+
     var entries = 0;
     var folders = 0;
     await _db.transaction(() async {
@@ -965,8 +1127,20 @@ class CoreActions {
         folders++;
       }
     });
-    onDataChanged({Topics.items, Topics.item, Topics.folders, Topics.search});
-    return {'ok': true, 'entries': entries, 'folders': folders};
+    onDataChanged({
+      Topics.items,
+      Topics.item,
+      Topics.folders,
+      Topics.search,
+      Topics.agentAccess,
+      Topics.agentAudit,
+    });
+    return {
+      'ok': true,
+      'entries': entries,
+      'folders': folders,
+      'agentDataCleared': agentWasEnabled || pairingRows.isNotEmpty,
+    };
   }
 
   // ─── 导出 / 导入（核心直接读写文件）─────────────────────

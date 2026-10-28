@@ -1108,6 +1108,57 @@ class AppLocalizationsEn extends AppLocalizations {
   String get agentServiceOff => 'MCP service stopped';
 
   @override
+  String get agentServiceUnavailable => 'MCP service is not running';
+
+  @override
+  String agentServiceRunning(String port) {
+    return 'MCP service running · 127.0.0.1:$port';
+  }
+
+  @override
+  String agentServiceError(String detail) {
+    return 'MCP failed to start: $detail';
+  }
+
+  @override
+  String get agentSessionLockSubtitle =>
+      'Locking cuts agent access immediately. In “ask every time” mode the key is only borrowed after you approve a call.';
+
+  @override
+  String get agentSessionUnlockSubtitle =>
+      'Unlock with your master password to let agents access the vault again.';
+
+  @override
+  String get agentStandingReadTitle => 'Reads allowed for this session';
+
+  @override
+  String get agentStandingReadActive => 'Reads allowed without prompting';
+
+  @override
+  String agentStandingReadBanner(String names) {
+    return 'These pairings can read metadata without prompts: $names.';
+  }
+
+  @override
+  String get agentStandingReadHint =>
+      'Metadata reads will not prompt until you revoke this, switch mode, turn agent access off/on, or lock the agent session.';
+
+  @override
+  String get agentStandingReadRevoke => 'Revoke';
+
+  @override
+  String get agentStandingReadRevokeAll => 'Revoke all';
+
+  @override
+  String agentStandingReadRevoked(String nickname) {
+    return 'Revoked the session read exemption for $nickname.';
+  }
+
+  @override
+  String get agentStandingReadRevokedAll =>
+      'All session read exemptions revoked.';
+
+  @override
   String get agentEnableFirst =>
       'Turn on agent access first, then pair an agent.';
 
@@ -1123,7 +1174,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get agentResetKeyConfirm =>
-      'Reset the agent key? Every agent using the old key will stop working until you pair it again.';
+      'Reset the agent key? This replaces the key that wraps the vault key and re-wraps it. Your existing MCP pairings keep working; to cut off a specific agent, revoke that pairing.';
 
   @override
   String agentCalls(String count) {
@@ -1185,6 +1236,17 @@ class AppLocalizationsEn extends AppLocalizations {
       'It is shown only once. EasyPass stores just a hash.';
 
   @override
+  String get agentKeyClipboardHint =>
+      'Copy it into your MCP client promptly. Clipboard history and other programs may be able to read it.';
+
+  @override
+  String get agentKeyCopiedHint =>
+      'Copied to clipboard (clipboard history / other programs may see it).';
+
+  @override
+  String get agentCopy => 'Copy';
+
+  @override
   String get agentCopied => 'Key copied to clipboard';
 
   @override
@@ -1203,7 +1265,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get agentAccessEntryOpen =>
-      'Open — agents may read this entry (metadata only).';
+      'Open — agents may read this entry’s metadata. Only login / secure note entries can be opened; in trusted mode agents may also modify or delete it.';
 
   @override
   String get agentAccessEntryDenied =>
@@ -1238,6 +1300,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get agentApprovalAllowStanding => 'Allow reads for this session';
 
   @override
+  String agentApprovalQueuePosition(String current, String total) {
+    return 'Request $current of $total';
+  }
+
+  @override
+  String agentApprovalQueueFull(String count) {
+    return 'Too many pending approvals: $count new request(s) were rejected automatically. Check the agent for a loop.';
+  }
+
+  @override
   String get agentApprovalOpRead => 'Read (metadata)';
 
   @override
@@ -1269,6 +1341,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get agentAuditOpClipboard => 'Copy to clipboard';
+
+  @override
+  String agentAuditOpClipboardField(String field) {
+    return 'Copy to clipboard ($field)';
+  }
 
   @override
   String get agentAuditDecisionAllowed => 'Allowed';

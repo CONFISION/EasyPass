@@ -482,4 +482,68 @@ void main() {
     expect(await harness.api.getItem('seed-login'), isNotNull);
     expect(find.byKey(EntryFormKeys.save), findsOneWidget);
   });
+
+  // ─── 智能体可访问性开关（D4 / H5）──────────────────────
+
+  final agentSwitch = find.widgetWithText(
+    SwitchListTile,
+    enL10n.agentAccessEntryTitle,
+  );
+
+  testWidgets('智能体开关只对登录 / 安全笔记显示，identity / SSH 整块不渲染',
+      (tester) async {
+    await harness.pumpAdd(tester);
+
+    // 登录（默认类型）：显示。
+    expect(agentSwitch, findsOneWidget);
+    // 安全笔记：仍显示。
+    await harness.selectType(tester, EntryType.secureNote);
+    expect(agentSwitch, findsOneWidget);
+    // 身份信息 / SSH：不向智能体开放，连开关都不该出现。
+    await harness.selectType(tester, EntryType.identity);
+    expect(agentSwitch, findsNothing,
+        reason: 'identity 不向智能体开放，不能给用户一个会被拒绝的授权开关');
+    await harness.selectType(tester, EntryType.sshKey);
+    expect(agentSwitch, findsNothing,
+        reason: 'SSH 私钥不向智能体开放，不能给用户一个会被拒绝的授权开关');
+  });
+
+  testWidgets('新建登录条目时打开授权：保存后 agentOpen=true（行为未回退）',
+      (tester) async {
+    await harness.pumpAdd(tester);
+    await tester.enterText(find.byKey(EntryFormKeys.name), 'GitHub');
+    await tester.enterText(find.byKey(EntryFormKeys.password), 'pw-1');
+    await harness.tapVisible(tester, agentSwitch);
+
+    await harness.tapSave(tester);
+    await harness.flushSnackBar(tester);
+
+    final item = (await harness.api.listItems()).single;
+    expect(item.agentOpen, isTrue);
+  });
+
+  testWidgets('编辑登录条目：切到 identity 时强制收回授权，保存后 agentOpen=false',
+      (tester) async {
+    await harness.api.saveItem(
+      harness.loginItem().copyWith(agentOpen: true),
+    );
+    await harness.pumpEdit(tester, 'seed-login');
+    expect(tester.widget<SwitchListTile>(agentSwitch).value, isTrue);
+
+    await harness.selectType(tester, EntryType.identity);
+    // 编辑态切类型要确认。
+    await tester.tap(find.text(enL10n.entryTypeSwitchConfirm));
+    await tester.pumpAndSettle();
+
+    // identity 下开关消失；保存时也必须落成"永久拒绝"。
+    expect(agentSwitch, findsNothing);
+    await harness.tapSave(tester);
+    await harness.flushSnackBar(tester);
+
+    final item = await harness.api.getItem('seed-login');
+    expect(item, isNotNull);
+    expect(item!.type, EntryType.identity);
+    expect(item.agentOpen, isFalse,
+        reason: '切到 identity 后必须强制收回智能体授权');
+  });
 }

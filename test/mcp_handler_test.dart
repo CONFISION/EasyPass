@@ -4,10 +4,11 @@ import 'package:easypass/mcp/mcp_handler.dart';
 import 'package:easypass/mcp/mcp_tools.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// MCP 的规则层（反 DNS rebinding R1/R2、认证 R5/R8、JSON-RPC 语义）。
+/// MCP 的规则层（反 DNS rebinding R1/R2、认证 R5/R8、JSON-RPC 语义、
+/// "预检/认证先于读 body"的缝、以及工具面 v3 的 schema/annotations 契约）。
 ///
 /// 这些规则全部用普通单测覆盖，不必起真服务器 —— 起 socket 的那一层在
-/// `mcp_http_server_test.dart` 里只验证"字节真的走通了"。
+/// `mcp_http_server_test.dart` 里验证字节与反滥用行为。
 void main() {
   const goodKey = 'good-key';
   const principal = McpPrincipal(pairingId: 'p1', nickname: 'DSH（工作机）');
@@ -15,13 +16,20 @@ void main() {
 
   late List<String> called;
   late bool failNext;
+  late int authenticateCalls;
+  late List<(int, String)> rejections;
   late McpHandler handler;
 
   setUp(() {
     called = [];
     failNext = false;
+    authenticateCalls = 0;
+    rejections = [];
     handler = McpHandler(
-      authenticate: (key) async => key == goodKey ? principal : null,
+      authenticate: (key) async {
+        authenticateCalls++;
+        return key == goodKey ? principal : null;
+      },
       callTool: (p, tool, args) async {
         called.add('$tool@${p.nickname}');
         if (failNext) {
@@ -35,6 +43,7 @@ void main() {
         }
         return {'ok': true};
       },
+      onRejected: (status, reason) => rejections.add((status, reason)),
     );
   });
 
@@ -61,6 +70,21 @@ void main() {
       headers: h,
       body: bodyOverride.isNotEmpty ? bodyOverride : jsonEncode(message),
       localPort: port,
+    );
+  }
+
+  /// 直接调预检（不认证、不读 body）。
+  McpHttpResponse? preflight({
+    String method = 'POST',
+    String path = McpHandler.endpointPath,
+    Map<String, String>? extraHeaders,
+    int localPort = port,
+  }) {
+    return handler.preflight(
+      method: method,
+      path: path,
+      headers: extraHeaders ?? headers(),
+      localPort: localPort,
     );
   }
 
@@ -144,6 +168,145 @@ void main() {
     });
   });
 
+  group('preflight：只看请求头就能拒绝（不认证、不读 body）', () {
+    test('合法请求返回 null，且没有拒绝回调', () {
+      expect(preflight(), isNull);
+      expect(rejections, isEmpty);
+      expect(authenticateCalls, 0);
+    });
+
+    test('非端点路径 ⇒ 404', () {
+      final r = preflight(path: '/other');
+      expect(r?.status, 404);
+      expect(rejections, contains((404, 'path')));
+    });
+
+    test('任何 Origin（含空值/同源）⇒ 403', () {
+      for (final origin in const ['https://evil.example', '', 'http://127.0.0.1:47821']) {
+        rejections.clear();
+        final r = preflight(extraHeaders: headers(origin: origin));
+        expect(r?.status, 403, reason: origin);
+        expect(rejections, contains((403, 'origin')));
+      }
+    });
+
+    test('Host 非回环 / 端口不符 / 多值 / 缺失 ⇒ 403', () {
+      for (final host in <String>[
+        'evil.example:$port',
+        '127.0.0.1:${port + 1}',
+        '127.0.0.1:$port,evil.example:$port',
+      ]) {
+        rejections.clear();
+        final r = preflight(extraHeaders: headers(host: host));
+        expect(r?.status, 403, reason: host);
+        expect(rejections, contains((403, 'host')));
+      }
+      rejections.clear();
+      final missingHost = handler.preflight(
+        method: 'POST',
+        path: McpHandler.endpointPath,
+        headers: {'authorization': 'Bearer $goodKey'},
+        localPort: port,
+      );
+      expect(missingHost?.status, 403);
+      expect(rejections, contains((403, 'host')));
+    });
+
+    test('非 POST ⇒ 405，且拒绝也要留痕', () {
+      for (final method in const ['GET', 'HEAD', 'OPTIONS', 'DELETE', 'PUT']) {
+        rejections.clear();
+        final r = preflight(method: method);
+        expect(r?.status, 405, reason: method);
+        expect(r?.body, isEmpty);
+        expect(rejections, contains((405, 'method')));
+      }
+    });
+
+    test('缺 Bearer / 空 Bearer / 非 Bearer 形态 ⇒ 401', () {
+      for (final auth in <String?>[null, 'Basic abc', 'Bearer', 'Bearer   ']) {
+        rejections.clear();
+        final r = preflight(extraHeaders: headers(authorization: auth));
+        expect(r?.status, 401, reason: '$auth');
+        expect(rejections, contains((401, 'authorization')));
+      }
+    });
+
+    test('预检失败不会触发认证，也不会执行工具', () async {
+      final r = await handler.handle(
+        method: 'POST',
+        path: McpHandler.endpointPath,
+        headers: headers(origin: 'https://evil.example'),
+        body: jsonEncode({'jsonrpc': '2.0', 'id': 1, 'method': 'ping'}),
+        localPort: port,
+      );
+      expect(r.status, 403);
+      expect(authenticateCalls, 0);
+      expect(called, isEmpty);
+    });
+  });
+
+  group('bearerFromHeaders', () {
+    test('只认 header 里的 Bearer：大小写不敏感、trim 首尾空白', () {
+      expect(handler.bearerFromHeaders({'authorization': 'Bearer $goodKey'}), goodKey);
+      expect(handler.bearerFromHeaders({'authorization': 'bearer $goodKey'}), goodKey);
+      expect(handler.bearerFromHeaders({'authorization': '  BEARER   $goodKey  '}), goodKey);
+      expect(handler.bearerFromHeaders({'authorization': 'Basic abc'}), isNull);
+      expect(handler.bearerFromHeaders({'authorization': 'Bearer'}), isNull);
+      expect(handler.bearerFromHeaders(const {}), isNull);
+    });
+  });
+
+  group('onRejected：HTTP 层拒绝都要留痕（供核心写审计）', () {
+    test('预检拒绝（Origin）', () async {
+      final r = await post({'jsonrpc': '2.0', 'id': 1, 'method': 'ping'},
+          extraHeaders: headers(origin: 'https://evil.example'));
+      expect(r.status, 403);
+      expect(rejections, contains((403, 'origin')));
+      expect(called, isEmpty);
+      expect(authenticateCalls, 0);
+    });
+
+    test('认证拒绝（错误密钥）', () async {
+      final r = await post({'jsonrpc': '2.0', 'id': 1, 'method': 'ping'},
+          extraHeaders: headers(authorization: 'Bearer wrong'));
+      expect(r.status, 401);
+      expect(rejections, contains((401, 'unknown_pairing')));
+      expect(called, isEmpty);
+    });
+
+    test('body 超限', () async {
+      final big = 'x' * (handler.maxBodyBytes + 10);
+      final r = await post({}, bodyOverride: big);
+      expect(r.status, 413);
+      expect(rejections, contains((413, 'body_too_large')));
+      expect(called, isEmpty);
+    });
+
+    test('成功请求不触发拒绝回调', () async {
+      final r = await post({'jsonrpc': '2.0', 'id': 1, 'method': 'ping'});
+      expect(r.status, 200);
+      expect(rejections, isEmpty);
+    });
+  });
+
+  group('handleAuthenticated：已认证后的纯逻辑入口', () {
+    test('正常 ping 返回 200', () async {
+      final r = await handler.handleAuthenticated(
+        principal: principal,
+        body: '{"jsonrpc":"2.0","id":9,"method":"ping"}',
+      );
+      expect(r.status, 200);
+      expect(jsonDecode(r.body)['id'], 9);
+    });
+
+    test('body 超限仍然拒绝（纵深防御）', () async {
+      final big = 'x' * (handler.maxBodyBytes + 10);
+      final r = await handler.handleAuthenticated(principal: principal, body: big);
+      expect(r.status, 413);
+      expect(rejections, contains((413, 'body_too_large')));
+    });
+  });
+
   group('传输形态', () {
     test('GET ⇒ 405（不提供 SSE）', () async {
       final r = await handler.handle(
@@ -181,7 +344,7 @@ void main() {
   });
 
   group('JSON-RPC：initialize / 通知 / 错误', () {
-    test('initialize 回能力表与协商后的协议版本', () async {
+    test('initialize 回能力表、协商后的协议版本与工具面版本', () async {
       final r = await post({
         'jsonrpc': '2.0',
         'id': 1,
@@ -194,7 +357,12 @@ void main() {
       final result = body['result'] as Map<String, dynamic>;
       expect(result['protocolVersion'], '2025-06-18');
       expect((result['capabilities'] as Map)['tools'], isNotNull);
-      expect(result['serverInfo'], isNotNull);
+      final serverInfo = result['serverInfo'] as Map<String, dynamic>;
+      expect(serverInfo['name'], isNotEmpty);
+      expect(serverInfo['version'], isNotEmpty);
+      // 工具面版本必须能被客户端/审计对上（surface v3）。
+      expect(serverInfo['surfaceVersion'], agentToolSurfaceVersion);
+      expect(serverInfo['surfaceVersion'], '3');
     });
 
     test('客户端要更新的修订版 ⇒ 回我们能实现的版本（让它自己回退）', () async {
@@ -263,6 +431,8 @@ void main() {
           byName[name]!['annotations'] as Map<String, Object?>;
       expect(annotationsOf('list_entries')['readOnlyHint'], isTrue);
       expect(annotationsOf('list_trash')['readOnlyHint'], isTrue);
+      expect(annotationsOf('get_entry')['readOnlyHint'], isTrue);
+      expect(annotationsOf('status')['readOnlyHint'], isTrue);
       expect(annotationsOf('create_entry')['readOnlyHint'], isFalse);
       expect(annotationsOf('update_entry')['readOnlyHint'], isFalse);
       expect(annotationsOf('restore_entry')['readOnlyHint'], isFalse);
@@ -312,6 +482,73 @@ void main() {
       expect(result['isError'], isTrue);
       final payload = jsonDecode((result['content'] as List).first['text'] as String);
       expect(payload['errorCode'], 'locked');
+    });
+  });
+
+  group('工具面 v3：schema / annotations 契约', () {
+    Map<String, Map<String, dynamic>> toolsByName() => {
+          for (final tool in agentTools)
+            tool.name: Map<String, dynamic>.from(tool.toJson()),
+        };
+
+    test('工具面版本 = 3', () {
+      expect(agentToolSurfaceVersion, '3');
+    });
+
+    test('begin_session / end_session 是写工具（readOnlyHint=false）', () {
+      final byName = toolsByName();
+      expect(byName['begin_session']!['annotations'], {
+        'readOnlyHint': false,
+        'destructiveHint': false,
+      });
+      expect(byName['end_session']!['annotations'], {
+        'readOnlyHint': false,
+        'destructiveHint': false,
+      });
+    });
+
+    test('begin/end_session 描述不再承诺空闲豁免，且明确不参与授权/不锁会话域', () {
+      final byName = toolsByName();
+      final begin = byName['begin_session']!['description'] as String;
+      final end = byName['end_session']!['description'] as String;
+      expect(begin, contains('不参与授权'));
+      expect(begin, isNot(contains('空闲锁定')));
+      expect(end, contains('不锁定'));
+    });
+
+    test('create_entry / update_entry 的 password 声明 string 或生成对象', () {
+      final byName = toolsByName();
+      for (final name in const ['create_entry', 'update_entry']) {
+        final schema = byName[name]!['inputSchema'] as Map;
+        final password = (schema['properties'] as Map)['password'] as Map;
+        final oneOf = password['oneOf'] as List;
+        expect(oneOf, hasLength(2), reason: name);
+        expect(oneOf[0], {'type': 'string'}, reason: name);
+        final object = oneOf[1] as Map;
+        expect(object['type'], 'object', reason: name);
+        expect(object['required'], ['generate'], reason: name);
+        final props = object['properties'] as Map;
+        for (final field in const [
+          'length',
+          'useUpper',
+          'useLower',
+          'useNumbers',
+          'useSymbols',
+        ]) {
+          expect(props.containsKey(field), isTrue, reason: '$name 缺少参数 $field');
+        }
+        expect(props['length'], containsPair('type', 'integer'), reason: name);
+      }
+    });
+
+    test('copy_to_clipboard 不再暴露 identity/SSH 专属字段', () {
+      final byName = toolsByName();
+      final schema = byName['copy_to_clipboard']!['inputSchema'] as Map;
+      final field = (schema['properties'] as Map)['field'] as Map;
+      final values = (field['enum'] as List).cast<String>();
+      expect(values, containsAll(['password', 'totp', 'notes', 'custom']));
+      expect(values, isNot(contains('private_key')));
+      expect(values, isNot(contains('passphrase')));
     });
   });
 }

@@ -6,8 +6,12 @@
 /// - Supabase MCP 外泄：官方定性是「No permissions were violated. The agent
 ///   just followed instructions it should never have trusted.」
 ///
-/// 判定顺序对应 `docs/agent-mcp-spec.md` §7.3，其中**条目开关（I-9）永远第一条**：
-/// "永久拒绝"是硬闸，任何方式、任何 scope、任何可信状态都突破不了。
+/// 判定顺序（评审修复后）：
+/// 1. 条目开关（I-9，永远第一条）；
+/// 2. 条目类型是否对智能体暴露（H5：只有 login / secure_note）；
+/// 3. 配对身份 / 会话 / 范围 / 操作类型；
+/// 4. 访问方式（可信直通 / 逐次审批 + 本会话免询问）。
+/// 1、2 两档是"任何方式、任何 scope、任何可信状态都突破不了"的硬闸。
 library;
 
 /// 访问方式（用户在 设置 → 智能体访问方式 里切换）。
@@ -34,10 +38,14 @@ enum AgentOp {
   delete,
 }
 
-/// 拒绝原因。进审计日志，**不进模型上下文**（避免把内部策略细节喂给模型）。
+/// 拒绝原因。只进服务端判定，**不进模型上下文、不进审批文案**
+/// （避免把内部策略细节喂给模型；审计用 decision 的粗粒度值）。
 enum AgentDenyReason {
   /// 条目"永久拒绝"（I-9 硬闸）。
   entryClosed,
+
+  /// 条目类型不对智能体暴露（H5：identity / SSH 等）。
+  typeNotExposed,
 
   pairingRevoked,
   pairingExpired,
@@ -87,6 +95,7 @@ class AgentAccessRequest {
   const AgentAccessRequest({
     required this.op,
     required this.entryOpen,
+    required this.typeExposed,
     this.revoked = false,
     this.expired = false,
     this.keyMatches = true,
@@ -103,6 +112,13 @@ class AgentAccessRequest {
 
   /// 条目开关是否"开放"（`EntryPayload.agentOpen`）。
   final bool entryOpen;
+
+  /// 条目类型是否对智能体暴露（只有 login / secure_note 为 true）。
+  ///
+  /// 单靠"开关"挡不住历史数据、导入文件与类型切换：一条被置成 open 的
+  /// SSH 条目仍然能通过 entryOpen。类型闸是第二道硬闸，**排在 entryOpen
+  /// 之后**（永久拒绝优先报 `entryClosed`）。
+  final bool typeExposed;
 
   final bool revoked;
   final bool expired;
@@ -124,15 +140,21 @@ class AgentAccessRequest {
 class AgentAccessPolicy {
   AgentAccessPolicy._();
 
-  /// 按 §7.3 的顺序判定。
+  /// 按上面的顺序判定。
   ///
-  /// 顺序不能随意调整：条目开关先于配对状态，配对状态先于方式，
-  /// 保证"被永久拒绝的条目"在任何情况下都拿不到允许。
+  /// 顺序不能随意调整：条目开关先于类型，类型先于配对状态，配对状态先于
+  /// 方式，保证"被永久拒绝的条目"和"类型不该暴露的条目"在任何情况下都拿不到允许。
   static AgentAccessResult evaluate(AgentAccessRequest r) {
     // 1. 条目开关是硬闸（I-9）：先于一切，包括"可信直通"。
     if (!r.entryOpen) return const AgentAccessResult.deny(AgentDenyReason.entryClosed);
 
-    // 2–4. 配对身份。
+    // 2. 类型硬闸（H5）：identity / SSH 永不对智能体暴露。排在 entryOpen 之后，
+    //    所以"永久拒绝的 SSH 条目"仍报 entryClosed（用户看到的拒绝原因以开关为准）。
+    if (!r.typeExposed) {
+      return const AgentAccessResult.deny(AgentDenyReason.typeNotExposed);
+    }
+
+    // 3–5. 配对身份。
     if (r.revoked) {
       return const AgentAccessResult.deny(AgentDenyReason.pairingRevoked);
     }
@@ -143,12 +165,12 @@ class AgentAccessPolicy {
       return const AgentAccessResult.deny(AgentDenyReason.keyRejected);
     }
 
-    // 5. 会话必须已解锁（fail closed）。
+    // 6. 会话必须已解锁（fail closed）。
     if (!r.sessionUnlocked) {
       return const AgentAccessResult.deny(AgentDenyReason.sessionLocked);
     }
 
-    // 6–7. 范围与操作类型。
+    // 7–8. 范围与操作类型。
     if (!r.inScope) {
       return const AgentAccessResult.deny(AgentDenyReason.outOfScope);
     }
@@ -156,7 +178,7 @@ class AgentAccessPolicy {
       return const AgentAccessResult.deny(AgentDenyReason.opNotAllowed);
     }
 
-    // 8. 方式 2：可信直通。
+    // 9. 方式 2：可信直通。
     if (r.mode == AgentMode.trusted) {
       if (!r.trusted) {
         return const AgentAccessResult.deny(AgentDenyReason.notTrusted);
@@ -164,7 +186,7 @@ class AgentAccessPolicy {
       return const AgentAccessResult.allow();
     }
 
-    // 9. 方式 1：逐次审批。
+    // 10. 方式 1：逐次审批。
     //    「本会话内允许读取」**只对普通读生效**：敏感读（明文/验证码）
     //    与写、删一律仍要本次同意 —— 否则它就是个绕过审批的后门。
     if (r.op == AgentOp.read && r.standingRead) {
@@ -184,10 +206,11 @@ class AgentAccessPolicy {
   /// 「永久拒绝」的条目先弹审批，用户点了同意之后才被告知"未开放"，等于让
   /// 智能体诱导无意义弹窗 —— 审批疲劳正是社会工程学的入口。
   ///
-  /// 纪律：**不替代** `evaluate`。审批期间用户可能改条目开关 / 配对，`_gate`
-  /// 之后仍要再走一次 `evaluate`（纵深防御）。
+  /// 纪律：**不替代** `evaluate`。审批期间用户可能改条目开关 / 配对，
+  /// `_gate` 之后仍要再走一次 `evaluate`（纵深防御）。
   static AgentDenyReason? precheck(AgentAccessRequest r) {
     if (!r.entryOpen) return AgentDenyReason.entryClosed;
+    if (!r.typeExposed) return AgentDenyReason.typeNotExposed;
     if (r.revoked) return AgentDenyReason.pairingRevoked;
     if (r.expired) return AgentDenyReason.pairingExpired;
     if (!r.keyMatches) return AgentDenyReason.keyRejected;

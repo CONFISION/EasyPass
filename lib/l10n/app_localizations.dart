@@ -2096,6 +2096,84 @@ abstract class AppLocalizations {
   /// **'MCP service stopped'**
   String get agentServiceOff;
 
+  /// No description provided for @agentServiceUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP service is not running'**
+  String get agentServiceUnavailable;
+
+  /// Service badge on the agent-access screen when the core reports a real listening port.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP service running · 127.0.0.1:{port}'**
+  String agentServiceRunning(String port);
+
+  /// Shown when agent access is enabled but the core could not start the MCP endpoint; {detail} is the core's error message.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP failed to start: {detail}'**
+  String agentServiceError(String detail);
+
+  /// No description provided for @agentSessionLockSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Locking cuts agent access immediately. In “ask every time” mode the key is only borrowed after you approve a call.'**
+  String get agentSessionLockSubtitle;
+
+  /// No description provided for @agentSessionUnlockSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlock with your master password to let agents access the vault again.'**
+  String get agentSessionUnlockSubtitle;
+
+  /// No description provided for @agentStandingReadTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reads allowed for this session'**
+  String get agentStandingReadTitle;
+
+  /// No description provided for @agentStandingReadActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Reads allowed without prompting'**
+  String get agentStandingReadActive;
+
+  /// Standing-read indicator on the agent-access screen.
+  ///
+  /// In en, this message translates to:
+  /// **'These pairings can read metadata without prompts: {names}.'**
+  String agentStandingReadBanner(String names);
+
+  /// No description provided for @agentStandingReadHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Metadata reads will not prompt until you revoke this, switch mode, turn agent access off/on, or lock the agent session.'**
+  String get agentStandingReadHint;
+
+  /// No description provided for @agentStandingReadRevoke.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoke'**
+  String get agentStandingReadRevoke;
+
+  /// No description provided for @agentStandingReadRevokeAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoke all'**
+  String get agentStandingReadRevokeAll;
+
+  /// Snackbar after revoking one pairing's standing read.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoked the session read exemption for {nickname}.'**
+  String agentStandingReadRevoked(String nickname);
+
+  /// No description provided for @agentStandingReadRevokedAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All session read exemptions revoked.'**
+  String get agentStandingReadRevokedAll;
+
   /// No description provided for @agentEnableFirst.
   ///
   /// In en, this message translates to:
@@ -2123,7 +2201,7 @@ abstract class AppLocalizations {
   /// No description provided for @agentResetKeyConfirm.
   ///
   /// In en, this message translates to:
-  /// **'Reset the agent key? Every agent using the old key will stop working until you pair it again.'**
+  /// **'Reset the agent key? This replaces the key that wraps the vault key and re-wraps it. Your existing MCP pairings keep working; to cut off a specific agent, revoke that pairing.'**
   String get agentResetKeyConfirm;
 
   /// How many times this pairing called the MCP service.
@@ -2234,6 +2312,24 @@ abstract class AppLocalizations {
   /// **'It is shown only once. EasyPass stores just a hash.'**
   String get agentKeyOnceMessage;
 
+  /// No description provided for @agentKeyClipboardHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy it into your MCP client promptly. Clipboard history and other programs may be able to read it.'**
+  String get agentKeyClipboardHint;
+
+  /// No description provided for @agentKeyCopiedHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Copied to clipboard (clipboard history / other programs may see it).'**
+  String get agentKeyCopiedHint;
+
+  /// No description provided for @agentCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get agentCopy;
+
   /// No description provided for @agentCopied.
   ///
   /// In en, this message translates to:
@@ -2267,7 +2363,7 @@ abstract class AppLocalizations {
   /// No description provided for @agentAccessEntryOpen.
   ///
   /// In en, this message translates to:
-  /// **'Open — agents may read this entry (metadata only).'**
+  /// **'Open — agents may read this entry’s metadata. Only login / secure note entries can be opened; in trusted mode agents may also modify or delete it.'**
   String get agentAccessEntryOpen;
 
   /// No description provided for @agentAccessEntryDenied.
@@ -2330,6 +2426,18 @@ abstract class AppLocalizations {
   /// **'Allow reads for this session'**
   String get agentApprovalAllowStanding;
 
+  /// Position indicator inside the approval dialog when multiple requests are queued.
+  ///
+  /// In en, this message translates to:
+  /// **'Request {current} of {total}'**
+  String agentApprovalQueuePosition(String current, String total);
+
+  /// Shown inside the approval dialog after the queue limit dropped some requests.
+  ///
+  /// In en, this message translates to:
+  /// **'Too many pending approvals: {count} new request(s) were rejected automatically. Check the agent for a loop.'**
+  String agentApprovalQueueFull(String count);
+
   /// No description provided for @agentApprovalOpRead.
   ///
   /// In en, this message translates to:
@@ -2389,6 +2497,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Copy to clipboard'**
   String get agentAuditOpClipboard;
+
+  /// Audit label for clipboard operations; field is password/totp/notes/private_key/passphrase/custom label.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy to clipboard ({field})'**
+  String agentAuditOpClipboardField(String field);
 
   /// No description provided for @agentAuditDecisionAllowed.
   ///

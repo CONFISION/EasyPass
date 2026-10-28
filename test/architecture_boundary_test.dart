@@ -105,4 +105,24 @@ void main() {
     expect(violations, isEmpty,
         reason: '核心不得依赖 Flutter：\n${violations.join('\n')}');
   });
+
+  test('lib/core/** 不得 import Flutter：核心是无 Flutter 的 AOT 程序', () {
+    // 3.1.0 新增的 DPAPI / 剪贴板 / 智能体钥匙材料都在 lib/core/ 下，且随核心
+    // AOT 编译；把"核心代码不得依赖 Flutter"的守卫从 core_service/mcp 扩展到
+    // 整个 lib/core（此前 core 目录是规则盲区）。
+    final violations = <String>[];
+    for (final file in dartFilesIn(Directory('lib/core'))) {
+      for (final line in file.readAsLinesSync()) {
+        final trimmed = line.trim();
+        if (!trimmed.startsWith('import ')) continue;
+        if (trimmed.contains('package:flutter/') ||
+            trimmed.contains('package:flutter_riverpod/') ||
+            trimmed.contains('package:flutter_secure_storage/')) {
+          violations.add('${file.path}: $trimmed');
+        }
+      }
+    }
+    expect(violations, isEmpty,
+        reason: '核心底层代码不得依赖 Flutter：\n${violations.join('\n')}');
+  });
 }

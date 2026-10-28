@@ -145,10 +145,45 @@ void main() {
           reason: '用户明确要求：智能体访问一旦授权，不随 UI 锁库而失效');
     });
 
-    test('改空闲超时会同步到 agent 域', () {
+    test('agent 域不参与空闲自动锁定：过了 idleTimeout 仍解锁（D1）', () {
+      var now = DateTime(2026, 10, 28, 12);
+      final domains = SessionDomains(
+        idleTimeout: const Duration(milliseconds: 20),
+        clock: () => now,
+      );
+      domains.agent.unlock(fakeKey());
+
+      now = now.add(const Duration(minutes: 3));
+
+      expect(domains.agent.isUnlocked, isTrue,
+          reason: '智能体访问是"一次授权、零介入"；空闲 5 分钟就锁会让可信直通失效');
+    });
+
+    test('ui / bridge 仍会空闲自动锁定（对照组）', () {
+      var now = DateTime(2026, 10, 28, 12);
+      final domains = SessionDomains(
+        idleTimeout: const Duration(milliseconds: 20),
+        clock: () => now,
+      );
+      domains.ui.unlock(fakeKey(1));
+      domains.bridge.unlock(fakeKey(2));
+      domains.agent.unlock(fakeKey(3));
+
+      now = now.add(const Duration(minutes: 3));
+
+      expect(domains.ui.isUnlocked, isFalse);
+      expect(domains.bridge.isUnlocked, isFalse);
+      expect(domains.agent.isUnlocked, isTrue);
+    });
+
+    test('改空闲超时只影响 ui / bridge，agent.idleTimeout 保持构造值（D1）', () {
       final domains = build();
       domains.setIdleTimeout(const Duration(minutes: 9));
-      expect(domains.agent.idleTimeout, const Duration(minutes: 9));
+
+      expect(domains.ui.idleTimeout, const Duration(minutes: 9));
+      expect(domains.bridge.idleTimeout, const Duration(minutes: 9));
+      expect(domains.agent.idleTimeout, const Duration(minutes: 5),
+          reason: 'agent 域不参与空闲锁定；改设置不改它的构造值，避免"看起来会过期"');
     });
 
     test('of(agent) 返回同一实例', () {

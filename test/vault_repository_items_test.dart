@@ -511,4 +511,21 @@ void main() {
       expect(again.deletedAt, isNotNull);
     });
   });
+
+  group('启动解封智能体钥匙的严格探测（评审 V-1）', () {
+    test('空库 ⇒ false（无法证明钥匙正确，fail closed）', () async {
+      expect(await repo.encryptionProbeWorksStrict(key), isFalse);
+    });
+
+    test('正确钥匙 ⇒ true；错误钥匙 ⇒ false；宽容版对错误钥匙仍返回 true（对照）', () async {
+      await repo.saveItem(loginItem());
+      expect(await repo.encryptionProbeWorksStrict(key), isTrue);
+
+      final wrong = crypto.deriveKey('other-master', crypto.generateSalt());
+      expect(await repo.encryptionProbeWorksStrict(wrong), isFalse);
+      // 宽容版刻意在"一行都解不开"时返回 true（轮换恢复语义），因此
+      // 启动解封的安全校验必须用 strict 版，不能退回去用它。
+      expect(await repo.encryptionProbeWorks(wrong), isTrue);
+    });
+  });
 }

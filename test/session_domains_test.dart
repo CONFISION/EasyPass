@@ -17,8 +17,11 @@ void main() {
   /// 记录 `(域, 是否解锁)` 的广播序列。
   late List<String> events;
 
-  SessionDomains build() {
-    final domains = SessionDomains(idleTimeout: const Duration(minutes: 5));
+  SessionDomains build({DateTime Function()? clock}) {
+    final domains = SessionDomains(
+      idleTimeout: const Duration(minutes: 5),
+      clock: clock,
+    );
     domains.onStateChanged = (domain, unlocked) {
       events.add('${domain.name}:${unlocked ? 'unlocked' : 'locked'}');
     };
@@ -154,6 +157,52 @@ void main() {
       expect(domains.bridge.key, everyElement(0),
           reason: '这正是"锁 A 域把 B 域密钥清掉"的现场，'
               '也是跨域必须 Uint8List.fromList 复制的原因');
+    });
+  });
+
+  /// D1：agent 域不再有空闲自动锁定 —— 生命周期只由总开关 / 显式锁 / 核心退出
+  /// 决定。ui/bridge 的既有空闲锁定语义必须原样保留。
+  group('agent 域不因空闲而锁定（D1）', () {
+    test('空闲很久：ui/bridge 锁定，agent 保持解锁且密钥完好', () {
+      var now = DateTime(2026, 3, 1, 10);
+      final domains = build(clock: () => now);
+      domains.ui.unlock(fakeKey());
+      domains.bridge.unlock(fakeKey());
+      domains.agent.unlock(Uint8List.fromList(fakeKey()));
+
+      now = now.add(const Duration(hours: 2));
+
+      expect(domains.ui.isUnlocked, isFalse, reason: 'ui 仍按 5 分钟空闲锁定');
+      expect(domains.bridge.isUnlocked, isFalse,
+          reason: 'bridge 仍按 5 分钟空闲锁定');
+      expect(domains.agent.isUnlocked, isTrue,
+          reason: 'agent 域不因时间过期（零介入语义的地基）');
+      expect(domains.agent.key, everyElement(0x5A),
+          reason: 'agent 的密钥不该被任何过期路径清掉');
+      expect(events, containsAll(<String>['ui:locked', 'bridge:locked']),
+          reason: '过期锁定仍然要广播（UI 靠它回到锁屏）');
+    });
+
+    test('setIdleTimeout 只改 ui/bridge，agent 的 idleTimeout 保持构造值', () {
+      final domains = build();
+
+      domains.setIdleTimeout(const Duration(minutes: 9));
+
+      expect(domains.ui.idleTimeout, const Duration(minutes: 9));
+      expect(domains.bridge.idleTimeout, const Duration(minutes: 9));
+      expect(domains.agent.idleTimeout, const Duration(minutes: 5),
+          reason: 'agent 域不参与空闲自动锁定，设置不该写进它的计时器');
+    });
+
+    test('显式锁 agent 域仍然立即生效并广播（收回路径不能少）', () {
+      final domains = build();
+      domains.agent.unlock(fakeKey());
+      events.clear();
+
+      domains.agent.lock();
+
+      expect(domains.agent.isUnlocked, isFalse);
+      expect(events, contains('agent:locked'));
     });
   });
 }

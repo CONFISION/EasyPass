@@ -228,6 +228,46 @@ void main() {
     );
   });
 
+  testWidgets('本会话免询问读取：侧边栏出现全局指示，撤销后消失', (tester) async {
+    api.agentEnabled = true;
+    api.agentPairings.add({
+      'id': 'p1',
+      'nickname': 'DSH',
+      'mode': 'trusted',
+      'trusted': true,
+      'revoked': false,
+      'createdAt': 0,
+      'lastUsedAt': null,
+      'calls': 0,
+      'standingRead': true,
+    });
+    final l10n = await pumpVaultScreen(tester);
+
+    expect(find.text(l10n.agentStandingReadTitle), findsOneWidget,
+        reason: '免询问读取必须有常驻全局指示，不能只藏在设置页里');
+    final indicatorY =
+        tester.getTopLeft(find.text(l10n.agentStandingReadTitle)).dy;
+    final trashY = tester.getTopLeft(find.text(l10n.trashTitle)).dy;
+    expect(indicatorY, lessThan(trashY), reason: '指示在回收站入口上方');
+
+    // 从全局入口进设置页，撤销后返回：指示必须消失（回前台会重取真实状态）。
+    await tester.tap(find.text(l10n.agentStandingReadTitle));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(l10n.agentStandingReadRevoke));
+    await tester.pumpAndSettle();
+    // 撤销成功的 SnackBar 有 4s 计时器，冲掉避免 pending Timer。
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(find.text(l10n.agentStandingReadTitle), findsNothing,
+        reason: '撤销后全局指示必须消失，不能继续误导');
+  });
+
   testWidgets('条目右键：弹出编辑 / 删除菜单（不用先进详情页）', (tester) async {
     await seedFourTypes();
     final l10n = await pumpVaultScreen(tester);

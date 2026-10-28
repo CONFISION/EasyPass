@@ -16,12 +16,26 @@ import 'dart:typed_data';
 ///
 /// 过期判定是**惰性**的：不引入定时器，任何 [isUnlocked] / [key] / [remaining]
 /// 读取都会先检查是否已空闲超时，超时则立刻 [lock]。
+///
+/// **例外（`agent` 域）**：智能体会话域不参与空闲自动锁定（[autoLockEnabled] 为
+/// false），生命周期只由总开关、显式锁与核心退出决定 —— 见 `SessionDomains`
+/// 的 D1 说明。
 class VaultSession {
   /// 空闲多久后自动锁定。
   ///
-  /// 可变：核心服务在用户改"自动锁定分钟数"时要**就地**更新两个会话域的
-  /// 超时；重建 [VaultSession] 会把已解锁的钥匙丢掉。
+  /// 可变：核心服务在用户改"自动锁定分钟数"时要**就地**更新 ui/bridge 两个
+  /// 会话域的超时；重建 [VaultSession] 会把已解锁的钥匙丢掉。
+  ///
+  /// 对 [autoLockEnabled] 为 false 的会话（agent 域）这个字段没有实际意义：它只
+  /// 影响 [remaining] 的展示，不产生过期。
   Duration idleTimeout;
+
+  /// 是否参与空闲自动锁定（默认 true）。
+  ///
+  /// 为什么 agent 域关掉它：智能体访问的语义是"用户一次授权、之后零介入"，
+  /// 空闲 5 分钟就锁会让可信直通在无人值守时确定性地失效；agent 域的钥匙只在
+  /// 核心里，收回路径是总开关/显式锁/核心退出，不依赖空闲计时。
+  final bool autoLockEnabled;
 
   /// 可注入时钟，便于单测过期逻辑；默认 [DateTime.now]。
   final DateTime Function() _clock;
@@ -34,6 +48,7 @@ class VaultSession {
 
   VaultSession({
     this.idleTimeout = const Duration(minutes: 5),
+    this.autoLockEnabled = true,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
@@ -60,10 +75,14 @@ class VaultSession {
   }
 
   /// 距离自动锁定还剩多久；已锁定返回 null。
+  ///
+  /// **不参与空闲自动锁定的会话（[autoLockEnabled] == false）恒为 null**：它没有
+  /// "还剩多久自动锁"这个概念，生命周期由总开关与显式锁控制。
   Duration? get remaining {
     _expireIfIdle();
     final lastActiveAt = _lastActiveAt;
     if (_key == null || lastActiveAt == null) return null;
+    if (!autoLockEnabled) return null;
 
     final idle = _clock().difference(lastActiveAt);
     final left = idleTimeout - idle;
@@ -105,7 +124,11 @@ class VaultSession {
   }
 
   /// 惰性过期：空闲时间达到 [idleTimeout] 即锁定。
+  ///
+  /// [autoLockEnabled] 为 false 的会话永远不因时间过期（解锁/锁定只由显式调用
+  /// 驱动）。
   void _expireIfIdle() {
+    if (!autoLockEnabled) return;
     final lastActiveAt = _lastActiveAt;
     if (_key == null || lastActiveAt == null) return;
     if (_clock().difference(lastActiveAt) >= idleTimeout) {

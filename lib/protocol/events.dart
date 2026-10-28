@@ -24,6 +24,13 @@ class Events {
   /// `entryId` / `entryName` / `allowStanding`。UI 用 `respondAgentApproval` 动作回话。
   /// 新增事件，不需要升协议版本。
   static const String agentApprovalRequested = 'agentApprovalRequested';
+
+  /// 一次审批请求已结束（响应 / 超时 / 取消）。
+  ///
+  /// 载荷：`approvalId` / `decision`（`allowed` / `denied` / `timeout` /
+  /// `cancelled`）。UI 必须据此把陈旧弹窗从队列里移除 —— 只靠 45s 的
+  /// 核心超时而不通知 UI，会让一个已经失效的弹窗继续可点、继续遮挡界面。
+  static const String agentApprovalResolved = 'agentApprovalResolved';
 }
 
 /// 订阅主题：UI 的读 provider 与核心的"变更通知"一一对应。

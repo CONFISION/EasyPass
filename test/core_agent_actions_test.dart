@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:easypass/core_service/agent_access_policy.dart';
+import 'package:easypass/core_service/agent_access_store.dart';
 import 'package:easypass/core_service/agent_pairing_store.dart';
 import 'package:easypass/protocol/protocol.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -172,7 +175,7 @@ void main() {
       expect(core.sessions.agent.isUnlocked, isTrue);
     });
 
-    test('切回逐次审批：信任清零并立刻锁 agent 域', () async {
+    test('切回逐次审批：信任清零、不清 agent 域（3.1.0 修复）', () async {
       final created = await core.call(
         Actions.createAgentPairing,
         {'nickname': 'DSH', 'mode': 'trusted', 'password': password},
@@ -180,10 +183,14 @@ void main() {
       final id = created['id'] as String;
       expect(core.sessions.agent.isUnlocked, isTrue);
 
-      final back =
-          await core.call(Actions.setAgentAccessMode, {'id': id, 'mode': 'approval'});
-      expect(back['agentUnlocked'], isFalse);
-      expect(core.sessions.agent.isUnlocked, isFalse);
+      final back = await core.call(
+          Actions.setAgentAccessMode, {'id': id, 'mode': 'approval'});
+      // 旧实现会在这里锁掉 agent 域，导致方式 1 的单条目工具"先读库后过闸"
+      // 拿不到钥匙、审批弹窗根本不出现（评审 H2/H3）。切方式只清授权，
+      // 会话域仍由总开关控制。
+      expect(back['agentUnlocked'], isTrue);
+      expect(core.sessions.agent.isUnlocked, isTrue,
+          reason: 'agent 域生命周期只随总开关/显式锁定/核心退出变化');
 
       final pairing = await store().findById(id);
       expect(pairing!.trusted, isFalse);
@@ -271,6 +278,47 @@ void main() {
 
       final again = await core.call(Actions.createAgentPairing, {'nickname': 'DSH'});
       expect(again['id'], isNot(first['id']));
+    });
+  });
+
+  group('免询问 / 删除所有数据（3.1.0 评审修复）', () {
+    test('clearStandingRead 动作存在且返回 ok；配对列表带 standingRead 字段', () async {
+      final created =
+          await core.call(Actions.createAgentPairing, {'nickname': 'DSH'});
+      final listed = await core.call(Actions.listAgentPairings);
+      final pairings = (listed['pairings'] as List).cast<Map>();
+      expect(pairings.first.containsKey('standingRead'), isTrue);
+
+      final cleared = await core.call(
+          Actions.clearStandingRead, {'id': created['id'] as String});
+      expect(cleared['ok'], isTrue);
+    });
+
+    test('删除所有数据会清掉智能体审计、配对与开关（M8）', () async {
+      await core.call(Actions.enableAgentAccess);
+      await core.call(Actions.createAgentPairing, {'nickname': 'DSH'});
+      await vault.db.insertAgentAudit(
+        at: 1,
+        pairingId: 'p1',
+        nickname: 'DSH',
+        mode: 'trusted',
+        tool: 'status',
+        op: 'read',
+        decision: 'allowed',
+      );
+
+      final result = await core.call(Actions.deleteAllData, {'confirm': true});
+      expect(result['agentDataCleared'], isTrue);
+      expect(await vault.db.getMetaByPrefix(AgentPairingStore.keyPrefix), isEmpty);
+      expect(await vault.db.countAgentAudit(), 0);
+      expect(
+        await AgentAccessStore(vault.db, blobFile: File(
+                '${Directory.systemTemp.path}\\unused-${DateTime.now().microsecondsSinceEpoch}.dpapi'))
+            .isEnabled(),
+        isFalse,
+      );
+      expect(core.sessions.agent.isUnlocked, isFalse);
+      expect(core.changedTopics, contains(Topics.agentAccess));
     });
   });
 }

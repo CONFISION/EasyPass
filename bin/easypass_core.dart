@@ -47,14 +47,15 @@ Future<void> main(List<String> args) async {
     // 托盘"仅退出 UI"、脚本都用它：只锁库，不停核心。
     // 没有核心在跑时 lockRunningCore() 返回 true（无事可做）⇒ 退 0，
     // 这样 CLI 在开发态不会误报失败，Linux 的 g_spawn_sync 也不会拿到非零。
+    // 发现文件坏掉时返回 false（fail closed）：核心可能还开着，不能报成功。
     final locked = await lockRunningCore();
-    stdout.writeln(locked ? 'vault locked' : 'could not lock the vault');
+    stdout.writeln(locked ? 'vault locked' : 'vault NOT locked');
     exit(locked ? 0 : 1);
   }
 
   if (args.contains('--shutdown')) {
     final stopped = await shutdownRunningCore();
-    stdout.writeln(stopped ? 'core stopped' : 'core did not stop in time');
+    stdout.writeln(stopped ? 'core stopped' : 'core NOT stopped');
     exit(stopped ? 0 : 1);
   }
 
@@ -77,9 +78,37 @@ Future<void> main(List<String> args) async {
 }
 
 /// `--status`：running=true 时退 0，否则退 1（便于脚本判定）。
+///
+/// 发现文件存在但坏掉时**不**谎报 `running:false`：核心可能在跑，只是状态
+/// 读不出来。JSON 里带 `error`、stderr 打明细、退出码 1（fail closed）。
 Future<int> _status() async {
-  final info = await CoreDiscovery.read();
-  final client = await CoreClient.connectToRunning(role: 'ui');
+  final CoreInfo? info;
+  try {
+    info = await CoreDiscovery.read();
+  } on CoreDiscoveryException catch (error) {
+    stderr.writeln('easypass_core: $error');
+    stdout.writeln(jsonEncode({
+      'running': false,
+      'info': null,
+      'error': '核心发现文件（daemon.json）损坏或无法读取，核心状态未知',
+      'dataDirectory': AppPaths.dataDirectory.path,
+    }));
+    return 1;
+  }
+  final CoreClient? client;
+  try {
+    client = await CoreClient.connectToRunning(role: 'ui');
+  } on CoreDiscoveryException catch (error) {
+    // 读取与连接之间文件恰好被写坏（极窄竞态）：同样按状态未知处理。
+    stderr.writeln('easypass_core: $error');
+    stdout.writeln(jsonEncode({
+      'running': false,
+      'info': info?.toJson(),
+      'error': '核心发现文件（daemon.json）损坏或无法读取，核心状态未知',
+      'dataDirectory': AppPaths.dataDirectory.path,
+    }));
+    return 1;
+  }
   if (client == null) {
     stdout.writeln(jsonEncode({
       'running': false,

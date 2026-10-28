@@ -26,6 +26,12 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
   bool _loading = true;
   bool _enabled = false;
   bool _unlocked = false;
+
+  /// 真实 MCP 端点状态（M6）：`enabled` 只是"用户想开"的持久标记，不代表
+  /// 端口真的在监听。徽标与错误提示必须读核心返回的运行态。
+  bool _mcpRunning = false;
+  int? _mcpPort;
+  String? _mcpError;
   List<Map<String, dynamic>> _pairings = const [];
   String? _error;
 
@@ -46,6 +52,9 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
       setState(() {
         _enabled = state['enabled'] == true;
         _unlocked = state['agentUnlocked'] == true;
+        _mcpRunning = state['mcpRunning'] == true;
+        _mcpPort = (state['mcpPort'] as num?)?.toInt();
+        _mcpError = state['mcpError'] as String?;
         _pairings = pairings;
         _loading = false;
         _error = null;
@@ -65,42 +74,25 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
       await _refresh();
     } catch (error) {
       if (!mounted) return;
+      // 失败后也要刷一次：核心可能已经回滚了状态（例如 enable 失败会
+      // wipe+lock），徽标必须显示真实状态，而不是用户点开关之前的样子。
+      await _refresh();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(_l10n.agentActionFailed('$error'))),
       );
     }
   }
 
-  Future<String?> _askMasterPassword(String title) async {
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
+  Future<String?> _askMasterPassword(String title) {
+    // controller 由弹窗自己的 State 持有：`showDialog` 的 Future 在路由
+    // pop 时就返回，但 TextField 还要等退场动画结束才 unmount。在这里
+    // dispose 会让 EditableText 用到已销毁的 controller（真机/测试都会抛
+    // "A TextEditingController was used after being disposed"）。
+    return showDialog<String>(
       context: context,
-      builder: (dialogContext) {
-        final l10n = AppLocalizations.of(dialogContext);
-        return AlertDialog(
-          title: Text(title),
-          content: TextField(
-            controller: controller,
-            obscureText: true,
-            autofocus: true,
-            decoration:
-                InputDecoration(labelText: l10n.agentMasterPasswordPrompt),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: Text(l10n.cancel),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, controller.text),
-              child: Text(l10n.agentConfirm),
-            ),
-          ],
-        );
-      },
+      builder: (_) => _MasterPasswordDialog(title: title),
     );
-    controller.dispose();
-    return result;
   }
 
   Future<void> _toggleEnabled(bool value) async {
@@ -109,11 +101,16 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
       await _run(api.disableAgentAccess);
       return;
     }
-    // 打开需要解锁保险库（要拿 vaultKey 来包裹）——先让 ui 域确认一次主密码。
+    // 打开开关要拿 ui 域的 vaultKey 去包裹；先让用户用主密码确认一次。
+    //
+    // 只做 `verifyMasterPassword`，**不再调用 `unlock`**：重新 unlock 会改变
+    // AuthNotifier 状态，进而重建 GoRouter（本页是 Navigator.push 进来的），
+    // 用户会在开关生效前被弹回 /vault，看不到结果。
     final password = await _askMasterPassword(_l10n.agentAccessTitle);
     if (password == null || !mounted) return;
+    final bool verified;
     try {
-      await api.unlock(password);
+      verified = await api.verifyMasterPassword(password);
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -121,37 +118,22 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
       );
       return;
     }
+    if (!mounted) return;
+    if (!verified) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_l10n.errorIncorrectMasterPassword)),
+      );
+      return;
+    }
     await _run(api.enableAgentAccess);
   }
 
   Future<void> _createPairing() async {
-    final controller = TextEditingController();
+    // 昵称 controller 同样交给弹窗自己的 State 管理（见 `_askMasterPassword`）。
     final nickname = await showDialog<String>(
       context: context,
-      builder: (dialogContext) {
-        final l10n = AppLocalizations.of(dialogContext);
-        return AlertDialog(
-          title: Text(l10n.agentCreatePairing),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            decoration: InputDecoration(labelText: l10n.agentPairingNickname),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: Text(l10n.cancel),
-            ),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.pop(dialogContext, controller.text.trim()),
-              child: Text(l10n.agentCreatePairing),
-            ),
-          ],
-        );
-      },
+      builder: (_) => const _PairingNicknameDialog(),
     );
-    controller.dispose();
     if (nickname == null || nickname.isEmpty || !mounted) return;
 
     // 建"可信直通"配对必须用主密码确认一次（核心据此置 trusted）。
@@ -176,49 +158,85 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
   }
 
   /// 密钥**只显示这一次**（库里只有 SHA-256）。
+  ///
+  /// **不自动复制到剪贴板**（M10）：配对密钥是 MCP 的 Bearer 凭据，自动复制
+  /// 会让它在用户没点"复制"时进入剪贴板历史/云剪贴板/同会话进程可见的通道。
+  /// 只有用户显式点"复制"才写，并当场提示剪贴板的风险。
   Future<void> _showKeyOnce(String key) async {
-    await Clipboard.setData(ClipboardData(text: key));
     if (!mounted) return;
-    final l10n = _l10n;
-    final theme = Theme.of(context);
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(l10n.agentKeyOnceTitle),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(l10n.agentKeyOnceMessage, style: theme.textTheme.bodySmall),
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
+      builder: (dialogContext) {
+        var copied = false;
+        return StatefulBuilder(
+          builder: (builderContext, setDialogState) {
+            final l10n = AppLocalizations.of(builderContext);
+            final theme = Theme.of(builderContext);
+            return AlertDialog(
+              title: Text(l10n.agentKeyOnceTitle),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.agentKeyOnceMessage,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: SelectableText(
+                      key,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontFamily: 'monospace',
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    l10n.agentKeyClipboardHint,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (copied) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      l10n.agentKeyCopiedHint,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
               ),
-              child: SelectableText(
-                key,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontFamily: 'monospace',
-                  letterSpacing: 0.5,
+              actions: [
+                TextButton.icon(
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: key));
+                    if (builderContext.mounted) {
+                      setDialogState(() => copied = true);
+                    }
+                  },
+                  icon: Icon(copied ? Icons.check : Icons.copy, size: 18),
+                  label: Text(l10n.agentCopy),
                 ),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton.icon(
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: key));
-              Navigator.pop(dialogContext);
-            },
-            icon: const Icon(Icons.copy, size: 18),
-            label: Text(l10n.agentCopied),
-          ),
-        ],
-      ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: Text(l10n.agentConfirm),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
@@ -274,6 +292,91 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
     await _run(api.resetAgentKey);
   }
 
+  /// 撤销某个配对的「本会话内允许读取」（D3：UI 必须给撤销入口）。
+  Future<void> _revokeStandingRead(Map<String, dynamic> pairing) async {
+    final id = pairing['id'] as String? ?? '';
+    if (id.isEmpty) return;
+    final nickname = pairing['nickname'] as String? ?? '';
+    final api = ref.read(vaultApiProvider);
+    try {
+      await api.clearStandingRead(id);
+      await _refresh();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_l10n.agentStandingReadRevoked(nickname))),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_l10n.agentActionFailed('$error'))),
+      );
+    }
+  }
+
+  /// 一次性撤销所有配对的免询问读取。
+  Future<void> _revokeAllStandingRead() async {
+    final api = ref.read(vaultApiProvider);
+    final ids = [
+      for (final pairing in _standingPairings)
+        if ((pairing['id'] as String? ?? '').isNotEmpty) pairing['id'] as String,
+    ];
+    for (final id in ids) {
+      try {
+        await api.clearStandingRead(id);
+      } catch (_) {
+        // 单个失败不阻塞其余撤销；最后统一刷新真实状态。
+      }
+    }
+    await _refresh();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(_l10n.agentStandingReadRevokedAll)),
+    );
+  }
+
+  Future<void> _lockAgentSession() async {
+    final api = ref.read(vaultApiProvider);
+    await _run(api.lockAgentDomain);
+  }
+
+  Future<void> _unlockAgentSession() async {
+    final password = await _askMasterPassword(_l10n.agentUnlock);
+    if (password == null || !mounted) return;
+    final api = ref.read(vaultApiProvider);
+    try {
+      await api.unlockAgentDomain(password);
+      await _refresh();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_l10n.agentActionFailed('$error'))),
+      );
+    }
+  }
+
+  /// 处于「本会话内免询问读取」的配对。
+  List<Map<String, dynamic>> get _standingPairings => [
+        for (final pairing in _pairings)
+          if (pairing['standingRead'] == true) pairing,
+      ];
+
+  /// 服务徽标文案：读的是真实 MCP 运行态，而不是"用户想开"的开关标记。
+  String _serviceLabel(AppLocalizations l10n) {
+    if (!_enabled) return l10n.agentServiceOff;
+    if (_mcpRunning) {
+      final port = _mcpPort;
+      return port == null
+          ? l10n.agentServiceOn
+          : l10n.agentServiceRunning('$port');
+    }
+    return l10n.agentServiceUnavailable;
+  }
+
+  Color _serviceColor(ColorScheme scheme) {
+    if (!_enabled) return scheme.outline;
+    return _mcpRunning ? scheme.primary : scheme.error;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = _l10n;
@@ -298,10 +401,16 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
                       ),
                     ),
                   ),
-                _buildToggleCard(l10n, scheme),
+                _buildToggleCard(l10n, theme),
                 if (_enabled) ...[
                   const SizedBox(height: 12),
                   _buildWarningBanner(l10n, theme),
+                ],
+                // 常驻的免询问指示（D3）：用户点过「本会话内允许读取」后必须
+                // 一直看得见、随时能撤销 —— 否则就是无痕授权。
+                if (_enabled && _standingPairings.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _buildStandingReadBanner(l10n, theme),
                 ],
                 const SizedBox(height: 20),
                 _sectionTitle(l10n.agentPairings, theme),
@@ -336,12 +445,35 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
                   _sectionTitle(l10n.agentAdvancedSection, theme),
                   const SizedBox(height: 8),
                   Card(
-                    child: ListTile(
-                      leading:
-                          Icon(Icons.key_off_outlined, color: scheme.error),
-                      title: Text(l10n.agentResetKey),
-                      subtitle: Text(l10n.agentResetKeySubtitle),
-                      onTap: _resetKey,
+                    child: Column(
+                      children: [
+                        // 智能体会话锁定/解锁（D1 / M6）：agent 域不再随空闲
+                        // 自动锁定，但用户必须有一个显式开关能立即收回访问权。
+                        ListTile(
+                          leading: Icon(
+                            _unlocked ? Icons.lock_outline : Icons.lock_open,
+                            color: _unlocked ? scheme.primary : null,
+                          ),
+                          title: Text(
+                            _unlocked ? l10n.agentLock : l10n.agentUnlock,
+                          ),
+                          subtitle: Text(
+                            _unlocked
+                                ? l10n.agentSessionLockSubtitle
+                                : l10n.agentSessionUnlockSubtitle,
+                          ),
+                          onTap:
+                              _unlocked ? _lockAgentSession : _unlockAgentSession,
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading: Icon(Icons.key_off_outlined,
+                              color: scheme.error),
+                          title: Text(l10n.agentResetKey),
+                          subtitle: Text(l10n.agentResetKeySubtitle),
+                          onTap: _resetKey,
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -362,7 +494,8 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
             ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
       );
 
-  Widget _buildToggleCard(AppLocalizations l10n, ColorScheme scheme) {
+  Widget _buildToggleCard(AppLocalizations l10n, ThemeData theme) {
+    final scheme = theme.colorScheme;
     return Card(
       child: Column(
         children: [
@@ -381,13 +514,18 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
           const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-            child: Row(
+            // 用 Wrap 而不是 Row：徽标文案随语言/端口变化，窄窗口（900×600
+            // 最小窗口、150% DPI）下硬排一行会 RenderFlex overflow。换行比
+            // 省略更可读，也不靠 padding 硬凑。
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 _badge(
-                  label: _enabled ? l10n.agentServiceOn : l10n.agentServiceOff,
-                  color: _enabled ? scheme.primary : scheme.outline,
+                  label: _serviceLabel(l10n),
+                  color: _serviceColor(scheme),
                 ),
-                const SizedBox(width: 8),
                 _badge(
                   label: _unlocked
                       ? l10n.agentDomainUnlocked
@@ -397,6 +535,28 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
               ],
             ),
           ),
+          // 开关开着但端点没起来：必须把核心给出的真实原因显示出来，
+          // 不能让用户以为"MCP 正常"。
+          if (_enabled && !_mcpRunning)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.error_outline, size: 16, color: scheme.error),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _mcpError == null
+                          ? l10n.agentServiceUnavailable
+                          : l10n.agentServiceError(_mcpError!),
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: scheme.error),
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -415,7 +575,16 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
         children: [
           Icon(Icons.circle, size: 8, color: color),
           const SizedBox(width: 6),
-          Text(label, style: TextStyle(fontSize: 12, color: color)),
+          // Flexible + ellipsis：单个徽标也不允许把父级撑爆（测试字体/150%
+          // 缩放下文案都比中文更长）。
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: color),
+            ),
+          ),
         ],
       ),
     );
@@ -447,6 +616,59 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
     );
   }
 
+  /// 免询问读取的常驻指示 + 一键撤销（D3）。
+  Widget _buildStandingReadBanner(AppLocalizations l10n, ThemeData theme) {
+    final scheme = theme.colorScheme;
+    final names = _standingPairings
+        .map((pairing) => pairing['nickname'] as String? ?? '')
+        .where((name) => name.isNotEmpty)
+        .join('、');
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: scheme.tertiaryContainer.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.tertiary.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.visibility_outlined,
+            color: scheme.onTertiaryContainer,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.agentStandingReadTitle,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onTertiaryContainer,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  l10n.agentStandingReadBanner(names),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onTertiaryContainer,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: _revokeAllStandingRead,
+            child: Text(l10n.agentStandingReadRevokeAll),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEmptyPairings(AppLocalizations l10n, ThemeData theme) {
     return Card(
       child: Padding(
@@ -471,52 +693,84 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
     final nickname = pairing['nickname'] as String? ?? '';
     final trusted = pairing['mode'] == 'trusted';
     final calls = pairing['calls'];
+    final standingRead = pairing['standingRead'] == true;
     final scheme = theme.colorScheme;
 
     return Card(
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: scheme.primaryContainer,
-          child: Icon(Icons.smart_toy_outlined,
-              color: scheme.onPrimaryContainer, size: 20),
-        ),
-        title: Text(nickname),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Text([
-            trusted ? l10n.agentModeTrusted : l10n.agentModeApproval,
-            if (calls != null) l10n.agentCalls('$calls'),
-          ].join(' · ')),
-        ),
-        trailing: PopupMenuButton<String>(
-          onSelected: (value) {
-            if (value == 'mode') {
-              _switchMode(pairing);
-            } else if (value == 'revoke') {
-              _revoke(pairing);
-            }
-          },
-          itemBuilder: (menuContext) => [
-            PopupMenuItem(
-              value: 'mode',
-              child: Text(
-                trusted ? l10n.agentSwitchToApproval : l10n.agentSwitchToTrusted,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ListTile(
+            leading: CircleAvatar(
+              backgroundColor: scheme.primaryContainer,
+              child: Icon(Icons.smart_toy_outlined,
+                  color: scheme.onPrimaryContainer, size: 20),
+            ),
+            title: Text(nickname),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text([
+                trusted ? l10n.agentModeTrusted : l10n.agentModeApproval,
+                if (calls != null) l10n.agentCalls('$calls'),
+                if (standingRead) l10n.agentStandingReadActive,
+              ].join(' · ')),
+            ),
+            trailing: PopupMenuButton<String>(
+              onSelected: (value) {
+                if (value == 'mode') {
+                  _switchMode(pairing);
+                } else if (value == 'revoke') {
+                  _revoke(pairing);
+                }
+              },
+              itemBuilder: (menuContext) => [
+                PopupMenuItem(
+                  value: 'mode',
+                  child: Text(
+                    trusted
+                        ? l10n.agentSwitchToApproval
+                        : l10n.agentSwitchToTrusted,
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'revoke',
+                  child: Text(l10n.agentRevoke),
+                ),
+              ],
+            ),
+          ),
+          // 「本会话内允许读取」是可撤销的会话级放行：卡片上必须有可见的
+          // 撤销按钮，不能只藏在菜单里（D3）。
+          if (standingRead)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 12, 10),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      l10n.agentStandingReadHint,
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => _revokeStandingRead(pairing),
+                    icon: const Icon(Icons.visibility_off_outlined, size: 18),
+                    label: Text(l10n.agentStandingReadRevoke),
+                  ),
+                ],
               ),
             ),
-            PopupMenuItem(
-              value: 'revoke',
-              child: Text(l10n.agentRevoke),
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }
 
   /// 切换访问方式。
   ///
-  /// 切到"可信直通"必须输入主密码（核心会二次校验）；切回"每次询问"不需要，
-  /// 但会**立刻锁掉 agent 会话域** —— 因为审批模式下对话是按次授权的。
+  /// 切到"可信直通"必须输入主密码（核心会二次校验并顺带解锁智能体会话）；
+  /// 切回"每次询问"不需要密码，也不再锁智能体会话（D1：agent 域生命周期只由
+  /// 总开关 / 显式锁定 / 核心退出决定）。
   Future<void> _switchMode(Map<String, dynamic> pairing) async {
     final id = pairing['id'] as String? ?? '';
     final isTrusted = pairing['mode'] == 'trusted';
@@ -532,5 +786,98 @@ class _AgentAccessScreenState extends ConsumerState<AgentAccessScreen> {
           mode: 'trusted',
           password: password,
         ));
+  }
+}
+
+/// 主密码确认弹窗。
+///
+/// controller 必须由弹窗自己的 [State] 持有：`showDialog` 的 Future 在路由 pop
+/// 时就完成，而 TextField 要等退场动画结束才 unmount。在 `await showDialog`
+/// 之后立刻 dispose，会让 EditableText 在下一帧用到已销毁的 controller
+/// （测试里就是 "A TextEditingController was used after being disposed"）。
+class _MasterPasswordDialog extends StatefulWidget {
+  const _MasterPasswordDialog({required this.title});
+
+  final String title;
+
+  @override
+  State<_MasterPasswordDialog> createState() => _MasterPasswordDialogState();
+}
+
+class _MasterPasswordDialogState extends State<_MasterPasswordDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        obscureText: true,
+        autofocus: true,
+        decoration:
+            InputDecoration(labelText: l10n.agentMasterPasswordPrompt),
+        onSubmitted: (value) => Navigator.pop(context, value),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text),
+          child: Text(l10n.agentConfirm),
+        ),
+      ],
+    );
+  }
+}
+
+/// 新建配对的昵称输入框（controller 生命周期与 [_MasterPasswordDialog] 同理）。
+class _PairingNicknameDialog extends StatefulWidget {
+  const _PairingNicknameDialog();
+
+  @override
+  State<_PairingNicknameDialog> createState() => _PairingNicknameDialogState();
+}
+
+class _PairingNicknameDialogState extends State<_PairingNicknameDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return AlertDialog(
+      title: Text(l10n.agentCreatePairing),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(labelText: l10n.agentPairingNickname),
+        onSubmitted: (value) => Navigator.pop(context, value.trim()),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _controller.text.trim()),
+          child: Text(l10n.agentCreatePairing),
+        ),
+      ],
+    );
   }
 }

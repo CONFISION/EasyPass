@@ -100,8 +100,8 @@ class Dpapi {
       throw DpapiException('DPAPI 只在 Windows 可用');
     }
     if (_protect != null) return;
-    final crypt32 = DynamicLibrary.open('crypt32.dll');
-    final kernel32 = DynamicLibrary.open('kernel32.dll');
+    final crypt32 = _openSystemDll('crypt32.dll');
+    final kernel32 = _openSystemDll('kernel32.dll');
     _protect = crypt32.lookupFunction<_CryptProtectDataNative,
         _CryptProtectDataDart>('CryptProtectData');
     _unprotect = crypt32.lookupFunction<_CryptUnprotectDataNative,
@@ -113,6 +113,28 @@ class Dpapi {
     _getLastError =
         kernel32.lookupFunction<_GetLastErrorNative, _GetLastErrorDart>(
             'GetLastError');
+  }
+
+  /// 优先从 `%SystemRoot%\System32\` 按**绝对路径**加载系统 DLL。
+  ///
+  /// 为什么：核心/UI 都装在用户可写目录，裸名加载会走 DLL 搜索顺序（应用目录、
+  /// 当前目录都可能被同账户进程投毒）；System32 是受 ACL 保护的系统目录，
+  /// 绝对路径加载不给搜索顺序留机会。取不到 SystemRoot / 文件不存在时回退
+  /// 裸名并打 stderr 提示 —— 硬化打折但功能可用（精简系统/测试环境）。
+  static DynamicLibrary _openSystemDll(String name) {
+    final root = Platform.environment['SystemRoot'];
+    if (root != null && root.trim().isNotEmpty) {
+      final absolute = '$root\\System32\\$name';
+      if (File(absolute).existsSync()) {
+        try {
+          return DynamicLibrary.open(absolute);
+        } catch (error) {
+          stderr.writeln('easypass: 加载 $absolute 失败（$error），回退裸名 $name');
+        }
+      }
+    }
+    stderr.writeln('easypass: WARN 无法按绝对路径加载 $name，回退 DLL 搜索顺序');
+    return DynamicLibrary.open(name);
   }
 
   /// 用当前用户的凭据加密 [plaintext]。
@@ -144,14 +166,15 @@ class Dpapi {
   }) {
     final localAlloc = _localAlloc!;
     final localFree = _localFree!;
-    final allocated = <Pointer<Void>>[];
+    // (指针, 字节数)：释放前用它做一次清零。
+    final allocated = <(Pointer<Void>, int)>[];
 
     Pointer<Uint8> alloc(int bytes) {
       final p = localAlloc(_lptr, bytes);
       if (p == nullptr) {
         throw DpapiException('LocalAlloc 失败（$bytes 字节）');
       }
-      allocated.add(p);
+      allocated.add((p, bytes));
       return p.cast<Uint8>();
     }
 
@@ -215,15 +238,26 @@ class Dpapi {
         return Uint8List.fromList(data.asTypedList(length));
       } finally {
         // DPAPI 的输出用 LocalFree 释放（与输入不同，不能混用）。
+        // 先清零再释放：LocalFree 不会擦除内存，而输出在 unprotect 分支就是
+        // 明文保险库密钥。Dart 无法阻止运行时/编译器产生内部副本，这里是
+        // 缩短明文驻留窗口的尽力措施，不构成"内存里一定没有密钥"的保证。
+        final length = outBlob.ref.cbData;
         final data = outBlob.ref.pbData;
+        if (data != nullptr && length > 0) {
+          data.asTypedList(length).fillRange(0, length, 0);
+        }
         if (data != nullptr) {
           localFree(data.cast<Void>());
           outBlob.ref.pbData = nullptr;
         }
+        outBlob.ref.cbData = 0;
       }
     } finally {
-      for (final p in allocated) {
-        localFree(p);
+      for (final (pointer, bytes) in allocated) {
+        // 输入缓冲（明文/密文/key material）与 entropy 在释放前清零；同样是
+        // 尽力而为：GC 副本、Dart 变量本身不在这些非托管缓冲的覆盖范围内。
+        pointer.cast<Uint8>().asTypedList(bytes).fillRange(0, bytes, 0);
+        localFree(pointer);
       }
     }
   }

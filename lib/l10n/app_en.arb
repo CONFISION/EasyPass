@@ -562,11 +562,48 @@
   "agentWarningBanner": "Agent access is ON: this vault can be unlocked automatically by EasyPass itself, for any process running as your Windows account. Turn it off to remove that ability immediately.",
   "agentServiceOn": "MCP service running",
   "agentServiceOff": "MCP service stopped",
+  "agentServiceUnavailable": "MCP service is not running",
+  "agentServiceRunning": "MCP service running · 127.0.0.1:{port}",
+  "@agentServiceRunning": {
+    "description": "Service badge on the agent-access screen when the core reports a real listening port.",
+    "placeholders": {
+      "port": { "type": "String" }
+    }
+  },
+  "agentServiceError": "MCP failed to start: {detail}",
+  "@agentServiceError": {
+    "description": "Shown when agent access is enabled but the core could not start the MCP endpoint; {detail} is the core's error message.",
+    "placeholders": {
+      "detail": { "type": "String" }
+    }
+  },
+  "agentSessionLockSubtitle": "Locking cuts agent access immediately. In “ask every time” mode the key is only borrowed after you approve a call.",
+  "agentSessionUnlockSubtitle": "Unlock with your master password to let agents access the vault again.",
+  "agentStandingReadTitle": "Reads allowed for this session",
+  "agentStandingReadActive": "Reads allowed without prompting",
+  "agentStandingReadBanner": "These pairings can read metadata without prompts: {names}.",
+  "@agentStandingReadBanner": {
+    "description": "Standing-read indicator on the agent-access screen.",
+    "placeholders": {
+      "names": { "type": "String" }
+    }
+  },
+  "agentStandingReadHint": "Metadata reads will not prompt until you revoke this, switch mode, turn agent access off/on, or lock the agent session.",
+  "agentStandingReadRevoke": "Revoke",
+  "agentStandingReadRevokeAll": "Revoke all",
+  "agentStandingReadRevoked": "Revoked the session read exemption for {nickname}.",
+  "@agentStandingReadRevoked": {
+    "description": "Snackbar after revoking one pairing's standing read.",
+    "placeholders": {
+      "nickname": { "type": "String" }
+    }
+  },
+  "agentStandingReadRevokedAll": "All session read exemptions revoked.",
   "agentEnableFirst": "Turn on agent access first, then pair an agent.",
   "agentAdvancedSection": "Advanced",
   "agentResetKey": "Reset the agent key",
   "agentResetKeySubtitle": "Replaces the key that wraps the vault key. The old key stops working immediately; your entries are untouched.",
-  "agentResetKeyConfirm": "Reset the agent key? Every agent using the old key will stop working until you pair it again.",
+  "agentResetKeyConfirm": "Reset the agent key? This replaces the key that wraps the vault key and re-wraps it. Your existing MCP pairings keep working; to cut off a specific agent, revoke that pairing.",
   "agentCalls": "{count} calls",
   "@agentCalls": {
     "description": "How many times this pairing called the MCP service.",
@@ -591,6 +628,9 @@
   "agentRevokeConfirm": "Revoke this pairing? The agent loses access immediately.",
   "agentKeyOnceTitle": "Paste this key into your MCP client",
   "agentKeyOnceMessage": "It is shown only once. EasyPass stores just a hash.",
+  "agentKeyClipboardHint": "Copy it into your MCP client promptly. Clipboard history and other programs may be able to read it.",
+  "agentKeyCopiedHint": "Copied to clipboard (clipboard history / other programs may see it).",
+  "agentCopy": "Copy",
   "agentCopied": "Key copied to clipboard",
   "agentMasterPasswordPrompt": "Confirm with your master password",
   "agentConfirm": "Confirm",
@@ -602,7 +642,7 @@
     }
   },
   "agentAccessEntryTitle": "Accessible to agents",
-  "agentAccessEntryOpen": "Open — agents may read this entry (metadata only).",
+  "agentAccessEntryOpen": "Open — agents may read this entry’s metadata. Only login / secure note entries can be opened; in trusted mode agents may also modify or delete it.",
   "agentAccessEntryDenied": "Permanently denied — agents can never read it.",
   "agentApprovalTitle": "An agent is asking for access",
   "agentApprovalAgent": "Agent",
@@ -613,6 +653,21 @@
   "agentApprovalAllow": "Allow",
   "agentApprovalDeny": "Deny",
   "agentApprovalAllowStanding": "Allow reads for this session",
+  "agentApprovalQueuePosition": "Request {current} of {total}",
+  "@agentApprovalQueuePosition": {
+    "description": "Position indicator inside the approval dialog when multiple requests are queued.",
+    "placeholders": {
+      "current": { "type": "String" },
+      "total": { "type": "String" }
+    }
+  },
+  "agentApprovalQueueFull": "Too many pending approvals: {count} new request(s) were rejected automatically. Check the agent for a loop.",
+  "@agentApprovalQueueFull": {
+    "description": "Shown inside the approval dialog after the queue limit dropped some requests.",
+    "placeholders": {
+      "count": { "type": "String" }
+    }
+  },
   "agentApprovalOpRead": "Read (metadata)",
   "agentApprovalOpSensitiveRead": "Read a secret",
   "agentApprovalOpWrite": "Write",
@@ -627,6 +682,13 @@
     "placeholders": { "count": { "type": "String" } }
   },
   "agentAuditOpClipboard": "Copy to clipboard",
+  "agentAuditOpClipboardField": "Copy to clipboard ({field})",
+  "@agentAuditOpClipboardField": {
+    "description": "Audit label for clipboard operations; field is password/totp/notes/private_key/passphrase/custom label.",
+    "placeholders": {
+      "field": { "type": "String" }
+    }
+  },
   "agentAuditDecisionAllowed": "Allowed",
   "agentAuditDecisionDenied": "Denied",
   "agentAuditDecisionTimeout": "Timed out",

@@ -57,7 +57,10 @@ void main() {
 
   test('打开总开关：写三处材料、解锁 agent 域、回调 true', () async {
     final callbacks = <bool>[];
-    core.actions.onAgentAccessChanged = callbacks.add;
+    core.actions.onAgentAccessChanged = (enabled) async {
+      callbacks.add(enabled);
+      return true;
+    };
 
     await core.call(Actions.enableAgentAccess);
 
@@ -67,6 +70,8 @@ void main() {
     expect(await blobFile.exists(), isTrue);
     expect(core.sessions.agent.isUnlocked, isTrue);
     expect(callbacks, [true]);
+    // keyId 必须写入：自动解封靠它拒绝"改密中断留下的旧包裹"。
+    expect(await vault.db.getMeta('vault.keyId'), isNotNull);
   });
 
   test('未解锁保险库时打开 ⇒ 拒绝，且不留下任何材料', () async {
@@ -83,7 +88,10 @@ void main() {
   test('关闭总开关：三处材料全清、锁 agent 域、回调 false', () async {
     await core.call(Actions.enableAgentAccess);
     final callbacks = <bool>[];
-    core.actions.onAgentAccessChanged = callbacks.add;
+    core.actions.onAgentAccessChanged = (enabled) async {
+      callbacks.add(enabled);
+      return true;
+    };
 
     await core.call(Actions.disableAgentAccess);
 
@@ -169,6 +177,18 @@ void main() {
     final store = accessStore();
     expect(await store.isEnabled(), isTrue, reason: '开关状态还在');
     expect(await store.loadAgentKey(), isNull, reason: '拿不到钥匙就得返回 null');
+  });
+
+  test('MCP 端点启动失败 ⇒ 打开开关回滚，不留 enabled=true（M6）', () async {
+    core.actions.onAgentAccessChanged = (enabled) async => false;
+
+    await expectLater(core.call(Actions.enableAgentAccess), throwsA(anything));
+
+    final store = accessStore();
+    expect(await store.isEnabled(), isFalse, reason: '启动失败必须回滚开关');
+    expect(await store.readWrap(), isNull);
+    expect(await blobFile.exists(), isFalse);
+    expect(core.sessions.agent.isUnlocked, isFalse);
   });
 
   test('总开关状态可从 getAgentAccessState 读到', () async {

@@ -141,6 +141,16 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
 
   /// 智能体可访问性（默认 false = 永久拒绝）。落在加密载荷里，不是明文列。
   bool _agentOpen = false;
+
+  /// 只有登录 / 安全笔记可以开放给智能体（D4）。
+  ///
+  /// identity / SSH 的字段太多、含私钥与证件号，工具面也不提供这些类型的
+  /// 写入；UI 必须和核心的硬闸保持一致：**不显示开关**，且切到这些类型时
+  /// 强制 `agentOpen=false`，避免"用户以为只读元数据、实际把私钥暴露给
+  /// 剪贴板工具"。
+  static bool _agentExposedType(EntryType type) =>
+      type == EntryType.login || type == EntryType.secureNote;
+
   bool _isSaving = false;
   bool _isLoading = false;
   bool _notFound = false;
@@ -245,7 +255,9 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
       _type = item.type;
       _selectedFolderId = item.folderId;
       _isFavorite = item.isFavorite;
-      _agentOpen = item.agentOpen;
+      // identity / SSH 不向智能体开放：历史数据里万一带着 true 也在这里清掉，
+      // 保存时不会把"本不该存在"的开放态写回去。
+      _agentOpen = _agentExposedType(item.type) && item.agentOpen;
       _nameController.text = item.name;
       _notesController.text = item.notes;
       _customFields = item.customFields;
@@ -306,7 +318,10 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
 
     // 新建时随便挑：切回去还是原来那份输入，什么都不会被丢弃。
     if (!widget.isEditing) {
-      setState(() => _type = next);
+      setState(() {
+        _type = next;
+        if (!_agentExposedType(next)) _agentOpen = false;
+      });
       return;
     }
 
@@ -338,6 +353,9 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
       // 混进别的类型。名称 / 备注 / 收藏 / 自定义字段保留。
       _baseItem = _baseItem?.withoutTypeData();
       _type = next;
+      // 切到 identity / SSH 必须同时收回智能体授权（D4）：开关本身在这两类
+      // 下不显示，残留 true 会在保存时把条目标成"开放"。
+      if (!_agentExposedType(next)) _agentOpen = false;
       _resetTypeSpecificFields();
     });
   }
@@ -398,7 +416,9 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
       name: _nameController.text.trim(),
       notes: _notesController.text,
       isFavorite: _isFavorite,
-      agentOpen: _agentOpen,
+      // 双保险：即使 `_agentOpen` 因为某种路径残留 true，非暴露类型在落库时
+      // 也一律按"永久拒绝"处理（与核心 D4 硬闸一致）。
+      agentOpen: _agentExposedType(_type) && _agentOpen,
       // 只给当前类型挂字段块：其它类型一律 null，
       // mapper 归一化后不会往库里写出任何"外来"数据。
       login: _type == EntryType.login
@@ -1123,18 +1143,22 @@ class _AddEditEntryScreenState extends ConsumerState<AddEditEntryScreen> {
                         const SizedBox(height: 8),
                         // 智能体可访问性：默认关闭 = 永久拒绝。
                         // 只有打开的条目才会出现在智能体的 `list_entries` 里。
-                        SwitchListTile(
-                          title: Text(l10n.agentAccessEntryTitle),
-                          subtitle: Text(
-                            _agentOpen
-                                ? l10n.agentAccessEntryOpen
-                                : l10n.agentAccessEntryDenied,
+                        // identity / SSH 不向智能体开放，**整块不渲染**（D4）：
+                        // 让用户看到开关就等于允许他做出一个会被硬闸拒绝的授权。
+                        if (_agentExposedType(_type)) ...[
+                          SwitchListTile(
+                            title: Text(l10n.agentAccessEntryTitle),
+                            subtitle: Text(
+                              _agentOpen
+                                  ? l10n.agentAccessEntryOpen
+                                  : l10n.agentAccessEntryDenied,
+                            ),
+                            value: _agentOpen,
+                            onChanged: (value) =>
+                                setState(() => _agentOpen = value),
                           ),
-                          value: _agentOpen,
-                          onChanged: (value) =>
-                              setState(() => _agentOpen = value),
-                        ),
-                        const SizedBox(height: 8),
+                          const SizedBox(height: 8),
+                        ],
                         KeyedSubtree(
                           key: ValueKey('entry-form-custom-fields-$_revision'),
                           child: CustomFieldsEditor(

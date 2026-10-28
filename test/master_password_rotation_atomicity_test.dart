@@ -1,10 +1,16 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:easypass/core/crypto/agent_key_material.dart';
 import 'package:easypass/core/storage/vault_meta_secret_store.dart';
+import 'package:easypass/core_service/agent_access_store.dart';
 import 'package:easypass/core_service/core_actions.dart';
+import 'package:easypass/data/database/database.dart';
 import 'package:easypass/data/models/entry_fields.dart';
 import 'package:easypass/data/models/entry_type.dart';
 import 'package:easypass/data/models/vault_item.dart';
+import 'package:easypass/data/models/vault_item_mapper.dart';
 import 'package:easypass/data/services/master_password_rotation.dart';
 import 'package:easypass/protocol/protocol.dart';
 
@@ -251,6 +257,163 @@ void main() {
         ),
         reason: '旧密码不应再能开库',
       );
+    });
+  });
+
+  /// H6 / D5：改主密码会换掉 vaultKey，而 agent 钥匙包裹与"钥匙指纹"都是
+  /// vaultKey 的派生物。它们必须与整库重加密**同一个事务**落库 —— 否则崩溃
+  /// 窗口会留下"库已是新钥匙、包裹还是旧钥匙"的错配，下次启动 agent 域会拿
+  /// 旧钥匙解封并照常启动 MCP（旧钥匙写入的数据之后永久解不开）。
+  group('智能体钥匙材料与轮换同事务（H6）', () {
+    /// 从当前会话钥匙出发，造一组"新密码的派生材料"。
+    Future<
+        ({
+          Uint8List oldKey,
+          String newSalt,
+          Uint8List newKey,
+          String newPasswordHash,
+        })> newMaterials(CoreHarness core) async {
+      final oldKey = Uint8List.fromList(core.sessions.ui.key!);
+      final newSalt = core.crypto.generateSalt();
+      final newKey = core.crypto.deriveKey(newPassword, newSalt);
+      final newPasswordHash =
+          core.crypto.hashMasterPassword(newPassword, newSalt);
+      return (
+        oldKey: oldKey,
+        newSalt: newSalt,
+        newKey: newKey,
+        newPasswordHash: newPasswordHash,
+      );
+    }
+
+    test('轮换成功：包裹与指纹跟整库重加密一起落库，且包裹真的能解开新钥匙', () async {
+      final core = await seed();
+      final agentKey = AgentKeyMaterial.generateAgentKey();
+      final m = await newMaterials(core);
+      final wrap =
+          AgentKeyMaterial.wrap(vaultKey: m.newKey, agentKey: agentKey);
+      final keyId = AgentKeyMaterial.keyId(m.newKey);
+
+      final count = await core.rotation.startRotation(
+        oldKey: m.oldKey,
+        newSalt: m.newSalt,
+        newPasswordHash: m.newPasswordHash,
+        newKey: m.newKey,
+        agentWrap: wrap,
+        vaultKeyId: keyId,
+      );
+
+      expect(count, 1);
+      // 写进去的是"能解开新钥匙"的真包裹，不是随便一个字符串。
+      final restored =
+          AgentKeyMaterial.unwrap(blob: wrap, agentKey: agentKey);
+      expect(restored, m.newKey);
+      expect(
+        await vault.db.getMeta(MasterPasswordRotation.agentWrapMetaKey),
+        wrap,
+      );
+      expect(
+        await vault.db.getMeta(MasterPasswordRotation.vaultKeyIdMetaKey),
+        keyId,
+      );
+      // 此时还没 completeRotation：日志仍在（新密码的唯一依据），但它与 agent
+      // 材料、整库密文是同一批提交的。
+      expect(await vault.db.getMeta(MasterPasswordRotation.metaKey), isNotNull);
+
+      // 整库确实已在新钥匙上（严格解密，不用宽容模式）。
+      final row = (await vault.db.getAllEntries()).single;
+      final mapper = VaultItemMapper(core.crypto);
+      expect(
+        mapper.fromRow(row, m.newKey, lenient: false).loginOrEmpty.password,
+        'secret-pw',
+      );
+    });
+
+    test('轮换中途失败：包裹/指纹/日志/已重加密的行一起回滚', () async {
+      final core = await seed();
+      await vault.db.setMeta(MasterPasswordRotation.agentWrapMetaKey, 'OLD-WRAP');
+      await vault.db
+          .setMeta(MasterPasswordRotation.vaultKeyIdMetaKey, 'OLD-KEY-ID');
+      // 第二条行故意造坏：它排在有效行之后，制造"前一行已经 update、后一行抛异常"，
+      // 用来证明整个事务域（不只是日志）都会回滚。
+      await vault.db.insertEntry(PasswordEntriesCompanion.insert(
+        id: 'corrupt-row',
+        name: 'Corrupt',
+        passwordEncrypted: 'not-a-valid-ciphertext',
+        createdAt: 0,
+        updatedAt: 0,
+      ));
+      final ciphertextBefore =
+          (await vault.db.getEntryById(entryId))!.passwordEncrypted;
+
+      final m = await newMaterials(core);
+      await expectLater(
+        core.rotation.startRotation(
+          oldKey: m.oldKey,
+          newSalt: m.newSalt,
+          newPasswordHash: m.newPasswordHash,
+          newKey: m.newKey,
+          agentWrap: 'NEW-WRAP',
+          vaultKeyId: 'NEW-KEY-ID',
+        ),
+        throwsA(anything),
+      );
+
+      expect(
+        await vault.db.getMeta(MasterPasswordRotation.agentWrapMetaKey),
+        'OLD-WRAP',
+        reason: 'agent 包裹必须跟着事务回滚，不能"只改一半"',
+      );
+      expect(
+        await vault.db.getMeta(MasterPasswordRotation.vaultKeyIdMetaKey),
+        'OLD-KEY-ID',
+      );
+      expect(await vault.db.getMeta(MasterPasswordRotation.metaKey), isNull,
+          reason: '轮换日志与重加密一起回滚');
+      final row = (await vault.db.getEntryById(entryId))!;
+      expect(row.passwordEncrypted, ciphertextBefore,
+          reason: '有效行必须还在旧钥匙上，不能被"改到一半"');
+      final codec = VaultItemMapper(core.crypto);
+      expect(
+        codec.fromRow(row, m.oldKey, lenient: false).loginOrEmpty.password,
+        'secret-pw',
+      );
+    });
+
+    test('不传包裹/指纹：事务内清掉旧值，不残留"旧钥匙还能解"的材料', () async {
+      final core = await seed();
+      await vault.db.setMeta(MasterPasswordRotation.agentWrapMetaKey, 'STALE-WRAP');
+      await vault.db
+          .setMeta(MasterPasswordRotation.vaultKeyIdMetaKey, 'STALE-KEY-ID');
+      final m = await newMaterials(core);
+
+      await core.rotation.startRotation(
+        oldKey: m.oldKey,
+        newSalt: m.newSalt,
+        newPasswordHash: m.newPasswordHash,
+        newKey: m.newKey,
+      );
+
+      expect(
+        await vault.db.getMeta(MasterPasswordRotation.agentWrapMetaKey),
+        isNull,
+        reason: '改密后不允许留下上一次的包裹（旧钥匙复活窗口）',
+      );
+      expect(
+        await vault.db.getMeta(MasterPasswordRotation.vaultKeyIdMetaKey),
+        isNull,
+        reason: '不写新指纹时也不该留着旧指纹（会误伤自动解封校验）',
+      );
+      expect(await vault.db.getMeta(MasterPasswordRotation.metaKey), isNotNull);
+    });
+
+    test('meta 键名与智能体存储 / 核心启动校验的约定一致', () {
+      expect(
+        MasterPasswordRotation.agentWrapMetaKey,
+        AgentAccessStore.wrapKey,
+        reason: 'core_actions 用 AgentAccessStore 写包裹，轮换必须写同一个键',
+      );
+      expect(MasterPasswordRotation.vaultKeyIdMetaKey, 'vault.keyId');
     });
   });
 }

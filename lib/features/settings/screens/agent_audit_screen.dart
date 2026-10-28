@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../providers/agent_access_provider.dart';
+import '../widgets/agent_approval_host.dart' show sanitizeAgentDisplayText;
 
 /// 智能体访问审计查看页（侧边栏「智能体活动」，回收站上方）。
 ///
@@ -108,7 +109,15 @@ class AgentAuditScreen extends ConsumerWidget {
     final allowed = decision == 'allowed' || decision == 'allowed_standing';
     final at = (entry['at'] as num?)?.toInt() ?? 0;
     final time = DateTime.fromMillisecondsSinceEpoch(at);
-    final entryName = entry['entryName'] as String?;
+    // 昵称与条目名都是用户/智能体可控字符串：审批页清洗过的同一套规则
+    // 在这里也要用，否则换行/RLO 能让一条审计记录"看起来像两条"。
+    final nickname = sanitizeAgentDisplayText(
+      entry['nickname'] as String? ?? '',
+    );
+    final rawEntryName = entry['entryName'] as String?;
+    final entryName =
+        rawEntryName == null ? null : sanitizeAgentDisplayText(rawEntryName);
+    final tool = sanitizeAgentDisplayText(entry['tool'] as String? ?? '');
     final op = entry['op'] as String? ?? '';
 
     return Card(
@@ -127,7 +136,7 @@ class AgentAuditScreen extends ConsumerWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${entry['nickname'] ?? ''} · ${_opLabel(l10n, op)}',
+                    '$nickname · ${_opLabel(l10n, op)}',
                     style: theme.textTheme.bodyMedium
                         ?.copyWith(fontWeight: FontWeight.w600),
                     overflow: TextOverflow.ellipsis,
@@ -143,7 +152,7 @@ class AgentAuditScreen extends ConsumerWidget {
             const SizedBox(height: 6),
             Text(
               [
-                entry['tool'],
+                tool,
                 ?entryName,
                 _decisionLabel(l10n, decision),
               ].join(' · '),
@@ -163,6 +172,16 @@ class AgentAuditScreen extends ConsumerWidget {
   }
 
   String _opLabel(AppLocalizations l10n, String op) {
+    // D10 起成功审计的 op 是 `clipboard:<field>`（field=password/totp/notes/…）；
+    // 只显示"复制到剪贴板"会让人分不清复制的是密码还是备注/私钥。
+    const clipboardPrefix = 'clipboard:';
+    if (op.startsWith(clipboardPrefix)) {
+      final field = op.substring(clipboardPrefix.length).trim();
+      if (field.isNotEmpty) {
+        return l10n.agentAuditOpClipboardField(sanitizeAgentDisplayText(field));
+      }
+      return l10n.agentAuditOpClipboard;
+    }
     switch (op) {
       case 'write':
         return l10n.agentApprovalOpWrite;

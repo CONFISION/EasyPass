@@ -1083,6 +1083,54 @@ class AppLocalizationsZh extends AppLocalizations {
   String get agentServiceOff => 'MCP 服务已停止';
 
   @override
+  String get agentServiceUnavailable => 'MCP 服务未运行';
+
+  @override
+  String agentServiceRunning(String port) {
+    return 'MCP 服务运行中 · 127.0.0.1:$port';
+  }
+
+  @override
+  String agentServiceError(String detail) {
+    return 'MCP 启动失败：$detail';
+  }
+
+  @override
+  String get agentSessionLockSubtitle => '锁定后智能体立即失去访问权；每次询问模式下由你在批准时临时借钥匙。';
+
+  @override
+  String get agentSessionUnlockSubtitle => '用主密码解锁后，智能体才能继续访问。';
+
+  @override
+  String get agentStandingReadTitle => '本会话免询问读取';
+
+  @override
+  String get agentStandingReadActive => '本会话免询问读取中';
+
+  @override
+  String agentStandingReadBanner(String names) {
+    return '以下配对普通读不再弹窗：$names。';
+  }
+
+  @override
+  String get agentStandingReadHint =>
+      '撤销前普通读不会再弹窗；切方式 / 关开总开关 / 重设主密码 / 锁定智能体会话也会清掉它。';
+
+  @override
+  String get agentStandingReadRevoke => '撤销';
+
+  @override
+  String get agentStandingReadRevokeAll => '全部撤销';
+
+  @override
+  String agentStandingReadRevoked(String nickname) {
+    return '已撤销 $nickname 的本会话免询问读取。';
+  }
+
+  @override
+  String get agentStandingReadRevokedAll => '已撤销全部本会话免询问读取。';
+
+  @override
   String get agentEnableFirst => '请先打开上方的智能体访问，再配对智能体。';
 
   @override
@@ -1095,7 +1143,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get agentResetKeySubtitle => '更换用于包裹保险库密钥的那把密钥。旧密钥立刻失效，条目数据不受影响。';
 
   @override
-  String get agentResetKeyConfirm => '重置智能体密钥？所有使用旧密钥的智能体会立刻失去访问权，需要重新配对。';
+  String get agentResetKeyConfirm =>
+      '重置智能体密钥？它会更换用于包裹保险库密钥的那把密钥并重新包裹。现有 MCP 配对**不会**失效；要收回某个智能体的访问权，请撤销该配对。';
 
   @override
   String agentCalls(String count) {
@@ -1154,6 +1203,15 @@ class AppLocalizationsZh extends AppLocalizations {
   String get agentKeyOnceMessage => '只显示这一次；EasyPass 只保存哈希。';
 
   @override
+  String get agentKeyClipboardHint => '请尽快填入 MCP 客户端；剪贴板历史与其他程序可能看到这把密钥。';
+
+  @override
+  String get agentKeyCopiedHint => '已复制到剪贴板（剪贴板历史 / 其他程序可能可见）。';
+
+  @override
+  String get agentCopy => '复制';
+
+  @override
   String get agentCopied => '密钥已复制到剪贴板';
 
   @override
@@ -1171,7 +1229,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get agentAccessEntryTitle => '允许智能体访问';
 
   @override
-  String get agentAccessEntryOpen => '开放 —— 智能体可读取该条目（仅元数据）。';
+  String get agentAccessEntryOpen =>
+      '开放 —— 智能体可读取该条目的元数据。只有登录 / 安全笔记条目可以开放；可信直通模式下智能体还可修改或删除它。';
 
   @override
   String get agentAccessEntryDenied => '永久拒绝 —— 智能体永远读不到它。';
@@ -1204,6 +1263,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get agentApprovalAllowStanding => '本会话内允许读取';
 
   @override
+  String agentApprovalQueuePosition(String current, String total) {
+    return '第 $current / $total 条待审批';
+  }
+
+  @override
+  String agentApprovalQueueFull(String count) {
+    return '待审批请求过多：已自动拒绝 $count 条新请求。请检查智能体是否陷入循环。';
+  }
+
+  @override
   String get agentApprovalOpRead => '读取（元数据）';
 
   @override
@@ -1234,6 +1303,11 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get agentAuditOpClipboard => '复制到剪贴板';
+
+  @override
+  String agentAuditOpClipboardField(String field) {
+    return '复制到剪贴板（$field）';
+  }
 
   @override
   String get agentAuditDecisionAllowed => '已允许';

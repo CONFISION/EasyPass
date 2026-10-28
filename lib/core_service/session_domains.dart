@@ -18,16 +18,30 @@ enum SessionDomain {
   ///
   /// **独立于 `ui` 与 `bridge`**：智能体是可被提示注入驱动的调用者，
   /// 不能借用"用户自己解锁了 App / 浏览器"带来的解锁态（见 MCP spec 的 I-3 与 D4）。
-  /// 空闲超时同样独立（默认 5 分钟），`end_session` 会立刻把它锁掉。
+  ///
+  /// **不参与空闲自动锁定（D1）**：智能体访问一旦被用户授权就是"零介入"，空闲
+  /// 5 分钟就锁会让可信直通在无人值守时确定性失效。它的生命周期只有四个边界：
+  /// 总开关开 → 解锁、总开关关 → 锁、用户显式锁 → 锁、核心退出 → 锁。
   agent,
 }
 
-/// 会话域集合：各自一份密钥副本与空闲计时器，外加"谁锁了"的传播规则。
+/// 会话域集合：各自一份密钥副本，外加"谁锁了"的传播规则。
+///
+/// 只有 `ui` / `bridge` 有空闲计时；`agent` 域不因时间过期（见
+/// [SessionDomain.agent]）。
 class SessionDomains {
-  SessionDomains({required Duration idleTimeout}) {
-    _ui = VaultSession(idleTimeout: idleTimeout);
-    _bridge = VaultSession(idleTimeout: idleTimeout);
-    _agent = VaultSession(idleTimeout: idleTimeout);
+  SessionDomains({
+    required Duration idleTimeout,
+    DateTime Function()? clock,
+  }) {
+    _ui = VaultSession(idleTimeout: idleTimeout, clock: clock);
+    _bridge = VaultSession(idleTimeout: idleTimeout, clock: clock);
+    // agent 域显式关掉空闲自动锁定：见 `VaultSession.autoLockEnabled` 的说明。
+    _agent = VaultSession(
+      idleTimeout: idleTimeout,
+      autoLockEnabled: false,
+      clock: clock,
+    );
     _lastKnown[SessionDomain.ui] = false;
     _lastKnown[SessionDomain.bridge] = false;
     _lastKnown[SessionDomain.agent] = false;
@@ -51,6 +65,8 @@ class SessionDomains {
 
   /// 定时检查间隔：`VaultSession` 的过期是**惰性**的（读 `isUnlocked` 才判定），
   /// 因此必须有这个节拍器才能把"空闲超时"变成可推送的事件。
+  ///
+  /// agent 域也在这个循环里（它的锁/解锁要能推送），但它不会因空闲而过期。
   static const Duration tickInterval = Duration(seconds: 5);
 
   VaultSession get ui => _ui;
@@ -84,8 +100,8 @@ class SessionDomains {
   /// UI 锁定 ⇒ **只锁 ui + bridge**。
   ///
   /// **agent 域刻意不在此列**（用户 2026-10-27 明确要求）：智能体访问一旦被用户
-  /// 授权，就应该是"零介入、不随 UI 状态变化"的。agent 域只随
-  /// 总开关关闭 / MCP 会话结束（`end_session`）/ 撤销配对 / 核心退出 而锁。
+  /// 授权，就应该是"零介入、不随 UI 状态变化"的。agent 域只随总开关关闭 /
+  /// 用户显式锁定 / 核心退出而锁（**没有**空闲自动锁定，见 D1）。
   void lockAll() {
     _ui.lock();
     _bridge.lock();
@@ -93,15 +109,17 @@ class SessionDomains {
   }
 
   /// 更新空闲超时（用户改设置）。就地改字段，保住已解锁的钥匙。
+  ///
+  /// **只改 ui / bridge**：agent 域不参与空闲自动锁定（D1），把设置写进它的
+  /// 计时器只会制造"它看起来会过期"的误解。
   void setIdleTimeout(Duration value) {
     _ui.idleTimeout = value;
     _bridge.idleTimeout = value;
-    _agent.idleTimeout = value;
   }
 
   Duration get idleTimeout => _ui.idleTimeout;
 
-  /// 检查两个域的状态并在翻转时回调。
+  /// 检查三个域的状态并在翻转时回调。
   ///
   /// 防重入：读 `isUnlocked` 可能触发惰性过期 → `lock()` → 又回调到这里。
   /// 没有这个标记会绕成一个（无害但没必要的）递归。

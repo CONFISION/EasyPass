@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'package:drift/drift.dart';
 
 import '../../core/crypto/crypto_service.dart';
 import '../database/database.dart';
@@ -133,13 +133,47 @@ class VaultRepository {
       return;
     }
 
+    // **更新绝不改 `deleted_at`**：回收站里的条目只能通过 restore 恢复。
+    // 旧实现把调用方的整行快照写回（编辑页构造的 item 从不带 deletedAt），
+    // 于是"编辑期间被删除"的条目会被静默复活、绕过恢复审批（评审 H1）。
+    // 这里强制保留库里的现状。
     await db.updateEntry(
       item.id,
-      mapper.toUpdate(
-        item.copyWith(createdAt: existing.createdAt, updatedAt: now),
-        key,
-      ),
+      mapper
+          .toUpdate(
+            item.copyWith(createdAt: existing.createdAt, updatedAt: now),
+            key,
+          )
+          .copyWith(deletedAt: Value(existing.deletedAt)),
     );
+  }
+
+  /// 条件更新：只有 `updated_at` 与调用方读到的值一致、且条目不在回收站时
+  /// 才落库；返回 false 表示期间被别的写入者改过（调用方应拒绝本次写入）。
+  ///
+  /// 智能体审批是"用户同意了一个基于旧快照的修改"，审批窗口内用户完全可能
+  /// 正在编辑同一条目（改密码/改 URL）。无条件整行写回会把用户的新值覆盖回
+  /// 旧值（评审 H1 的凭据回滚 PoC），所以写入必须带 CAS。
+  Future<bool> updateItemIfUnchanged(
+    VaultItem item, {
+    required int expectedUpdatedAt,
+  }) async {
+    final key = _requireKey();
+    final mapper = this.mapper;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final companion = mapper
+        .toUpdate(
+          item.copyWith(createdAt: item.createdAt, updatedAt: now),
+          key,
+        )
+        .copyWith(deletedAt: const Value(null));
+    final affected = await (db.update(db.passwordEntries)
+          ..where((t) =>
+              t.id.equals(item.id) &
+              t.updatedAt.equals(expectedUpdatedAt) &
+              t.deletedAt.isNull()))
+        .write(companion);
+    return affected > 0;
   }
 
   /// 删除 = **移到回收站**（软删：只写 `deleted_at`，密文一个字节都不动）。
@@ -172,11 +206,14 @@ class VaultRepository {
   ///
   /// 刻意只允许删回收站里的条目：正常条目必须先"删除"进回收站，再删一次。
   /// 这是给 UI/智能体两端都保一条"误删还能捞回来"的缓冲。
+  ///
+  /// 用**单语句条件删除**而不是"先查后删"：并发 restore 落在查询与删除之间
+  /// 时，旧实现会硬删一条已经恢复成正常的条目（评审 DATA-4）。
   Future<bool> permanentlyDeleteItem(String id) async {
-    final row = await db.getEntryById(id);
-    if (row == null || row.deletedAt == null) return false;
-    await db.deleteEntry(id);
-    return true;
+    final affected = await (db.delete(db.passwordEntries)
+          ..where((t) => t.id.equals(id) & t.deletedAt.isNotNull()))
+        .go();
+    return affected > 0;
   }
 
   /// 清空回收站（硬删除全部已删除行），返回删除条数。
@@ -279,6 +316,28 @@ class VaultRepository {
       }
     }
     return true;
+  }
+
+  /// **严格**探测：必须至少有一行能用 [key] 严格解开，否则返回 false。
+  ///
+  /// 与 [encryptionProbeWorks] 的宽容语义刻意不同：宽容版在"一行都解不开"时
+  /// 返回 true（为轮换恢复而设计——无法区分"钥匙不对"与"整库都坏"）。但启动
+  /// 自动解封智能体钥匙时不能用它：无 `vault.keyId` 的旧库若包裹里是旧钥匙，
+  /// 宽容版会把"完全解不开"判成"无法证明不对"，等于 fail-open（评审 V-1）。
+  /// 安全校验一律用本方法；空库无法证明，同样返回 false（fail closed）。
+  Future<bool> encryptionProbeWorksStrict(Uint8List key) async {
+    final rows = await db.getAllEntries();
+    if (rows.isEmpty) return false;
+    final itemMapper = mapper;
+    for (final row in rows) {
+      try {
+        itemMapper.fromRow(row, key, lenient: false);
+        return true;
+      } catch (_) {
+        // 这一行解不开：继续试下一行（坏行是现实存在的）。
+      }
+    }
+    return false;
   }
 
   // ─── 文件夹 ─────────────────────────────────────────────

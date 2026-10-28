@@ -148,4 +148,52 @@ void main() {
       expect(VaultSession().idleTimeout, const Duration(minutes: 5));
     });
   });
+
+  /// `agent` 域的生命周期不靠时间（D1）：空闲多久都不该过期，只由显式
+  /// lock()/unlock() 驱动。这条不变量是"智能体零介入"的地基 —— 空闲 5 分钟就锁
+  /// 会让可信直通在无人值守时确定性地失效。
+  group('不参与空闲自动锁定（agent 域）', () {
+    VaultSession buildAgent() => VaultSession(
+          clock: () => now,
+          autoLockEnabled: false,
+        );
+
+    test('空闲无限久也不锁定，密钥一直在', () {
+      final agent = buildAgent();
+      final key = fakeKey();
+      agent.unlock(key);
+
+      now = now.add(const Duration(days: 365));
+
+      expect(agent.isUnlocked, isTrue, reason: 'agent 域不参与空闲自动锁定');
+      expect(agent.key, same(key));
+      expect(key, isNot(everyElement(0)), reason: '没有过期，就不该有清零动作');
+    });
+
+    test('remaining 恒为 null（没有"还剩多久自动锁"这个概念）', () {
+      final agent = buildAgent();
+      agent.unlock(fakeKey());
+
+      expect(agent.remaining, isNull);
+      now = now.add(const Duration(hours: 1));
+      expect(agent.remaining, isNull);
+    });
+
+    test('显式 lock 仍然立即生效并清零密钥字节', () {
+      final agent = buildAgent();
+      final key = fakeKey();
+      agent.unlock(key);
+
+      agent.lock();
+
+      expect(agent.isUnlocked, isFalse);
+      expect(agent.key, isNull);
+      expect(key, everyElement(0));
+    });
+
+    test('开关默认开启（ui/bridge 语义不变），只有显式关掉的会话才免过期', () {
+      expect(VaultSession().autoLockEnabled, isTrue);
+      expect(buildAgent().autoLockEnabled, isFalse);
+    });
+  });
 }

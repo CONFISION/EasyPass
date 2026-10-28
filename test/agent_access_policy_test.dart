@@ -15,6 +15,7 @@ void main() {
   AgentAccessRequest req({
     AgentOp op = AgentOp.read,
     bool entryOpen = true,
+    bool typeExposed = true,
     bool revoked = false,
     bool expired = false,
     bool keyMatches = true,
@@ -29,6 +30,7 @@ void main() {
     return AgentAccessRequest(
       op: op,
       entryOpen: entryOpen,
+      typeExposed: typeExposed,
       revoked: revoked,
       expired: expired,
       keyMatches: keyMatches,
@@ -41,6 +43,50 @@ void main() {
       standingRead: standingRead,
     );
   }
+
+  group('H5：identity / SSH 类型硬闸（排在 entryOpen 之后）', () {
+    test('类型不暴露时，任何方式 / 已同意 / 可信都拿不到允许', () {
+      final result = AgentAccessPolicy.evaluate(req(
+        typeExposed: false,
+        mode: AgentMode.trusted,
+        trusted: true,
+        approvedThisCall: true,
+        standingRead: true,
+      ));
+      expect(result.allowed, isFalse);
+      expect(result.reason, AgentDenyReason.typeNotExposed);
+    });
+
+    test('顺序：entryClosed 先于 typeNotExposed', () {
+      expect(
+        AgentAccessPolicy.evaluate(req(entryOpen: false, typeExposed: false)).reason,
+        AgentDenyReason.entryClosed,
+      );
+    });
+
+    test('顺序：typeNotExposed 先于 revoked / sessionLocked', () {
+      expect(
+        AgentAccessPolicy.evaluate(req(typeExposed: false, revoked: true)).reason,
+        AgentDenyReason.typeNotExposed,
+      );
+      expect(
+        AgentAccessPolicy.evaluate(req(typeExposed: false, sessionUnlocked: false))
+            .reason,
+        AgentDenyReason.typeNotExposed,
+      );
+    });
+
+    test('precheck 同样在弹审批之前拒绝不暴露的类型', () {
+      expect(
+        AgentAccessPolicy.precheck(req(typeExposed: false)),
+        AgentDenyReason.typeNotExposed,
+      );
+      expect(
+        AgentAccessPolicy.precheck(req(typeExposed: false, revoked: true)),
+        AgentDenyReason.typeNotExposed,
+      );
+    });
+  });
 
   group('I-9：条目开关是硬闸，先于一切', () {
     test('条目永久拒绝时，可信直通 + 已同意也拿不到允许', () {

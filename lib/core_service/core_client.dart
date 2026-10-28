@@ -280,10 +280,20 @@ class CoreRequestException implements Exception {
 /// 请求正在运行的核心锁定保险库（托盘"仅退出 UI"、CLI `--lock`）。
 ///
 /// 返回 true 表示核心确认已锁定；没有核心在跑时返回 true（无事可做）。
+/// 发现文件存在但读不出来时返回 false —— **不能**当成"没有核心"，
+/// 否则调用方会把"库没锁"当成功报给用户（fail-open）。
 Future<bool> lockRunningCore({
   Duration timeout = const Duration(seconds: 5),
 }) async {
-  final info = await CoreDiscovery.read();
+  final CoreInfo? info;
+  try {
+    info = await CoreDiscovery.read();
+  } on CoreDiscoveryException catch (error) {
+    stderr.writeln(
+      'easypass: 发现文件无法读取，核心状态未知，锁定失败（fail closed）：$error',
+    );
+    return false;
+  }
   if (info == null) return true;
   CoreClient? client;
   try {
@@ -302,10 +312,20 @@ Future<bool> lockRunningCore({
 ///
 /// 返回 true 表示核心确认退出（或本来就没在跑）。实现上先发 `shutdownCore`，
 /// 再轮询发现文件是否消失 —— 那才是"核心真的退出了"的证据。
+/// 发现文件存在但读不出来时返回 false（fail closed）：核心可能还开着，
+/// 不能对调用方谎报"已退出"。
 Future<bool> shutdownRunningCore({
   Duration timeout = const Duration(seconds: 10),
 }) async {
-  final info = await CoreDiscovery.read();
+  final CoreInfo? info;
+  try {
+    info = await CoreDiscovery.read();
+  } on CoreDiscoveryException catch (error) {
+    stderr.writeln(
+      'easypass: 发现文件无法读取，核心状态未知，无法确认退出（fail closed）：$error',
+    );
+    return false;
+  }
   if (info == null) return true;
 
   CoreClient? client;
@@ -323,10 +343,15 @@ Future<bool> shutdownRunningCore({
   final deadline = DateTime.now().add(timeout);
   while (DateTime.now().isBefore(deadline)) {
     await Future<void>.delayed(const Duration(milliseconds: 200));
-    final current = await CoreDiscovery.read();
-    if (current == null || current.pid != info.pid) {
-      client?.close();
-      return true;
+    try {
+      final current = await CoreDiscovery.read();
+      if (current == null || current.pid != info.pid) {
+        client?.close();
+        return true;
+      }
+    } on CoreDiscoveryException catch (error) {
+      // 轮询期间文件被写坏：读不到就不能确认退出，继续等；超时返回 false。
+      stderr.writeln('easypass: 轮询发现文件失败，继续等待：$error');
     }
   }
   client?.close();

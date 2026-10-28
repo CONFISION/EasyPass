@@ -33,6 +33,9 @@ class ExportImportException implements Exception {
 ///   `id / folder_id / type / name / notes / is_favorite / created_at /
 ///   updated_at`，加**当前类型自己的**字段块（`login` / `identity` /
 ///   `ssh_key`）与非空 `custom_fields`。给用户自己看，别拿去分享。
+///   另有 `agent_access`（`open` / `denied`）：它是**本机授权位**，会随备份
+///   带出 —— 明文备份被分享时等于告诉对方"哪些条目对智能体开放"，所以别分享。
+///   `deleted_at` **不出现**：导出走 `getItems()`，回收站条目默认排除。
 /// - **加密备份**：`format: 'encrypted'`，整份明文 JSON 用会话密钥
 ///   AES-256-CBC 加密（`IV(16) || ciphertext` 的 base64）。文件里**不得**
 ///   出现明文密码 / TOTP 密钥 / SSH 私钥 / 口令 / 证件号。
@@ -41,6 +44,9 @@ class ExportImportException implements Exception {
 /// - 认 2.0.0，也认 1.x（没有 `type` → 登录；`url/username/password/
 ///   totp_secret` 平铺在条目顶层 —— `VaultItem.fromJson` 负责这部分）；
 /// - 未知 `type` 一律回退登录，绝不因为类型字段乱七八糟就崩；
+/// - **本机状态位一律清洗**（见 [ExportImportService._parseEntry]）：
+///   `deleted_at` 丢弃（条目不会因导入而静默消失），`identity` / `ssh_key`
+///   的 `agent_access=open` 强制关闭，`login` / `secure_note` 保留（备份恢复语义）；
 /// - 持久化统一走 [VaultRepository.saveItem]（登录字段由 `VaultItemMapper`
 ///   用会话密钥重新加密），本服务**不再**自己拼 `PasswordEntriesCompanion`；
 /// - **先全部解析校验、再写库**（写库还包在一个事务里）：解析失败就抛
@@ -476,8 +482,16 @@ class ExportImportService {
   /// 单个条目 → [VaultItem]。
   ///
   /// 类型解析、字段块兼容、平铺的 1.x 登录字段全部交给
-  /// [VaultItem.fromJson]（未知 type 回退登录），这里只补三件事：
-  /// 老格式密文键的解密、缺 id、缺 name。
+  /// [VaultItem.fromJson]（未知 type 回退登录），这里补三件事：
+  /// 老格式密文键的解密、缺 id / 缺 name 的兜底，以及**清洗本机状态位**。
+  ///
+  /// 为什么必须清洗（导入搬的是"数据"，不是"本机状态与授权"）：
+  /// - `deleted_at` 只由本机回收站产生，正常导出不含它（导出走 `getItems()`，
+  ///   默认排除回收站）。文件里出现它只可能来自手改/构造 —— 照单全收会让
+  ///   "导入 N 条"之后有几条在列表里静默消失（用户会以为导入失败/丢数据）。
+  /// - `agent_open` 是**本机授权**：备份文件不该替用户决定"这条对智能体开放"。
+  ///   login / secure_note 保留（用户自己备份的恢复语义）；identity / ssh_key
+  ///   强制关闭（这两类产品上不对智能体开放，见修复计划 D4）。
   VaultItem _parseEntry(Map<String, dynamic> raw, int index) {
     final map = <String, dynamic>{...raw};
 
@@ -507,6 +521,13 @@ class ExportImportService {
     if (item.name.trim().isEmpty) {
       item = item.copyWith(name: _unnamedEntry);
     }
+
+    final agentOpenAllowed =
+        item.type == EntryType.login || item.type == EntryType.secureNote;
+    item = item.copyWith(
+      deletedAt: null,
+      agentOpen: item.agentOpen && agentOpenAllowed,
+    );
     return item;
   }
 

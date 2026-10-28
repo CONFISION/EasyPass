@@ -332,8 +332,159 @@ void main() {
     expect(await db.getMeta(MasterPasswordRotation.metaKey), isNull,
         reason: 'v3 的 vault_meta 表必须一并建出来');
 
+    // 目标 schema 断言：版本号 / 表 / 列 / 索引都要与 schemaVersion=5 对齐。
+    expect(await _userVersion(db), 5,
+        reason: '迁移成功后才写 user_version（drift 的约定），必须落到 5');
+    expect(
+      await _tableNames(db),
+      containsAll(<String>[
+        'folders',
+        'password_entries',
+        'vault_meta',
+        'agent_audit',
+      ]),
+    );
+    expect(
+      await _columnNames(db, 'password_entries'),
+      containsAll(<String>[
+        'id',
+        'folder_id',
+        'type',
+        'name',
+        'url',
+        'username',
+        'password_encrypted',
+        'notes_encrypted',
+        'totp_secret_encrypted',
+        'data_encrypted',
+        'is_favorite',
+        'deleted_at',
+        'created_at',
+        'updated_at',
+      ]),
+    );
+    expect(
+      await _indexNames(db),
+      containsAll(<String>[
+        'idx_password_entries_type',
+        'idx_password_entries_deleted',
+        'idx_agent_audit_at',
+      ]),
+    );
+
     final mapper = VaultItemMapper(crypto);
     expect(mapper.fromRow(rows.single, key).loginOrEmpty.password, 'ancient-pw');
+  });
+
+  test('重复执行迁移：deleted_at 已存在（上次半迁移）不报 duplicate column，并补齐索引',
+      () async {
+    final crypto = CryptoService(secureStorage: FakeSecureStorage());
+    final key = crypto.deriveKey('master', crypto.generateSalt());
+    final legacyPassword = crypto.encryptData('half-migrated-pw', key);
+
+    final executor = NativeDatabase.memory(setup: (raw) {
+      createV4Schema(raw);
+      // 模拟"上次 4→5 的 ALTER 已经提交、但 user_version 没来得及写"：
+      // 列在、索引不在、版本号仍是 4。
+      raw.execute('ALTER TABLE password_entries ADD COLUMN deleted_at INTEGER;');
+      raw.execute('PRAGMA user_version = 4;');
+      raw.execute(
+        'INSERT INTO password_entries '
+        '(id, folder_id, type, name, url, username, password_encrypted, '
+        ' notes_encrypted, totp_secret_encrypted, data_encrypted, '
+        ' is_favorite, deleted_at, created_at, updated_at) '
+        "VALUES ('e1', NULL, 'login', 'GitHub', 'https://github.com', 'alice', "
+        "'$legacyPassword', '', '', '', 0, NULL, 100, 200);",
+      );
+    });
+
+    final db = AppDatabase.forTesting(executor);
+    addTearDown(db.close);
+
+    // 打开即触发迁移：必须成功（不能对已存在的列再 ALTER 一遍）。
+    final rows = await db.getAllEntries();
+    expect(rows.length, 1, reason: '幂等重跑不该动数据');
+    expect(rows.single.deletedAt, isNull);
+    expect(await _userVersion(db), 5);
+    expect(await _columnNames(db, 'password_entries'), contains('deleted_at'));
+    expect(await _indexNames(db), contains('idx_password_entries_deleted'),
+        reason: '半迁移库重跑必须把上次没建成的索引补上');
+
+    // 迁移后回收站功能真的可用。
+    expect(await db.trashEntry('e1', 999), 1);
+    expect(await db.getTrashedEntries(), hasLength(1));
+    expect(await db.restoreEntry('e1'), 1);
+
+    final mapper = VaultItemMapper(crypto);
+    expect(mapper.fromRow(rows.single, key).loginOrEmpty.password,
+        'half-migrated-pw');
+  });
+
+  test('迁移中途失败：本次已执行的 DDL 整体回滚，版本号与表结构都不动', () async {
+    final executor = NativeDatabase.memory(setup: (raw) {
+      // 从 3 升级会依次跑 3→4（建 agent_audit）、4→5（加 deleted_at、建索引）。
+      // 用一个**与目标索引同名的表**让 4→5 最后的 CREATE INDEX 失败
+      // （SQLite：there is already a table named ...）。
+      createV3Schema(raw);
+      raw.execute('CREATE TABLE idx_password_entries_deleted (x INTEGER);');
+    });
+
+    final db = AppDatabase.forTesting(executor);
+    addTearDown(db.close);
+
+    await expectLater(db.getAllEntries(), throwsA(anything));
+
+    // 整段事务回滚：3→4 建的 agent_audit、4→5 加的 deleted_at 都不该留下；
+    // user_version 仍停在 3（drift 只在迁移成功后写）。
+    final version = await executor.runSelect('PRAGMA user_version', []);
+    expect(version.single['user_version'], 3);
+    final columns =
+        await executor.runSelect('PRAGMA table_info(password_entries)', []);
+    expect(columns.map((row) => row['name']), isNot(contains('deleted_at')));
+    final tables = await executor.runSelect(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+      [],
+    );
+    expect(tables.map((row) => row['name']), isNot(contains('agent_audit')));
+  });
+
+  test('降级：库版本高于程序时拒绝打开，且不改库、不写 user_version', () async {
+    final executor = NativeDatabase.memory(setup: (raw) {
+      createV4Schema(raw);
+      raw.execute('ALTER TABLE password_entries ADD COLUMN deleted_at INTEGER;');
+      // 模拟"用户先装了更新版本（schema 6），又装回本版本"。
+      raw.execute('PRAGMA user_version = 6;');
+      raw.execute(
+        'INSERT INTO password_entries '
+        '(id, folder_id, type, name, url, username, password_encrypted, '
+        ' notes_encrypted, totp_secret_encrypted, data_encrypted, '
+        ' is_favorite, deleted_at, created_at, updated_at) '
+        "VALUES ('e1', NULL, 'login', 'Future', '', '', 'cipher', '', '', '', 0, NULL, 1, 2);",
+      );
+    });
+
+    final db = AppDatabase.forTesting(executor);
+    addTearDown(db.close);
+
+    await expectLater(
+      db.getAllEntries(),
+      throwsA(
+        isA<UnsupportedSchemaDowngradeException>()
+            .having((e) => e.from, 'from', 6)
+            .having((e) => e.to, 'to', 5)
+            .having((e) => '$e', 'message', contains('降级不受支持')),
+      ),
+    );
+
+    // 拒绝发生在任何写操作之前：user_version 没被改写，数据原样还在。
+    final version = await executor.runSelect('PRAGMA user_version', []);
+    expect(version.single['user_version'], 6);
+    final data = await executor.runSelect(
+      'SELECT id, name FROM password_entries',
+      [],
+    );
+    expect(data.single['id'], 'e1');
+    expect(data.single['name'], 'Future');
   });
 
   test('v2 库新写入的四种类型：类型列与计数查询都正确', () async {    final db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -386,4 +537,34 @@ void main() {
     expect(row.folderId, isNull);
     expect(await db.getAllFolders(), isEmpty);
   });
+}
+
+// ─── schema 断言辅助（迁移测试用）────────────────────────────
+
+/// 库文件里记录的 `user_version`（drift 用它表示 schema 版本）。
+Future<int> _userVersion(AppDatabase db) async {
+  final row = await db.customSelect('PRAGMA user_version').getSingle();
+  return row.read<int>('user_version');
+}
+
+Future<Set<String>> _tableNames(AppDatabase db) async {
+  final rows = await db
+      .customSelect("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .get();
+  return {for (final row in rows) row.read<String>('name')};
+}
+
+Future<Set<String>> _columnNames(AppDatabase db, String table) async {
+  final rows = await db.customSelect('PRAGMA table_info($table)').get();
+  return {for (final row in rows) row.read<String>('name')};
+}
+
+Future<Set<String>> _indexNames(AppDatabase db) async {
+  final rows = await db
+      .customSelect(
+        "SELECT name FROM sqlite_master "
+        "WHERE type = 'index' AND name NOT LIKE 'sqlite_%'",
+      )
+      .get();
+  return {for (final row in rows) row.read<String>('name')};
 }

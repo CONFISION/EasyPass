@@ -219,6 +219,17 @@ class MasterPasswordRotation {
   /// 轮换日志在 `vault_meta` 里的键名。
   static const String metaKey = MasterPasswordVerifier.metaKey;
 
+  /// 智能体钥匙包裹（agentKey 包着 vaultKey）在 `vault_meta` 里的键名。
+  ///
+  /// 与 `AgentAccessStore.wrapKey` 必须是同一个字符串；放在这里是为了让
+  /// "改密时一起更新包裹"有唯一的写入点（见 [startRotation]）。
+  static const String agentWrapMetaKey = 'agent.wrap';
+
+  /// 当前库钥匙指纹（`AgentKeyMaterial.keyId(vaultKey)`）在 `vault_meta` 里的键名。
+  ///
+  /// 启动自动解封 agent 域时用它校验"包裹里那把钥匙仍是当前库的钥匙"。
+  static const String vaultKeyIdMetaKey = 'vault.keyId';
+
   /// 是否挂着未完成的轮换。
   Future<bool> hasPendingRotation() => verifier.hasPendingRotation();
 
@@ -229,13 +240,25 @@ class MasterPasswordRotation {
 
   /// 开始一次轮换，并**原子地**把库交给新钥匙。
   ///
-  /// 返回实际重加密的条目数。抛异常时整库原封不动（事务回滚、日志未写入），
-  /// 旧密码仍然有效。
+  /// [agentWrap] / [vaultKeyId] 是智能体钥匙材料在改密后的新状态，**与整库重加密
+  /// 写在同一个事务里**：改主密码会换掉 vaultKey，而 agent 的包裹与钥匙指纹都是
+  /// vaultKey 的派生物。若它们在事务外写，崩溃/断电窗口会留下"库与轮换日志已是
+  /// 新钥匙、包裹还是旧钥匙"的错配 —— 下次启动 agent 域会拿着旧钥匙解封并照常
+  /// 启动 MCP，agent 用旧钥匙写入的条目将永久解不开（H6）。
+  ///
+  /// 两者为 `null` 表示**事务结束时该键必须不存在**（不是"跳过"）：改密后不允许
+  /// 残留上一次的包裹/指纹，否则"旧钥匙还能解"或"指纹与钥匙不匹配导致 fail
+  /// closed"都会出现。要保留请显式传值。
+  ///
+  /// 返回实际重加密的条目数。抛异常时整库原封不动（事务回滚、日志未写入，
+  /// agent 包裹与指纹也一起回滚），旧密码仍然有效。
   Future<int> startRotation({
     required Uint8List oldKey,
     required String newSalt,
     required String newPasswordHash,
     required Uint8List newKey,
+    String? agentWrap,
+    String? vaultKeyId,
   }) async {
     final pending = PendingRotation(salt: newSalt, passwordHash: newPasswordHash);
 
@@ -247,8 +270,20 @@ class MasterPasswordRotation {
         newKey: newKey,
         touchUpdatedAt: true,
       );
+      // 智能体钥匙材料跟着整库重加密一起提交/回滚（H6）。
+      await _writeOptionalMeta(agentWrapMetaKey, agentWrap);
+      await _writeOptionalMeta(vaultKeyIdMetaKey, vaultKeyId);
     });
     return count;
+  }
+
+  /// 事务内的"可选 meta"写入：`null` = 删除该键（见 [startRotation] 的说明）。
+  Future<void> _writeOptionalMeta(String key, String? value) async {
+    if (value == null) {
+      await _db.deleteMeta(key);
+      return;
+    }
+    await _db.setMeta(key, value);
   }
 
   /// 轮换的最后一步：把目标校验材料写进 secure storage，然后清掉日志。

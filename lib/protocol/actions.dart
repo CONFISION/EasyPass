@@ -112,6 +112,9 @@ class Actions {
   /// 读取智能体访问审计（最近 N 条）。
   static const String listAgentAudit = 'listAgentAudit';
 
+  /// 撤销某个配对的「本会话内允许读取」（用户显式收回、无需锁库）。
+  static const String clearStandingRead = 'clearStandingRead';
+
   // ─── 回收站（3.1.0 / schema 5；**只给 ui**）─────────────
   //
   // 删除 = 移到回收站（只写 deleted_at）。这三个动作是"回收站的管理面"：
@@ -185,6 +188,7 @@ class Actions {
     resetAgentKey,
     respondAgentApproval,
     listAgentAudit,
+    clearStandingRead,
     // 回收站：列 / 恢复 / 彻底删除 / 清空（删除本身走 `deleteItem`）。
     listTrash,
     restoreItem,

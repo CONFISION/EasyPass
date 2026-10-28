@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:easypass/core/crypto/agent_key_material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -131,6 +132,40 @@ void main() {
         ),
         throwsA(isA<AgentKeyMaterialException>()),
       );
+    });
+  });
+
+  /// 钥匙指纹：改密时与 agent 包裹同事务写进 `vault_meta.vault.keyId`，
+  /// 启动自动解封时用它校验"包裹里那把钥匙仍是当前库的钥匙"（H6）。
+  group('钥匙指纹 keyId', () {
+    test('是 64 位小写十六进制，且对同一把钥匙是确定的', () {
+      final vaultKey = key(0x70);
+      final id = AgentKeyMaterial.keyId(vaultKey);
+
+      expect(id, hasLength(64));
+      expect(RegExp(r'^[0-9a-f]{64}$').hasMatch(id), isTrue);
+      expect(AgentKeyMaterial.keyId(vaultKey), id);
+    });
+
+    test('等于 SHA-256(vaultKey) 的十六进制（与 crypto 包直算一致）', () {
+      final vaultKey = key(0x30);
+      expect(AgentKeyMaterial.keyId(vaultKey), sha256.convert(vaultKey).toString());
+    });
+
+    test('不同钥匙的指纹不同（可用于识别旧包裹）', () {
+      expect(
+        AgentKeyMaterial.keyId(key(0x10)),
+        isNot(AgentKeyMaterial.keyId(key(0x20))),
+      );
+    });
+
+    test('指纹不泄漏钥匙本身', () {
+      final vaultKey = key(0x40);
+      final id = AgentKeyMaterial.keyId(vaultKey);
+
+      expect(id.contains(base64Encode(vaultKey)), isFalse);
+      expect(id.contains(vaultKey.map((b) => b.toRadixString(16)).join()),
+          isFalse);
     });
   });
 }

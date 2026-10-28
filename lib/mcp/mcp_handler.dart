@@ -46,13 +46,17 @@ class McpHttpResponse {
 
 /// MCP 的 HTTP 层与 JSON-RPC 层（**纯逻辑**，不做 socket）。
 ///
-/// 把规则集中在这里的好处：反 DNS rebinding 的每一条都能用普通单测覆盖，
-/// 不必起真服务器；`McpHttpServer` 只负责读写字节。
-///
 /// 规则编号对应 `docs/agent-mcp-spec.md` §5.4：
 /// R1 拒绝任何带 `Origin` 的请求 · R2 校验 `Host` · R3（由 socket 层保证只绑 127.0.0.1）
-/// R4 永不发 CORS 头 · R5 每个请求都要 Bearer、**不接受 query 里的密钥**
-/// R6 请求体上限 · R7 密钥比较常量时间（在 authenticate 回调里）· R8 先 trim
+/// R4 永不发 CORS 头 · R5 只认 `Authorization: Bearer`（**不接受 query 里的密钥**）
+/// R6 请求体上限（**超时与并发上限在 [McpHttpServer]**）· R7 密钥比较常量时间
+/// （在 authenticate 回调里）· R8 先 trim 首尾空白。
+///
+/// 为什么拆成 [preflight] / [bearerFromHeaders] / [handleAuthenticated]：
+/// body 是**不可信且可能极慢**的输入。服务器必须在读 body 之前就完成所有
+/// "只看请求头就能判断"的拒绝（路径/Origin/Host/方法/凭据格式）与认证；
+/// 否则未认证请求就能让核心读满 256 KB、或长期占住连接（slowloris）。
+/// 这三个方法就是"先校验、后读 body"的那条缝。
 class McpHandler {
   McpHandler({
     required this.authenticate,
@@ -60,13 +64,23 @@ class McpHandler {
     this.maxBodyBytes = 256 * 1024,
     this.serverName = 'easy pass',
     this.serverVersion = '3.1.0',
+    this.onRejected,
   });
 
   final McpAuthenticator authenticate;
   final McpToolHandler callTool;
   final int maxBodyBytes;
   final String serverName;
+
+  /// 由核心注入 `AppConstants.coreVersion`；默认值只用于单测/兼容构造。
   final String serverVersion;
+
+  /// HTTP 层拒绝回调（预检 / 认证 / body 超限 / 超时）。
+  ///
+  /// 只报告**拒绝**，供核心写审计（HTTP 层拒绝也要留痕）。参数是 HTTP 状态码
+  /// 与一个短原因串（不含凭据、不含请求头内容）。回调自己的异常由调用方吞掉：
+  /// MCP 服务不能因为审计写失败而倒下。
+  final void Function(int status, String reason)? onRejected;
 
   static const String endpointPath = '/mcp';
 
@@ -77,6 +91,60 @@ class McpHandler {
   static const Set<String> supportedProtocolVersions = {'2025-06-18'};
   static const String preferredProtocolVersion = '2025-06-18';
 
+  /// 预检：path / Origin / Host / 方法 / Bearer 头格式。
+  ///
+  /// 返回 `null` = 可以继续（下一步交给调用方：认证 → 读 body）；
+  /// 非 `null` = 直接把这个响应回给客户端，**不要读 body**。
+  /// 所有拒绝都会触发 [onRejected]。
+  McpHttpResponse? preflight({
+    required String method,
+    required String path,
+    required Map<String, String> headers,
+    required int localPort,
+  }) {
+    // ① 路径（单端点）。
+    if (path != endpointPath) {
+      return _rejected(
+          404, 'path', McpErrorCodes.methodNotFound, 'Not found');
+    }
+
+    // R1：浏览器跨源请求必带 Origin；原生 MCP 客户端不带。
+    // 直接拒绝比"校验白名单"更难写错，也顺带挡住 DNS rebinding 的绝大部分场景。
+    if (headers.containsKey('origin')) {
+      return _rejected(403, 'origin', McpErrorCodes.invalidRequest,
+          'Origin header is not allowed');
+    }
+
+    // R2：Host 必须是回环地址本身（攻击者域名会出现在这里）。
+    if (!_hostAllowed(headers['host'], localPort)) {
+      return _rejected(403, 'host', McpErrorCodes.invalidRequest,
+          'Unexpected Host header');
+    }
+
+    // 单端点只支持 POST；GET 走 405（规范允许不提供 SSE）。
+    if (method != 'POST') {
+      onRejected?.call(405, 'method');
+      return const McpHttpResponse(405);
+    }
+
+    // R5：Bearer 必须来自 header，**不接受 query string**。
+    if (bearerFromHeaders(headers) == null) {
+      return _rejected(401, 'authorization', McpErrorCodes.invalidRequest,
+          'Missing or malformed Authorization header');
+    }
+    return null;
+  }
+
+  /// 从请求头取 Bearer 密钥；缺失或格式不对返回 `null`。
+  ///
+  /// 单独暴露的原因：服务器要先做"头格式校验"再认证，认证之后才读 body。
+  String? bearerFromHeaders(Map<String, String> headers) =>
+      _bearer(headers['authorization']);
+
+  /// 兼容入口：完整走一遍"预检 → 认证 → body 上限 → JSON-RPC"。
+  ///
+  /// 真实链路里服务器不用它（服务器自己 preflight → 认证 → 读 body → 再进
+  /// [handleAuthenticated]）；保留给单测和"已经有完整 body"的调用方。
   Future<McpHttpResponse> handle({
     required String method,
     required String path,
@@ -84,48 +152,40 @@ class McpHandler {
     required String body,
     required int localPort,
   }) async {
-    // ① 路径（单端点）。
-    if (path != endpointPath) {
-      return _json(404, _rpcError(null, McpErrorCodes.methodNotFound, 'Not found'));
-    }
+    final rejection =
+        preflight(method: method, path: path, headers: headers, localPort: localPort);
+    if (rejection != null) return rejection;
 
-    // R1：浏览器跨源请求必带 Origin；原生 MCP 客户端不带。
-    // 直接拒绝比"校验白名单"更难写错，也顺带挡住 DNS rebinding 的绝大部分场景。
-    if (headers.containsKey('origin')) {
-      return _json(403, _rpcError(null, McpErrorCodes.invalidRequest,
-          'Origin header is not allowed'));
-    }
-
-    // R2：Host 必须是回环地址本身（攻击者域名会出现在这里）。
-    if (!_hostAllowed(headers['host'], localPort)) {
-      return _json(403, _rpcError(null, McpErrorCodes.invalidRequest,
-          'Unexpected Host header'));
-    }
-
-    // 单端点只支持 POST；GET 走 405（规范允许不提供 SSE）。
-    if (method != 'POST') {
-      return const McpHttpResponse(405);
-    }
-
-    // R5：Bearer 必须来自 header，**不接受 query string**（那是会进日志的地方）。
-    final key = _bearer(headers['authorization']);
+    // preflight 已保证 Bearer 格式正确；这里再取一次只是拿值。
+    final key = bearerFromHeaders(headers);
     if (key == null) {
-      return _json(401, _rpcError(null, McpErrorCodes.invalidRequest,
-          'Missing or malformed Authorization header'));
+      return _rejected(401, 'authorization', McpErrorCodes.invalidRequest,
+          'Missing or malformed Authorization header');
     }
 
-    // R6：请求体上限。
-    if (body.length > maxBodyBytes) {
-      return _json(413, _rpcError(null, McpErrorCodes.invalidRequest,
-          'Request body too large'));
-    }
-
-    // 认证在解析 JSON 之后做也行，但放在这里可以少解析一次垃圾请求。
-    // 注意：**先认证再返回任何业务信息**。
+    // **先认证再返回任何业务信息**；认证失败不区分"未知"与"已撤销"。
     final principal = await authenticate(key);
     if (principal == null) {
-      return _json(401, _rpcError(null, McpErrorCodes.invalidRequest,
-          'Unknown or revoked pairing'));
+      return _rejected(401, 'unknown_pairing', McpErrorCodes.invalidRequest,
+          'Unknown or revoked pairing');
+    }
+
+    return handleAuthenticated(principal: principal, body: body);
+  }
+
+  /// 已认证后的 JSON-RPC 处理。
+  ///
+  /// 调用前提：调用方已经验证过 Origin/Host/方法/凭据格式，并且
+  /// [authenticate] 返回了非 null 的 principal。body 上限在这里再查一次
+  /// （纵深防御；socket 层是按字节限的，这里按字符限恒不更宽松）。
+  Future<McpHttpResponse> handleAuthenticated({
+    required McpPrincipal principal,
+    required String body,
+  }) async {
+    // R6：请求体上限（socket 层可能已经按字节拒绝过，这里是纯逻辑层的兜底）。
+    if (body.length > maxBodyBytes) {
+      return _rejected(413, 'body_too_large', McpErrorCodes.invalidRequest,
+          'Request body too large');
     }
 
     final Object? decoded;
@@ -149,10 +209,6 @@ class McpHandler {
     // 通知（没有 id）：按规范回 202 且没有 body，不返回结果。
     final isNotification = !message.containsKey('id');
     if (isNotification) {
-      if (rpcMethod == 'notifications/initialized' ||
-          rpcMethod.startsWith('notifications/')) {
-        return const McpHttpResponse(202);
-      }
       return const McpHttpResponse(202);
     }
 
@@ -182,6 +238,9 @@ class McpHandler {
     }
   }
 
+  /// 供服务器在"已认证但 body 读失败/超时/过大"等场景补记审计。
+  void notifyRejected(int status, String reason) => onRejected?.call(status, reason);
+
   Map<String, Object?> _initializeResult(Map<String, Object?> params) {
     final requested = params['protocolVersion'];
     final negotiated = requested is String &&
@@ -193,7 +252,12 @@ class McpHandler {
       'capabilities': {
         'tools': {'listChanged': false},
       },
-      'serverInfo': {'name': serverName, 'version': serverVersion},
+      'serverInfo': {
+        'name': serverName,
+        'version': serverVersion,
+        // 工具面版本让客户端/审计能对上"当时那套工具定义"，不靠客户端猜。
+        'surfaceVersion': agentToolSurfaceVersion,
+      },
       'instructions':
           'EasyPass 本地保险库。工具只返回条目元数据；只有用户显式标记为“开放”'
               '的条目可见，每个条目都可以被“永久拒绝”。',
@@ -255,6 +319,12 @@ class McpHandler {
     if (value.substring(0, 7).toLowerCase() != 'bearer ') return null;
     final key = value.substring(7).trim();
     return key.isEmpty ? null : key;
+  }
+
+  /// 拒绝响应：先通知审计回调，再回 JSON-RPC 错误。
+  McpHttpResponse _rejected(int status, String reason, int code, String message) {
+    notifyRejected(status, reason);
+    return _json(status, _rpcError(null, code, message));
   }
 
   static McpHttpResponse _json(int status, Map<String, Object?> body) =>

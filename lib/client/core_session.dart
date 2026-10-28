@@ -29,6 +29,10 @@ class CoreSession {
   /// 智能体审批请求（方式 1）：给 UI 弹窗用。
   final StreamController<Map<String, dynamic>> _agentApprovals =
       StreamController<Map<String, dynamic>>.broadcast();
+
+  /// 审批请求已结束（响应/超时/取消）：给 UI 关闭陈旧弹窗用。
+  final StreamController<Map<String, dynamic>> _agentApprovalResolutions =
+      StreamController<Map<String, dynamic>>.broadcast();
   bool _disposed = false;
 
   /// 数据变更主题流（`items` / `item` / `folders` / `search`）。
@@ -40,6 +44,10 @@ class CoreSession {
   /// 智能体审批请求流。
   Stream<Map<String, dynamic>> get agentApprovalRequests =>
       _agentApprovals.stream;
+
+  /// 审批请求结束流（响应/超时/取消）。
+  Stream<Map<String, dynamic>> get agentApprovalResolved =>
+      _agentApprovalResolutions.stream;
 
   bool get isConnected => _client?.isClosed == false;
 
@@ -55,7 +63,19 @@ class CoreSession {
   }
 
   Future<CoreClient> _connect() async {
-    var info = await CoreDiscovery.read();
+    // 发现文件损坏（存在但读不出/不是合法 JSON）与"文件不存在"必须区分：
+    // 前者若当成"没有核心"直接删除并拉起新核心，会与仍在运行的核心抢
+    // 单实例/数据库。这里 fail closed，把明确错误交给 UI。
+    CoreInfo? info;
+    try {
+      info = await CoreDiscovery.read();
+    } on CoreDiscoveryException catch (error) {
+      stderr.writeln('easypass: daemon.json 读取失败：$error');
+      throw VaultApiException(
+        ErrorCodes.unsupported,
+        '核心发现文件损坏（daemon.json）：$error',
+      );
+    }
 
     // ── 陈旧核心退休（3.0.0）─────────────────────────────────
     //
@@ -95,7 +115,15 @@ class CoreSession {
         '核心服务未运行，且找不到核心可执行文件（easypass_core）',
       );
     }
-    info = await waitForCore();
+    try {
+      info = await waitForCore();
+    } on CoreDiscoveryException catch (error) {
+      stderr.writeln('easypass: daemon.json 读取失败：$error');
+      throw VaultApiException(
+        ErrorCodes.unsupported,
+        '核心发现文件损坏（daemon.json）：$error',
+      );
+    }
     if (info == null) {
       throw VaultApiException(ErrorCodes.unsupported, '核心服务启动超时');
     }
@@ -129,6 +157,11 @@ class CoreSession {
         _agentApprovals.add(Map<String, dynamic>.from(event));
         return;
       }
+      // 审批结束：UI 据此关掉陈旧弹窗（超时/取消后不能再让用户点）。
+      if (event['event'] == Events.agentApprovalResolved) {
+        _agentApprovalResolutions.add(Map<String, dynamic>.from(event));
+        return;
+      }
       final sessionEvent = uiSessionEvent(event);
       if (sessionEvent != null) _sessionEvents.add(sessionEvent);
     });
@@ -155,6 +188,7 @@ class CoreSession {
     await _changes.close();
     await _sessionEvents.close();
     await _agentApprovals.close();
+    await _agentApprovalResolutions.close();
   }
 }
 
@@ -170,6 +204,10 @@ class CoreVaultApi implements VaultApi {
   @override
   Stream<Map<String, dynamic>> get agentApprovalRequests =>
       _session.agentApprovalRequests;
+
+  @override
+  Stream<Map<String, dynamic>> get agentApprovalResolved =>
+      _session.agentApprovalResolved;
 
   @override
   Stream<String> get sessionEvents => _session.sessionEvents;
@@ -475,6 +513,12 @@ class CoreVaultApi implements VaultApi {
   @override
   Future<void> lockAgentDomain() async {
     await _call(Actions.lockAgentDomain);
+  }
+
+  @override
+  Future<bool> clearStandingRead(String pairingId) async {
+    final data = await _call(Actions.clearStandingRead, {'id': pairingId});
+    return data['ok'] == true;
   }
 
   @override

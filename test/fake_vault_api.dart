@@ -189,6 +189,7 @@ class FakeVaultApi implements VaultApi {
     _changes.close();
     _sessionEvents.close();
     _agentApprovals.close();
+    _agentApprovalResolutions.close();
   }
 
   Never _throw(Object failure) {
@@ -596,6 +597,14 @@ class FakeVaultApi implements VaultApi {
   bool agentUnlocked = false;
   bool agentEnabled = false;
 
+  /// 真实 MCP 端点状态（M6：UI 徽标读这些字段，而不是只读开关标记）。
+  bool mcpRunning = false;
+  int? mcpPort;
+  String? mcpError;
+
+  /// 测试注入：非 null 时 `enableAgentAccess` 抛这个错误（M6 失败提示用例）。
+  Object? enableAgentAccessFailure;
+
   @override
   Future<bool> agentDomainUnlocked() async {
     calls.add('agentDomainUnlocked');
@@ -605,14 +614,23 @@ class FakeVaultApi implements VaultApi {
   @override
   Future<Map<String, dynamic>> agentAccessState() async {
     calls.add('agentAccessState');
-    return {'enabled': agentEnabled, 'agentUnlocked': agentUnlocked};
+    return {
+      'enabled': agentEnabled,
+      'agentUnlocked': agentUnlocked,
+      'mcpRunning': mcpRunning,
+      'mcpPort': mcpPort,
+      if (mcpError != null) 'mcpError': mcpError,
+    };
   }
 
   @override
   Future<void> enableAgentAccess() async {
     calls.add('enableAgentAccess');
+    final failure = enableAgentAccessFailure;
+    if (failure != null) throw failure;
     agentEnabled = true;
     agentUnlocked = true;
+    mcpRunning = true;
   }
 
   @override
@@ -620,6 +638,7 @@ class FakeVaultApi implements VaultApi {
     calls.add('disableAgentAccess');
     agentEnabled = false;
     agentUnlocked = false;
+    mcpRunning = false;
   }
 
   @override
@@ -631,17 +650,48 @@ class FakeVaultApi implements VaultApi {
 
   final StreamController<Map<String, dynamic>> _agentApprovals =
       StreamController<Map<String, dynamic>>.broadcast();
+  final StreamController<Map<String, dynamic>> _agentApprovalResolutions =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   @override
   Stream<Map<String, dynamic>> get agentApprovalRequests =>
       _agentApprovals.stream;
+
+  @override
+  Stream<Map<String, dynamic>> get agentApprovalResolved =>
+      _agentApprovalResolutions.stream;
 
   /// 测试可以推一条假审批进来。
   void emitAgentApproval(Map<String, dynamic> request) {
     if (!_agentApprovals.isClosed) _agentApprovals.add(request);
   }
 
-  final List<Map<String, bool>> approvalResponses = [];
+  /// 测试可以推一条"审批已结束"（超时/取消/已响应）。
+  void emitAgentApprovalResolved(String approvalId, String decision) {
+    if (!_agentApprovalResolutions.isClosed) {
+      _agentApprovalResolutions.add({
+        'approvalId': approvalId,
+        'decision': decision,
+      });
+    }
+  }
+
+  /// 每次审批回应：`{approvalId, allow, allowStandingRead}`（H8 双击回归要
+  /// 断言"第二次点击没有作用到下一条请求"，所以必须带上 approvalId）。
+  final List<Map<String, dynamic>> approvalResponses = [];
+
+  /// 被撤销「本会话内允许读取」的配对 id（顺序记录）。
+  final List<String> standingReadCleared = <String>[];
+
+  @override
+  Future<bool> clearStandingRead(String pairingId) async {
+    calls.add('clearStandingRead');
+    standingReadCleared.add(pairingId);
+    for (final pairing in agentPairings) {
+      if (pairing['id'] == pairingId) pairing['standingRead'] = false;
+    }
+    return true;
+  }
 
   @override
   Future<bool> respondAgentApproval({
@@ -651,6 +701,7 @@ class FakeVaultApi implements VaultApi {
   }) async {
     calls.add('respondAgentApproval');
     approvalResponses.add({
+      'approvalId': approvalId,
       'allow': allow,
       'allowStandingRead': allowStandingRead,
     });
@@ -692,6 +743,7 @@ class FakeVaultApi implements VaultApi {
       'createdAt': 0,
       'lastUsedAt': null,
       'calls': 0,
+      'standingRead': false,
     });
     return {'id': id, 'key': key, 'nickname': nickname, 'mode': mode};
   }

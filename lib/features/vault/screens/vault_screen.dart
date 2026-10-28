@@ -10,6 +10,7 @@ import '../../../l10n/app_localizations.dart';
 import '../../../protocol/codecs.dart' show WireFolder;
 import '../../auth/providers/auth_provider.dart';
 import '../../settings/providers/agent_access_provider.dart';
+import '../../settings/screens/agent_access_screen.dart';
 import '../providers/vault_provider.dart';
 import '../widgets/entry_card.dart';
 import '../widgets/entry_type_bits.dart';
@@ -585,6 +586,9 @@ class VaultScreen extends ConsumerWidget {
                 ),
                 onTap: () => context.push('/vault/agent-audit'),
               ),
+            // 免询问读取的**全局入口指示**（H4）：只要存在 standing read 就常驻，
+            // 点进去可以逐配对撤销。不存在的用户完全看不到这一行。
+            if (agentEnabled) const _AgentStandingReadIndicator(),
             ListTile(
               leading: Icon(
                 Icons.delete_outline,
@@ -1158,4 +1162,99 @@ Future<String?> _showEntryContextMenu(
       ),
     ],
   );
+}
+
+/// 侧边栏「本会话免询问读取」的全局指示（H4 的"常驻指示"）。
+///
+/// 只在**确实存在** standing read 的配对时出现；点进去是智能体访问页（那里有
+/// 逐配对的撤销按钮）。数据在"本路由重新成为当前路由"时刷新：用户在设置页撤销
+/// 完返回保险库，这一行必须跟着消失 —— 否则常驻指示本身就成了误导。
+class _AgentStandingReadIndicator extends ConsumerStatefulWidget {
+  const _AgentStandingReadIndicator();
+
+  @override
+  ConsumerState<_AgentStandingReadIndicator> createState() =>
+      _AgentStandingReadIndicatorState();
+}
+
+class _AgentStandingReadIndicatorState
+    extends ConsumerState<_AgentStandingReadIndicator> {
+  List<Map<String, dynamic>> _standing = const [];
+  bool _wasCurrent = false;
+  bool _fetching = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // `ModalRoute.isCurrent` 变化时会被通知：从设置页 pop 回保险库、或从本页
+    // push 出去再回来，都会重新拉一次真实状态（核心不会为 clearStandingRead
+    // 广播主题，UI 只能这样对齐）。
+    final isCurrent = ModalRoute.of(context)?.isCurrent ?? true;
+    if (isCurrent && !_wasCurrent) {
+      _wasCurrent = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _refresh();
+      });
+    } else if (!isCurrent) {
+      _wasCurrent = false;
+    }
+  }
+
+  Future<void> _refresh() async {
+    if (!mounted || _fetching) return;
+    _fetching = true;
+    try {
+      final pairings = await ref.read(vaultApiProvider).listAgentPairings();
+      if (!mounted) return;
+      final standing = [
+        for (final pairing in pairings)
+          if (pairing['standingRead'] == true) pairing,
+      ];
+      // 只在"哪些配对"变了时重建，避免每次回前台都白白刷新侧边栏。
+      final before = _standing.map((pairing) => pairing['id']).join('|');
+      final after = standing.map((pairing) => pairing['id']).join('|');
+      if (before != after) {
+        setState(() => _standing = standing);
+      }
+    } catch (_) {
+      // 核心暂时不可用：保留上一次显示，下次回前台再刷，不编造"已撤销"。
+    } finally {
+      _fetching = false;
+    }
+  }
+
+  Future<void> _openAgentAccess() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const AgentAccessScreen()),
+    );
+    await _refresh();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_standing.isEmpty) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final names = _standing
+        .map((pairing) => pairing['nickname'] as String? ?? '')
+        .where((name) => name.isNotEmpty)
+        .join('、');
+    return ListTile(
+      leading: Icon(
+        Icons.visibility_outlined,
+        color: theme.colorScheme.tertiary,
+      ),
+      title: Text(
+        l10n.agentStandingReadTitle,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text(
+        l10n.agentStandingReadBanner(names),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      onTap: _openAgentAccess,
+    );
+  }
 }

@@ -52,6 +52,7 @@ class CoreService {
     required NativeMessagingService bridgeService,
     required McpHttpServer mcpServer,
     required AgentAccessStore agentAccess,
+    required VaultRepository agentRepository,
     required ServerSocket socket,
   })  : _db = db,
         _sessions = sessions,
@@ -59,6 +60,7 @@ class CoreService {
         _bridgeService = bridgeService,
         _mcpServer = mcpServer,
         _agentAccess = agentAccess,
+        _agentRepository = agentRepository,
         _socket = socket;
 
   final AppDatabase _db;
@@ -67,6 +69,7 @@ class CoreService {
   final NativeMessagingService _bridgeService;
   final McpHttpServer _mcpServer;
   final AgentAccessStore _agentAccess;
+  final VaultRepository _agentRepository;
   final ServerSocket _socket;
 
   final List<_CoreConnection> _connections = [];
@@ -74,6 +77,13 @@ class CoreService {
   CoreInfo? _info;
   int _revision = 0;
   bool _shuttingDown = false;
+
+  /// MCP 端点真实状态（不是 DB 里的开关标记）。
+  String? _mcpError;
+
+  /// 总开关切换的串行队列：快速关→开/并发 enable-disable 必须按顺序落，
+  /// 否则会出现"DB 说开着、端口没监听"或孤儿监听器。
+  Future<bool> _agentTransition = Future<bool>.value(true);
 
   /// 核心退出时完成 —— CLI 靠它把进程挂住。
   Future<void> get stopped => _stopped.future;
@@ -90,7 +100,15 @@ class CoreService {
     if (!singleton.usedFixedPort &&
         await CoreSingleton.isAnotherCoreListening()) {
       await singleton.close();
-      throw CoreAlreadyRunning(await CoreDiscovery.read());
+      // daemon.json 可能损坏（新异常类型）：此时"已有核心"仍成立（端口被占），
+      // 只是拿不到可读的发现信息 —— 不要把这条常见路径变成未捕获崩溃。
+      CoreInfo? existing;
+      try {
+        existing = await CoreDiscovery.read();
+      } on CoreDiscoveryException {
+        existing = null;
+      }
+      throw CoreAlreadyRunning(existing);
     }
 
     final db = AppDatabase();
@@ -148,6 +166,9 @@ class CoreService {
     );
     final pairingStore = AgentPairingStore(db);
     final agentAccess = AgentAccessStore(db);
+    // 长跑进程里审计表必须边写边裁：启动时 prune 只收拾历史，运行期不裁会
+    // 无限增长，"保留最近 1000 条"就成了一句空话（DDL 注释与文档都这么承诺）。
+    var auditWritesSincePrune = 0;
     final agentActions = AgentActions(
       repository: agentRepository,
       sessions: sessions,
@@ -155,22 +176,36 @@ class CoreService {
       agentAccess: agentAccess,
       totpService: TotpService(),
       // 审计落库：方式 2 承诺"每次访问都留日志"，内存环形缓冲重启即丢。
-      auditSink: (entry) => db.insertAgentAudit(
-        at: entry.at,
-        pairingId: entry.pairingId,
-        nickname: entry.nickname,
-        mode: entry.mode,
-        tool: entry.tool,
-        op: entry.op,
-        entryId: entry.entryId,
-        entryName: entry.entryName,
-        decision: entry.decision,
-      ),
+      auditSink: (entry) async {
+        await db.insertAgentAudit(
+          at: entry.at,
+          pairingId: entry.pairingId,
+          nickname: entry.nickname,
+          mode: entry.mode,
+          tool: entry.tool,
+          op: entry.op,
+          entryId: entry.entryId,
+          entryName: entry.entryName,
+          decision: entry.decision,
+        );
+        auditWritesSincePrune++;
+        if (auditWritesSincePrune >= 100) {
+          auditWritesSincePrune = 0;
+          unawaited(db.pruneAgentAudit().catchError((Object _) {}));
+        }
+      },
     );
     final mcpServer = McpHttpServer(
       handler: McpHandler(
         authenticate: agentActions.authenticate,
         callTool: agentActions.callTool,
+        // 版本只有一处来源：核心版本常量（原来这里是第 5 处硬编码）。
+        serverVersion: AppConstants.coreVersion,
+        // HTTP 层拒绝（Origin/Host/方法/认证）也要进审计：未认证的探测
+        // 同样应该留痕，而不是只记"成功进到工具层"的调用。
+        onRejected: (status, reason) {
+          agentActions.recordHttpRejection('HTTP $status $reason');
+        },
       ),
     );
 
@@ -186,6 +221,11 @@ class CoreService {
       pairingStore: pairingStore,
       agentAccess: agentAccess,
       onAgentAccessChanged: (enabled) => service._setAgentAccessEnabled(enabled),
+      onAgentMcpStatus: () => service._agentAccessRuntime(),
+      onIsStandingRead: agentActions.isStandingRead,
+      onClearStandingRead: agentActions.clearStandingRead,
+      onClearAllStandingRead: agentActions.clearAllStandingRead,
+      onCancelPendingApprovals: () => agentActions.cancelPendingApprovals(),
       onDataChanged: (topics) => service._broadcastChanged(topics),
     );
 
@@ -196,6 +236,7 @@ class CoreService {
       bridgeService: bridgeService,
       mcpServer: mcpServer,
       agentAccess: agentAccess,
+      agentRepository: agentRepository,
       socket: singleton.socket,
     );
 
@@ -205,6 +246,14 @@ class CoreService {
               'event': Events.agentApprovalRequested,
               ...request,
             });
+    // 审批结束（响应/超时/取消）也要通知 UI：否则已经失效的弹窗会一直
+    // 留在屏幕上可点，用户以为还能"同意"，实际核心早已拒绝。
+    agentActions.onApprovalResolved = (approvalId, decision) =>
+        service._broadcast({
+          'event': Events.agentApprovalResolved,
+          'approvalId': approvalId,
+          'decision': decision,
+        });
     // 智能体写库后必须广播变更主题，否则 UI 列表不会重取（真机反馈：
     // 智能体建/删条目后界面不刷新）。
     agentActions.onDataChanged = (topics) => service._broadcastChanged(topics);
@@ -248,6 +297,12 @@ class CoreService {
     if (await _agentAccess.isEnabled()) {
       if (await _autoUnsealAgent()) {
         mcpPort = await _startMcpListener();
+        if (mcpPort == null) {
+          stderr.writeln(
+            'easypass_core: 智能体访问已开启，但 MCP 端点启动失败'
+            '（${_mcpError ?? '未知原因'}）；MCP 未启动',
+          );
+        }
       } else {
         stderr.writeln(
           'easypass_core: 智能体访问已开启，但专属密钥不可用'
@@ -287,41 +342,57 @@ class CoreService {
     );
   }
 
-  /// 启动 MCP 监听：先试固定端口，被占用才退化为临时端口。
+  /// 启动 MCP 监听：**只绑固定端口 47821，失败即不启动**。
   ///
-  /// 固定端口是为了让客户端配置长期有效（临时端口每次核心重启都会变）。
+  /// 为什么不退化为临时端口：MCP 客户端把端点写死在自己的配置里，端口一变
+  /// 客户端必然连不上；更糟的是，若 47821 被本机其他进程占用，客户端会把
+  /// `Authorization: Bearer <配对密钥>` 发给那个占用者 —— 等于把凭据投递出去。
+  /// 因此这里必须 fail closed，并由 UI 把"端口被占用/启动失败"明确告诉用户。
+  ///
   /// 返回 null 表示启动失败（不影响核心其它功能）。
   Future<int?> _startMcpListener() async {
     if (_mcpServer.isRunning) return _mcpServer.port;
     try {
-      return await _mcpServer.start(port: AppConstants.coreMcpFixedPort);
+      final port = await _mcpServer.start(port: AppConstants.coreMcpFixedPort);
+      _mcpError = null;
+      return port;
     } catch (error) {
-      stderr.writeln(
-        'easypass_core: MCP 固定端口 ${AppConstants.coreMcpFixedPort} 不可用'
-        '（$error），改用临时端口',
-      );
-      try {
-        return await _mcpServer.start();
-      } catch (fallbackError) {
-        stderr.writeln('easypass_core: MCP 端点启动失败（已跳过）：$fallbackError');
-        return null;
-      }
+      _mcpError = 'MCP 固定端口 ${AppConstants.coreMcpFixedPort} 不可用：$error';
+      stderr.writeln('easypass_core: $_mcpError');
+      return null;
     }
   }
 
-  /// 总开关变化：启停监听，并把最新的 `mcpPort` 写回 `daemon.json`。
+  /// 总开关变化：串行执行，返回 **MCP 端点是否真的在运行**。
   ///
-  /// 关闭时写回 **null**：客户端看到 `daemon.json` 里没有 `mcpPort` 就知道
-  /// 服务已停，而不是一直往一个死端口重连。
-  Future<void> _setAgentAccessEnabled(bool enabled) async {
-    int? mcpPort;
-    if (enabled) {
-      mcpPort = await _startMcpListener();
-    } else {
-      await _mcpServer.stop();
-    }
-    await _persistMcpPort(mcpPort);
+  /// 旧实现是 fire-and-forget 的 `void` 回调：快速关→开或并发 enable/disable
+  /// 会落成"DB 说开着、端口没监听"或孤儿监听器。这里用 Future 链把状态转换
+  /// 串行化，并把真实结果回给 CoreActions（失败时它负责回滚开关）。
+  Future<bool> _setAgentAccessEnabled(bool enabled) {
+    final next = _agentTransition.then((_) => _applyAgentAccess(enabled));
+    // 链上保留一个吞异常的占位，避免一次失败让后续转换全部短路。
+    _agentTransition = next.then((_) => true, onError: (Object _) => false);
+    return next;
   }
+
+  Future<bool> _applyAgentAccess(bool enabled) async {
+    if (enabled) {
+      final port = await _startMcpListener();
+      await _persistMcpPort(port);
+      return port != null;
+    }
+    await _mcpServer.stop();
+    _mcpError = null;
+    await _persistMcpPort(null);
+    return true;
+  }
+
+  /// 供 `getAgentAccessState` 查询的 MCP 真实运行态（不是 DB 开关标记）。
+  Map<String, Object?> _agentAccessRuntime() => {
+        'mcpRunning': _mcpServer.isRunning,
+        'mcpPort': _mcpServer.isRunning ? _mcpServer.port : null,
+        if (_mcpError != null) 'mcpError': _mcpError,
+      };
 
   Future<void> _persistMcpPort(int? mcpPort) async {
     final info = _info;
@@ -335,14 +406,25 @@ class CoreService {
       exe: info.exe,
       mcpPort: mcpPort,
     );
-    await CoreDiscovery.write(_info!);
+    try {
+      await CoreDiscovery.write(_info!);
+    } catch (error) {
+      // 运行时写发现文件失败不该崩掉核心：端口状态仍以内存为准，
+      // 下一次成功写入会自愈（stderr 留痕便于排查）。
+      stderr.writeln('easypass_core: 写入 daemon.json 失败：$error');
+    }
   }
 
   /// 核心启动时自动解封智能体域（**零介入**）。
   ///
   /// 链路：DPAPI 读出专属密钥 → 用它解包 `vault_meta` 里的 wrapped vaultKey
-  /// → 解锁 agent 域。任一步失败都返回 false（调用方据此不启动 MCP），
-  /// **绝不回退**到弱存储或"先解锁再试"。
+  /// → **校验这把钥匙确实属于当前库** → 解锁 agent 域。
+  ///
+  /// 为什么必须校验：改密是"整库重加密 + 重包裹"两步，若在两者之间崩溃/断电，
+  /// DB 里可能留着**旧钥匙**的包裹。只验 DPAPI/MAC 的话旧钥匙会照常解封、
+  /// MCP 照常启动，agent 用旧钥匙写入的数据将永久解不开（两个密码都解不开）。
+  /// 校验不通过时 fail closed：不启动 MCP，也不 wipe（用户可用"重置智能体
+  /// 密钥"恢复）。绝不回退到弱存储。
   Future<bool> _autoUnsealAgent() async {
     try {
       final wrapped = await _agentAccess.readWrap();
@@ -351,6 +433,45 @@ class CoreService {
       final vaultKey =
           AgentKeyMaterial.unwrap(blob: wrapped, agentKey: agentKey);
       try {
+        final expectedKeyId = await _db.getMeta('vault.keyId');
+        if (expectedKeyId != null && expectedKeyId.isNotEmpty) {
+          final actualKeyId = AgentKeyMaterial.keyId(vaultKey);
+          if (actualKeyId != expectedKeyId) {
+            stderr.writeln(
+              'easypass_core: 智能体包裹的密钥与当前库不匹配'
+              '（疑似改密中断）；MCP 未启动，请在设置里重置智能体密钥',
+            );
+            return false;
+          }
+        } else {
+          // 旧库没有 keyId：用一次真实解密探测。空库无法证明，按 fail closed
+          // 处理（用户重新开关一次智能体访问即可写入 keyId）。
+          final rows = await _db.getAllEntries();
+          if (rows.isEmpty) {
+            stderr.writeln(
+              'easypass_core: 缺少 vault.keyId 且库为空，无法验证智能体密钥；'
+              'MCP 未启动，请重新开关智能体访问',
+            );
+            return false;
+          }
+          final probe = Uint8List.fromList(vaultKey);
+          try {
+            // 用**严格**探测：没有 keyId 的旧库只能靠"至少一行真能解开"来
+            // 证明包裹里的钥匙属于当前库。宽容版 encryptionProbeWorks 在
+            // "一行都解不开"时返回 true，会把旧钥匙放进来（评审 V-1）。
+            final works =
+                await _agentRepository.encryptionProbeWorksStrict(probe);
+            if (!works) {
+              stderr.writeln(
+                'easypass_core: 智能体包裹的密钥无法验证/解开当前库；'
+                'MCP 未启动，请在设置里重置智能体密钥或重新开关智能体访问',
+              );
+              return false;
+            }
+          } finally {
+            probe.fillRange(0, probe.length, 0);
+          }
+        }
         _sessions.agent.unlock(Uint8List.fromList(vaultKey));
       } finally {
         vaultKey.fillRange(0, vaultKey.length, 0);

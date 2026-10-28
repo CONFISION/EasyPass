@@ -277,6 +277,104 @@ void main() {
     });
   });
 
+  // ─── 导入清洗：本机状态位与授权不随文件迁移 ──────────────
+
+  group('导入清洗（回收站状态 / 智能体授权）', () {
+    test('带 deleted_at 的条目导入后仍在正常列表（不静默藏进回收站）', () async {
+      final json = jsonEncode({
+        'version': '2.0.0',
+        'app': 'EasyPass',
+        'format': 'plain',
+        'entries': [
+          {
+            'id': 'e-trashed',
+            'type': 'login',
+            'name': '被塞进回收站的条目',
+            'login': {'username': 'u', 'password': 'p'},
+            // 正常导出不含这个键（导出走 getItems() 排除回收站）；
+            // 出现在文件里只可能来自手改/构造。
+            'deleted_at': 1730000000000,
+          },
+        ],
+      });
+
+      final fresh = freshVault();
+      final counts = await fresh.service.importFromJson(json);
+      expect(counts['entries'], 1);
+
+      // 导入的是"数据"，不是"本机回收站状态"：必须回到正常列表。
+      expect((await fresh.repo.getItems()).single.id, 'e-trashed');
+      expect(await fresh.repo.getTrashedItems(), isEmpty);
+      expect(await fresh.db.countTrashedEntries(), 0);
+      final row = await fresh.db.getEntryById('e-trashed');
+      expect(row, isNotNull);
+      expect(row!.deletedAt, isNull, reason: 'deleted_at 必须被清洗掉');
+    });
+
+    test('agent_access 不随文件迁移：login/secure_note 保留，identity/ssh_key 强制关闭',
+        () async {
+      final json = jsonEncode({
+        'version': '2.0.0',
+        'app': 'EasyPass',
+        'format': 'plain',
+        'entries': [
+          {
+            'id': 'e-login',
+            'type': 'login',
+            'name': '开放登录',
+            'login': {'username': 'u', 'password': 'p'},
+            'agent_access': 'open',
+          },
+          {
+            'id': 'e-note',
+            'type': 'secure_note',
+            'name': '开放笔记',
+            'notes': '正文',
+            'agent_access': 'open',
+          },
+          {
+            'id': 'e-identity',
+            'type': 'identity',
+            'name': '身份',
+            'identity': {},
+            'agent_access': 'open',
+          },
+          {
+            'id': 'e-ssh',
+            'type': 'ssh_key',
+            'name': 'SSH',
+            'ssh_key': {'public_key': 'ssh-ed25519 AAAA'},
+            'agent_access': 'open',
+          },
+          {
+            'id': 'e-denied',
+            'type': 'login',
+            'name': '永久拒绝',
+            'login': {'username': 'u', 'password': 'p'},
+            'agent_access': 'denied',
+          },
+        ],
+      });
+
+      final fresh = freshVault();
+      expect(await fresh.service.importFromJson(json), {
+        'folders': 0,
+        'entries': 5,
+      });
+
+      final byId = {
+        for (final item in await fresh.repo.getItems()) item.id: item,
+      };
+      // login / secure_note：用户自己备份的恢复语义 —— 保留"开放"。
+      expect(byId['e-login']!.agentOpen, isTrue);
+      expect(byId['e-note']!.agentOpen, isTrue);
+      expect(byId['e-denied']!.agentOpen, isFalse);
+      // identity / ssh_key：产品上不对智能体开放，文件不能替用户打开。
+      expect(byId['e-identity']!.agentOpen, isFalse);
+      expect(byId['e-ssh']!.agentOpen, isFalse);
+    });
+  });
+
   // ─── 1.x 兼容 ───────────────────────────────────────────
 
   group('向后兼容 1.x 导出', () {

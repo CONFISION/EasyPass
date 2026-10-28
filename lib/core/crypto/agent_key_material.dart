@@ -57,6 +57,16 @@ class AgentKeyMaterial {
     );
   }
 
+  /// 钥匙指纹：`SHA-256(vaultKey)` 的十六进制（64 字符）。
+  ///
+  /// 用途：改密时把"新库钥匙的指纹"与 agent 包裹写进**同一个事务**
+  /// （`vault_meta.vault.keyId`），启动自动解封时用它校验"包裹里那把钥匙仍是
+  /// 当前库的钥匙"，从而识别"改密在重包裹之前崩溃"留下的旧包裹（H6）。
+  ///
+  /// 它只是指纹：不泄漏密钥、不参与任何派生、也不能代替包裹的 HMAC 校验。
+  static String keyId(Uint8List vaultKey) =>
+      sha256.convert(vaultKey).toString();
+
   /// 把 [vaultKey] 用 [agentKey] 包裹成可落库的 base64 字符串。
   static String wrap({
     required Uint8List vaultKey,
@@ -66,7 +76,12 @@ class AgentKeyMaterial {
     _requireLength(agentKey, agentKeyBytes, 'agentKey');
 
     final iv = _randomBytes(_ivBytes);
-    final ciphertext = _encrypter(agentKey).encryptBytes(vaultKey, iv: encrypt.IV(iv)).bytes;
+    final ciphertext = _withEncrypter(
+      agentKey,
+      (encrypter) => encrypter
+          .encryptBytes(vaultKey, iv: encrypt.IV(iv))
+          .bytes,
+    );
     final mac = _mac(agentKey, iv, ciphertext);
 
     return base64Encode(utf8.encode(jsonEncode({
@@ -116,16 +131,21 @@ class AgentKeyMaterial {
 
     // **先验 MAC 再解密**：否则等于把未认证的密文喂给解密器。
     final expected = _mac(agentKey, iv, ciphertext);
-    if (!SecureChannelCrypto.constantTimeEquals(mac, expected)) {
+    final macOk = SecureChannelCrypto.constantTimeEquals(mac, expected);
+    expected.fillRange(0, expected.length, 0);
+    if (!macOk) {
       throw AgentKeyMaterialException('MAC 校验失败（密钥不对或密文被篡改）');
     }
 
     final Uint8List plain;
     try {
-      plain = Uint8List.fromList(
-        _encrypter(agentKey).decryptBytes(
-          encrypt.Encrypted(ciphertext),
-          iv: encrypt.IV(iv),
+      plain = _withEncrypter(
+        agentKey,
+        (encrypter) => Uint8List.fromList(
+          encrypter.decryptBytes(
+            encrypt.Encrypted(ciphertext),
+            iv: encrypt.IV(iv),
+          ),
         ),
       );
     } catch (error) {
@@ -151,13 +171,22 @@ class AgentKeyMaterial {
 
   // ─── 内部 ──────────────────────────────────────────────
 
-  static encrypt.Encrypter _encrypter(Uint8List agentKey) {
-    return encrypt.Encrypter(
-      encrypt.AES(
-        encrypt.Key(_derive(agentKey, _encLabel)),
-        mode: encrypt.AESMode.cbc,
-      ),
-    );
+  /// 用 agentKey 派生的**加密子密钥**跑一次 AES 操作，子密钥用完立刻原地清零。
+  ///
+  /// [body] 必须是同步的：encrypter/子密钥只在调用期间有效，返回后子密钥已被
+  /// 清零。Dart 的 GC 不保证及时回收，密钥字节不该无声地留在堆里（P2）。
+  static T _withEncrypter<T>(
+    Uint8List agentKey,
+    T Function(encrypt.Encrypter encrypter) body,
+  ) {
+    final subkey = _derive(agentKey, _encLabel);
+    try {
+      return body(encrypt.Encrypter(
+        encrypt.AES(encrypt.Key(subkey), mode: encrypt.AESMode.cbc),
+      ));
+    } finally {
+      subkey.fillRange(0, subkey.length, 0);
+    }
   }
 
   /// 由专属密钥派生独立的**加密子密钥**与 **MAC 子密钥**（互不复用）。
@@ -169,8 +198,12 @@ class AgentKeyMaterial {
 
   static Uint8List _mac(Uint8List agentKey, Uint8List iv, Uint8List ciphertext) {
     final macKey = _derive(agentKey, _macLabel);
-    final data = Uint8List.fromList([...iv, ...ciphertext]);
-    return Uint8List.fromList(Hmac(sha256, macKey).convert(data).bytes);
+    try {
+      final data = Uint8List.fromList([...iv, ...ciphertext]);
+      return Uint8List.fromList(Hmac(sha256, macKey).convert(data).bytes);
+    } finally {
+      macKey.fillRange(0, macKey.length, 0);
+    }
   }
 
   static Uint8List _randomBytes(int length) {
