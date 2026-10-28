@@ -93,7 +93,28 @@ jobs:
       - name: Popup extra smoke (jsdom)
         run: node browser_extension/tools/smoke_popup_extra.mjs
 
-      # ─── 5. windows/runner 语法检查（不调用 MSBuild）──────────────────
+      # ─── 5. 真机验收工具脚本语法检查（不启动应用）────────────────────
+      # tool/ui_probe 只在本地 Release 构建上跑，CI 不执行它；这里只做 PowerShell
+      # 语法解析，防止脚本在 Windows 上悄悄坏掉。
+      - name: UI probe scripts syntax check
+        shell: pwsh
+        run: |
+          $errors = @()
+          Get-ChildItem tool\ui_probe\*.ps1 | ForEach-Object {
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName, [ref]$null, [ref]$parseErrors) | Out-Null
+            if ($parseErrors -and $parseErrors.Count -gt 0) {
+              $errors += "$($_.Name): $($parseErrors[0].Message)"
+            }
+          }
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_ }
+            exit 1
+          }
+          Write-Host "ui_probe scripts: syntax OK"
+
+      # ─── 6. windows/runner 语法检查（不调用 MSBuild）──────────────────
       # check_syntax.bat 用 cl /Zs /W4 /WX 解析 runner 源码，但它的 /I 里列了
       # windows\flutter\ephemeral：flutter_windows.h 与
       # cpp_client_wrapper\include\flutter\*.h 都在那里。这些文件平时是 CMake

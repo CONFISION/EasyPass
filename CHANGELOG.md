@@ -45,6 +45,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 - **回收站**（schema **5**，`password_entries.deleted_at`）：删除 = 移到回收站（软删，
   密文不动、可恢复）；侧边栏新增「回收站」页面，可恢复 / 彻底删除 / 清空；
   删除条目后的提示条提供「撤销」。列表 / 搜索 / 健康报告 / 计数 / 导出默认排除回收站。
+- **真机验收工具 `tool/ui_probe/`**：Windows PowerShell 工具箱——真实 SendInput 的窗口置前/截图/
+  点击/滚轮驱动、MCP 传输冒烟与单工具调用、审批按钮颜色识别。只对本地 Release 构建使用，不参与 CI
+  （CI 只做脚本语法检查），用于验证单测覆盖不到的真机行为（审批弹窗、剪贴板、HTTP 栈、进程间交互）。
 
 ### Changed
 

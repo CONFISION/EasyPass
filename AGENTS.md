@@ -34,7 +34,7 @@ flutter pub get
 dart run build_runner build --delete-conflicting-outputs   # 改 tables.drift 后必须
 flutter gen-l10n                                            # 改 lib/l10n/*.arb 后必须
 flutter analyze --no-pub                                    # 门禁
-flutter test --no-pub                                       # 门禁；全量用例数以实跑输出为准（§13 有计数命令）
+flutter test --no-pub                                       # 门禁；当前 853 例（以后以实跑输出为准；§13 有计数命令）
 flutter build windows                                       # 完整构建（含核心 + x86 桥 + 运行库）
 ```
 
@@ -90,7 +90,7 @@ lib/features/                  UI（不得 import drift / database / repositorie
                                vault（列表/详情/编辑/回收站 + providers）、settings（含 agent_access_provider / agent_audit_screen /
                                agent_approval_host）、auth、generator、health、desktop_{tray,integration,autostart,single_instance}
 lib/l10n/                      app_en.arb（源）/ app_zh.arb（中文）+ gen-l10n 产物
-tool/build_core.ps1            核心构建；tool/probe_core.dart 核心探针
+tool/build_core.ps1            核心构建；tool/probe_core.dart 核心探针；tool/ui_probe/ 真机验收（真实输入 + MCP 冒烟，仅本地 Release 构建）
 browser_extension/             Chrome MV3 扩展 + 32 位 native host（x86 桥）
 windows/                       Flutter Windows runner（含托盘/单实例/关闭即锁的 C++ 胶水；源码必须纯 ASCII）
 installer/                     Inno Setup 安装包与发布产物收集
@@ -268,6 +268,10 @@ agent 交付前仍需本地跑：`flutter analyze --no-pub`、`flutter test --no
   fail closed（打失败信息、退非零），UI 报"核心不可用"而不是删文件重新拉起。
 - `easypass_core --lock` 锁库不停核心（托盘"仅退出 UI"、关窗共用 `LockVault()`）。
 - 调试工具：`node browser_extension/tools/probe_bridge.mjs`、`probe_daemon.mjs`、`dart run tool\probe_core.dart --core <path>`。
+- **真机验收**：`tool/ui_probe/`（Windows PowerShell）——真实 SendInput 的窗口置前/截图/点击/滚轮 +
+  MCP 传输冒烟/单工具调用 + 审批按钮识别。只对**本地已启动的 Release 构建**使用，会移动真实鼠标/前台窗口
+  （尽量副屏）；写/删用例只用一次性条目，剪贴板用例先备份后恢复。详见 `tool/ui_probe/README.md`。
+  **不参与 CI 门禁**，CI 只做脚本语法检查。
 - 扩展打包：`node browser_extension/tools/build_extension_zip.mjs`（`--dry-run` 校验；白名单打包）。
 - 发布产物与哈希由脚本生成，不要手抄：`installer/release/README.md`。
 - `Plan.md`（本地）是路线图；改架构先看 `docs/technical-spec.md`，改协议先看 `docs/protocol-api.md`，

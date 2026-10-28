@@ -7,7 +7,7 @@
 
 | 文件 | 触发 | 做什么 |
 | --- | --- | --- |
-| `ci.yml` | push 到 `master`、任何 `pull_request` | Windows 上跑 analyze / test / 扩展静态检查 + 三个 jsdom 冒烟 / runner 语法检查 |
+| `ci.yml` | push 到 `master`、任何 `pull_request` | Windows 上跑 analyze / test / 扩展静态检查 + 三个 jsdom 冒烟 / `tool/ui_probe` 脚本语法 / runner 语法检查 |
 | `release.yml` | 推送 `v*` 形式的 tag（如 `v3.0.0`） | Windows 装包，汇总 `SHA256SUMS.txt` 并创建 GitHub Release |
 
 两个文件的注释都是中文；`name:`（Actions 界面里显示的步骤名）保持英文，便于在
@@ -40,7 +40,8 @@ SIGTERM 路径）在 Windows 上**不注册用例**，所以 Windows 上的报�
 3. `flutter test --no-pub`
 4. `npm ci`（jsdom）→ `node browser_extension/tools/check_extension.mjs`
    → `smoke_content.mjs` → `smoke_popup.mjs` → `smoke_popup_extra.mjs`
-5. 准备 `windows/flutter/ephemeral` → `cmd /c windows\runner\check_syntax.bat`
+5. `tool/ui_probe` 的 PowerShell 脚本语法解析（只校验，不启动应用；真机验收仍由人本地跑）
+6. 准备 `windows/flutter/ephemeral` → `cmd /c windows\runner\check_syntax.bat`
 
 ### jsdom 从哪来（为什么仓库根多了一个 package.json）
 
