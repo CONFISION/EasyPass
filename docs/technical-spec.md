@@ -455,7 +455,7 @@ claude mcp add --transport http easypass http://127.0.0.1:47821/mcp \
 | `end_session` | 关闭窗口（**不锁** agent 域，零介入语义） |
 | `list_entries` | 条目**元数据**（名称/类型/文件夹/URL/用户名/有无密码/有无 TOTP） |
 | `get_entry` | 单条元数据 |
-| `create_entry` | 新建 login / secure_note；`password: {"generate": true}` 让核心生成并加密入库，**明文不回传** |
+| `create_entry` | 新建 login / secure_note；`password: {"generate": true}` 让核心生成并加密入库，**明文不回传**；secure_note 没有 url / username / password 字段（传了返回 `invalidRequest`，不静默忽略） |
 | `update_entry` | 局部更新（没传的字段不动）；只改 login / secure_note 的字段 |
 | `delete_entry` | **移入回收站**（软删，可恢复）；智能体**永远不能彻底删除** |
 | `list_trash` | 回收站里**对智能体开放**的元数据（带删除时间） |

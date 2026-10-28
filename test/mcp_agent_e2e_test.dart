@@ -577,6 +577,42 @@ void main() {
       expect(missing['errorCode'], 'invalidRequest');
     });
 
+    test('create_entry：secure_note 传 url/username/password 显式报错（不静默忽略）',
+        () async {
+      for (final key in ['url', 'username', 'password']) {
+        final payload = await callToolPayload(
+          trustedKey,
+          'create_entry',
+          {'name': '笔记', 'type': 'secure_note', key: 'x'},
+        );
+        expect(payload['errorCode'], 'invalidRequest', reason: key);
+        expect('${payload['message']}', contains('login'), reason: key);
+      }
+
+      // 不带登录字段就正常创建；notes / customFields 仍可用。
+      final ok = await callToolPayload(trustedKey, 'create_entry', {
+        'name': '纯笔记',
+        'type': 'secure_note',
+        'notes': '正文',
+      });
+      expect(ok['type'], 'secure_note');
+      expect(ok.containsKey('password'), isFalse);
+      final stored = await repository.getItem(ok['id'] as String);
+      expect(stored!.notes, '正文');
+    });
+
+    test('update_entry：对 secure_note 传 password 同样被拒（与 create 一致）', () async {
+      final created = await callToolPayload(trustedKey, 'create_entry', {
+        'name': '笔记2',
+        'type': 'secure_note',
+      });
+      final denied = await callToolPayload(trustedKey, 'update_entry', {
+        'id': created['id'],
+        'password': 'x',
+      });
+      expect(denied['errorCode'], 'invalidRequest');
+    });
+
     test('update_entry：只改传入字段，返回值只有字段名与结果', () async {
       final updated = await callToolPayload(trustedKey, 'update_entry', {
         'id': 'e-open',

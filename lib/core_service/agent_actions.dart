@@ -781,6 +781,19 @@ class AgentActions {
     final name = _requiredText(args, 'name', maxLength: _maxNameLength);
     _errorEntryName = name;
     final type = _writableType(args['type']);
+    // secure_note 没有登录字段：**显式拒绝**而不是静默忽略。
+    // 静默忽略会让调用方以为"密码存进去了"，实际什么都没发生（update_entry
+    // 早就有同一道校验，create 之前漏了）。
+    if (type != EntryType.login) {
+      for (final key in const ['url', 'username', 'password']) {
+        if (args.containsKey(key)) {
+          throw McpToolException(
+            'invalidRequest',
+            '$key 只属于 login 条目；${type.wireName} 没有这个字段',
+          );
+        }
+      }
+    }
     final folderId = await _folderArg(args);
     final notes = _optionalText(args, 'notes', maxLength: _maxNotesLength) ?? '';
     final customFields = _customFieldsArg(args);

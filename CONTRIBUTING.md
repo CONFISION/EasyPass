@@ -44,7 +44,7 @@ cmd /c windows\runner\check_syntax.bat
 
 CI runs the same set on every push, so a green local run means a green PR.
 
-**Reading the test count.** A Windows run currently reports **728 passing** (63 test files).
+**Reading the test count.** A Windows run currently reports **730 passing** (63 test files).
 A few platform-specific tests have `skip:` guards on unsupported hosts (DPAPI / system
 clipboard), so a run can report fewer cases than are declared — that is a reduced case
 count, not failures. Do not "fix" the numbers by forcing platform-specific tests to run
@@ -146,3 +146,4 @@ model — including which properties are known limitations rather than bugs.
 
 Contributions are accepted under GPL-3.0 (see [`LICENSE`](LICENSE)). By opening a
 pull request you confirm you have the right to submit the work under that licence.
+

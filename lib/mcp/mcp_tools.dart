@@ -107,7 +107,8 @@ const List<McpTool> agentTools = <McpTool>[
     name: 'create_entry',
     description:
         '新建条目（只支持 login / secure_note）。'
-        'password 可传 {"generate": true} 让核心生成并直接加密入库 —— 明文不会返回。'
+        'secure_note 没有 url / username / password 字段，传了会 invalidRequest。'
+        'password 可传字符串，或 {"generate": true} 让核心生成并直接加密入库 —— 明文不会返回。'
         '**新建条目默认对智能体开放**（用户可随时在 EasyPass 里改成「永久拒绝」收回）。',
     inputSchema: {
       'type': 'object',

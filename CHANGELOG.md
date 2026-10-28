@@ -58,6 +58,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html):
 
 ### Fixed
 
+- **`create_entry` 对 secure_note 静默忽略登录字段**：现在传 `url` / `username` /
+  `password` 会返回 `invalidRequest`（与 `update_entry` 一致），避免调用方误以为
+  "密码已经存进去了"。
 - **智能体新建 / 修改 / 删除 / 恢复条目后，UI 列表不实时刷新**：核心在智能体写库后
   没有广播变更主题，现在补上（`items` / `item` / `folders` / `search`）。
 - **带「撤销」的提示条永不消失**（这台 Flutter 里带 action 的 `SnackBar` 默认

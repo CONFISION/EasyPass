@@ -32,7 +32,7 @@ flutter pub get
 dart run build_runner build --delete-conflicting-outputs   # 改 tables.drift 后必须
 flutter gen-l10n                                            # 改 lib/l10n/*.arb 后必须
 flutter analyze --no-pub                                    # 门禁
-flutter test --no-pub                                       # 门禁；当前 728 例（63 个测试文件）
+flutter test --no-pub                                       # 门禁；当前 730 例（63 个测试文件）
 flutter build windows                                       # 完整构建（含核心 + x86 桥 + 运行库）
 ```
 
@@ -214,7 +214,7 @@ agent 交付前仍需本地跑：`flutter analyze --no-pub`、`flutter test --no
 - **`getCredentials` 返回数组**；没有登录表单的 frame 不得应答 `fillCredentials`（否则成功填充显示成"受限"）。
 - **jsdom 没有布局**：`textContent` 包含 hidden 子树、`offsetParent` 恒 null；测可见性要自己走祖先链/打桩。
 - **两个 `flutter test` 并发会抢 `build\native_assets\windows\sqlite3.dll`**（同一 checkout）：串行跑或重试。
-- **文档里的数字要对代码核**：动作数（ui=43 / bridge=10 / agent=0）、MCP 工具 11、schema 5、测试 728 都可由
+- **文档里的数字要对代码核**：动作数（ui=43 / bridge=10 / agent=0）、MCP 工具 11、schema 5、测试 730 都可由
   `docs/technical-spec.md` §13 的快照命令重生。
 - **给 CLI 传长文本用文件**（`git commit -F msg.txt`）；`Select-Object -First N` 会提前关管道，别用它判断退出码。
 
@@ -231,3 +231,4 @@ agent 交付前仍需本地跑：`flutter analyze --no-pub`、`flutter test --no
 - 发布产物与哈希由脚本生成，不要手抄：`installer/release/README.md`。
 - `Plan.md`（本地）是路线图；改架构先看 `docs/technical-spec.md`，改协议先看 `docs/protocol-api.md`，
   改 schema 先看 `docs/data-model.md`。
+
